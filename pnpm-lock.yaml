@@ -67,7 +67,14 @@ importers:
 
   packages/packs: {}
 
-  packages/query: {}
+  packages/query:
+    dependencies:
+      '@kgpacks/db':
+        specifier: workspace:*
+        version: link:../db
+      '@kgpacks/embeddings':
+        specifier: workspace:*
+        version: link:../embeddings
 
   parity/diff: {}
 
