@@ -164,9 +164,22 @@ describe('scaffold — third-party runtime dependency pins', () => {
     expect(external).toEqual(['@github/copilot-sdk']);
   });
 
-  it('no package other than db, embeddings and agent carries a third-party runtime dependency', () => {
+  it('@kgpacks/mcp carries the MCP SDK and zod as its only third-party runtime dependencies', () => {
+    // Phase 1: @kgpacks/mcp implements the MCP server, so it now legitimately
+    // depends on the TypeScript MCP SDK (and zod for its tool input schemas).
+    // These are its ONLY non-@kgpacks runtime dependencies.
+    const p = readJson('packages/mcp/package.json');
+    const deps = (p.dependencies ?? {}) as Record<string, string>;
+    expect(deps['@modelcontextprotocol/sdk']).toBeDefined();
+    expect(deps['zod']).toBeDefined();
+    const external = Object.keys(deps).filter((d) => !d.startsWith('@kgpacks/'));
+    expect(external.sort()).toEqual(['@modelcontextprotocol/sdk', 'zod']);
+  });
+
+  it('no package other than db, embeddings, agent and mcp carries a third-party runtime dependency', () => {
+    const allowed = new Set(['db', 'embeddings', 'agent', 'mcp']);
     for (const name of PACKAGES) {
-      if (name === 'db' || name === 'embeddings' || name === 'agent') continue;
+      if (allowed.has(name)) continue;
       const p = readJson(`packages/${name}/package.json`);
       const deps = (p.dependencies ?? {}) as Record<string, string>;
       const external = Object.keys(deps).filter((d) => !d.startsWith('@kgpacks/'));
