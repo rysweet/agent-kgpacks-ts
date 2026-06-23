@@ -1,0 +1,21 @@
+{
+  "description": "Cross-encoder relevance logits for (query, passage) pairs — Spike D parity oracle. Generated with the validated Spike D config (AutoModelForSequenceClassification, fp32) on the same ONNX weights the TS cross-encoder loads, which Spike D validated at max|diff|=0.0000 against cross-encoder/ms-marco-MiniLM-L-12-v2. Read-only oracle; never regenerate to pass a test.",
+  "source": "rysweet/agent-kgpacks Spike D cross-encoder oracle (ms-marco-MiniLM-L-12-v2)",
+  "model": "cross-encoder/ms-marco-MiniLM-L-12-v2",
+  "ts_model": "Xenova/ms-marco-MiniLM-L-12-v2",
+  "dtype": "fp32",
+  "task_head": "AutoModelForSequenceClassification",
+  "query": "How does HNSW vector search work?",
+  "passages": [
+    "HNSW builds a navigable small-world graph with multiple layers so nearest-neighbour search runs in logarithmic time.",
+    "Cosine similarity measures the angle between two vectors as the dot product of their unit-normalized forms.",
+    "Bananas are an excellent dietary source of potassium and vitamin B6.",
+    "A hierarchical navigable small world index greedily descends layers, refining the candidate neighbour set at each step.",
+    "The capital city of France is Paris, situated on the river Seine."
+  ],
+  "scores": [
+    5.132113456726074, -10.348737716674805, -11.297415733337402, -11.102784156799316,
+    -11.293238639831543
+  ],
+  "ranking": [0, 1, 3, 4, 2]
+}
