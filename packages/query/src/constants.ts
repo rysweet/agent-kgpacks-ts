@@ -46,6 +46,27 @@ export const DEFAULT_NODE_TABLE = 'Section';
 /** Vector index name (reference schema `embedding_idx`). */
 export const DEFAULT_VECTOR_INDEX = 'embedding_idx';
 
+// ── ENHANCEMENTS constants ──────────────────────────────────────────────────
+
+/** Default graph-reranker boost coefficient. */
+export const DEFAULT_RERANK_ALPHA = 0.5;
+
+/** Default number of top candidates used as graph-traversal seeds. */
+export const DEFAULT_RERANK_SEED_K = 5;
+
+/** Default (and current maximum) graph hops expanded from each seed. */
+export const DEFAULT_RERANK_MAX_HOPS = 1;
+
+/** Default number of few-shot exemplars selected (top-n by BGE cosine). */
+export const DEFAULT_FEW_SHOT_N = 3;
+
+/**
+ * Fixed relevance score assigned to every validated Cypher-RAG row. Structural
+ * graph matches are treated as fully relevant, so on a dedupe tie a Cypher row
+ * supersedes the cosine-scored vector candidate for the same id.
+ */
+export const CYPHER_RAG_SCORE = 1;
+
 /**
  * Read-only Cypher allow-list prefixes. A validated query must start with one of
  * these (reference: `upper.startswith("MATCH") or upper.startswith("CALL")`).

@@ -1,9 +1,9 @@
 // @kgpacks/query — public entry point.
 //
-// The CORE retrieval pipeline (Phase 1): vector and hybrid retrieval over a
-// LadybugDB pack, plus the read-only Cypher safety validator. Reranker,
-// multi-document synthesis, few-shot prompting, and Cypher-RAG land in a later
-// slice. See docs/PLAN.md and the package README for the contract.
+// The CORE retrieval pipeline (vector and hybrid retrieval over a LadybugDB pack,
+// plus the read-only Cypher safety validator) and the ENHANCEMENTS layer: graph
+// reranker, cross-encoder, multi-document synthesis, few-shot selection, and
+// Cypher-RAG. See docs/enhancements.md and the package README for the contract.
 
 export { createRetriever } from './retriever.js';
 export type { CreateRetrieverOptions } from './retriever.js';
@@ -31,3 +31,25 @@ export type {
   RetrieveMode,
   RetrieveOptions,
 } from './types.js';
+
+// ── ENHANCEMENTS surface ──────────────────────────────────────────────────────
+
+export { graphRerank } from './reranker.js';
+export { createCrossEncoder } from './cross-encoder.js';
+export { selectFewShot } from './few-shot.js';
+export { cypherRagRetrieve, cypherGeneratorFromAgent } from './cypher-rag.js';
+export { synthesizeFromResults } from './multi-doc-synthesis.js';
+
+export type {
+  RerankerOptions,
+  CrossEncoder,
+  FewShotExample,
+  FewShotEmbedder,
+  QueryAgent,
+  SynthesisAgent,
+  CypherGenerator,
+  RetrieveAndSynthesizeResult,
+} from './types.js';
+
+// Re-exported from @kgpacks/agent for caller convenience.
+export type { SynthesisRequest, SynthesisResult, ContextChunk } from '@kgpacks/agent';
