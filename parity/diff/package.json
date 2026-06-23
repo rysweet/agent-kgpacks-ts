@@ -1,0 +1,17 @@
+{
+  "name": "@kgpacks/parity",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Dev-only stage-localizing parity diff harness: compares per-stage TS pipeline outputs against committed golden fixtures.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  }
+}

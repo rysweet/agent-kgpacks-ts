@@ -42,6 +42,9 @@ Requires **Node 22 LTS or newer**. No C/C++ toolchain needed —
 - [docs/packages/agent.md](docs/packages/agent.md) — the `@kgpacks/agent` GitHub
   Copilot SDK LLM-layer API contract (answer synthesis, query expansion,
   multi-query, seed-article identification, and token/usage accounting).
+- [docs/packages/parity.md](docs/packages/parity.md) — the dev-time
+  `@kgpacks/parity` harness: golden-fixture schema, stage comparison contract,
+  TypeScript API, the Python oracle, and regeneration tutorials.
 - [docs/PLAN.md](docs/PLAN.md) — the end-to-end TypeScript port plan.
 
 ## License
