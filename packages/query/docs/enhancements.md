@@ -201,7 +201,7 @@ const { results, synthesis } = await retriever.retrieveAndSynthesize('how does H
 });
 
 console.log(synthesis.answer); // cited prose grounded in `results`
-console.log(synthesis.metadata.citedIds); // e.g. ['Section:12', 'Section:7']
+console.log(synthesis.metadata.citedIds); // e.g. ['12', '7'] (RetrieverResult ids are node primary keys)
 
 await agent.stop();
 conn.close();
@@ -222,6 +222,7 @@ enhancements layer adds the following optional fields to `CreateRetrieverOptions
 | `agent`           | `QueryAgent`       | _unset_                                | multi-doc synthesis, Cypher-RAG |
 | `crossEncoder`    | `CrossEncoder`     | lazy singleton `createCrossEncoder()`  | cross-encoder stage             |
 | `fewShotExamples` | `FewShotExample[]` | `[]`                                   | few-shot stage                  |
+| `fewShotN`        | `number`           | `3`                                    | few-shot stage (top-n selected) |
 | `reranker`        | `RerankerOptions`  | `{ alpha: 0.5, seedK: 5, maxHops: 1 }` | graph reranker stage            |
 
 ```ts
@@ -233,15 +234,18 @@ export interface CreateRetrieverOptions {
   stopWords?: ReadonlySet<string>;
 
   // ── ENHANCEMENTS (all optional, all static) ──────────────────────────────
-  /** Agent used by multi-doc synthesis (`synthesizeAnswer`) and Cypher-RAG
-   *  (`generateCypher`). A `CopilotAgent` satisfies the synthesis half directly;
-   *  see {@link QueryAgent}. Required only when those stages are enabled. */
+  /** Agent used by multi-doc synthesis (`synthesizeAnswer`) and Cypher-RAG (Cypher
+   *  generation via the `cypherGeneratorFromAgent` adapter — `CopilotAgent` has no
+   *  `generateCypher` of its own). A `CopilotAgent` satisfies the synthesis half
+   *  directly; see {@link QueryAgent}. Required only when those stages are enabled. */
   agent?: QueryAgent;
   /** Cross-encoder reranker. Defaults to a lazily-constructed singleton over
    *  `Xenova/ms-marco-MiniLM-L-12-v2` (fp32). Inject a fake in tests. */
   crossEncoder?: CrossEncoder;
   /** Few-shot exemplar corpus. Selection is a no-op when empty. */
   fewShotExamples?: FewShotExample[];
+  /** Number of exemplars the few-shot stage selects (top-n by BGE cosine). Default 3. */
+  fewShotN?: number;
   /** Graph-reranker tuning. */
   reranker?: RerankerOptions;
 }
@@ -294,11 +298,21 @@ type and the flags-off invariant are preserved.
 
 ### `retriever.retrieveAndSynthesize`
 
+The enhancements layer **extends** the CORE [`Retriever`](../README.md) interface —
+which exposes only `retrieve` — with a second method, `retrieveAndSynthesize`, that
+runs the full pipeline and returns a synthesized answer alongside the candidate
+list. `retrieve`'s signature is unchanged, so the flags-off invariant holds:
+
 ```ts
-retrieveAndSynthesize(
-  query: string,
-  opts?: RetrieveOptions,
-): Promise<RetrieveAndSynthesizeResult>;
+export interface Retriever {
+  /** CORE: vector/hybrid retrieval, honouring the candidate-list flags (stages 0–3). */
+  retrieve(query: string, opts?: RetrieveOptions): Promise<RetrieverResult[]>;
+  /** ENHANCEMENTS: full pipeline + synthesized answer (adds stages 4–5). */
+  retrieveAndSynthesize(
+    query: string,
+    opts?: RetrieveOptions,
+  ): Promise<RetrieveAndSynthesizeResult>;
+}
 
 export interface RetrieveAndSynthesizeResult {
   /** The candidate list AFTER stages 0–3, exactly as `retrieve()` would return. */
@@ -314,7 +328,10 @@ The full pipeline:
 
 1. Runs `retrieve(query, opts)` → `results` (stages 0–3).
 2. If `enableFewshot`, runs [`selectFewShot`](#few-shot-selection--selectfewshot)
-   over the configured `fewShotExamples` → `exemplars` (else `[]`).
+   over the configured `fewShotExamples`, selecting the top-`fewShotN` (default 3)
+   → `exemplars` (else `[]`). This requires the construction `embedder` to expose
+   `generate` (a [`FewShotEmbedder`](#structural-contracts)); a query-only embedder
+   throws `QueryError` (fail-closed). The default `BgeEmbedder` satisfies it.
 3. Maps `results` to `ContextChunk[]` (`{ id, text: content }`). If
    `enableMultidoc` is **false**, only the single top-ranked result is passed as
    context (degenerate single-doc grounding); if **true**, the full list is passed.
@@ -682,7 +699,7 @@ describe('@kgpacks/query — cross-encoder parity gate (Spike D golden logits)',
 
   it('reproduces the Python logits within 1e-3', () => {
     golden.scores.forEach((expected, i) => {
-      expect(scores[i], `passage[${i}]`).toBeCloseTo(expected, 3);
+      expect(Math.abs(scores[i] - expected), `passage[${i}]`).toBeLessThanOrEqual(TOL);
     });
   });
 
