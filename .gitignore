@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+coverage/
+*.log
+.DS_Store
+.env
+.env.*
+.turbo/
+*.tsbuildinfo
+# LadybugDB local artifacts
+*.kuzu/
+*.lbug/
+*.wal
