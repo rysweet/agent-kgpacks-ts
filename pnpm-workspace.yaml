@@ -4,3 +4,6 @@ packages:
   # parity/oracle has no package.json, so pnpm ignores it — only parity/diff is
   # adopted as a workspace member.
   - parity/*
+  # Deployable applications (the Vite + React frontend SPA). Kept out of
+  # packages/* so the packages/*-only structural suites do not scan it.
+  - apps/*

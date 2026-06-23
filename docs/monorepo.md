@@ -46,7 +46,7 @@ pnpm install             # installs all workspace dependencies (frozen in CI)
 ```text
 .
 ├── package.json              # private root; workspace scripts + tool pins
-├── pnpm-workspace.yaml        # workspace globs (packages/*)
+├── pnpm-workspace.yaml        # workspace globs (packages/*, parity/*, apps/*)
 ├── pnpm-lock.yaml             # committed lockfile (reproducible installs)
 ├── tsconfig.base.json         # shared strict-ESM TypeScript settings
 ├── eslint.config.js           # ESLint 9 flat config (+ typescript-eslint, prettier)
@@ -64,7 +64,11 @@ pnpm install             # installs all workspace dependencies (frozen in CI)
 │       ├── db.md               # @kgpacks/db API + Spike A tutorial
 │       ├── agent.md            # @kgpacks/agent Copilot SDK API contract
 │       ├── packs.md            # @kgpacks/packs API + installer/security model
+│       ├── backend.md          # @kgpacks/backend HTTP API + SSE contract
+│       ├── frontend.md         # @kgpacks/frontend SPA + /api/v1 client contract
 │       └── mcp.md              # @kgpacks/mcp stdio server + external contract
+├── apps/
+│   └── frontend/               # @kgpacks/frontend — Vite + React 18 SPA
 └── packages/
     ├── db/                     # @kgpacks/db   — LadybugDB wrapper (+ Spike A)
     ├── embeddings/             # @kgpacks/embeddings
@@ -106,8 +110,12 @@ phase ordering).
 | `@kgpacks/mcp`        | TypeScript MCP server exposing `list_packs`, `pack_info`, `query_knowledge_pack`.                                                                                  |
 | `@kgpacks/eval`       | Eval runner + judge (Copilot SDK), baselines, skill evaluators.                                                                                                    |
 
-> `@kgpacks/ingestion` and `frontend` are intentionally **not** scaffolded in
-> Phase 0 — they land in Phase 2 and the frontend migration respectively.
+> `@kgpacks/ingestion` is intentionally **not** scaffolded in Phase 0 — it lands
+> in Phase 2. The **frontend** has since shipped as the workspace's first
+> _application_: it lives under [`apps/frontend/`](../apps/frontend/README.md)
+> (not `packages/`) because it is a deployable SPA rather than a library, and its
+> `apps/` placement keeps it out of the `packages/*`-only structural suites. See
+> [docs/packages/frontend.md](./packages/frontend.md).
 
 ## Everyday commands
 
@@ -205,8 +213,14 @@ Each package's `tsconfig.json` extends this base and sets only what is local:
 
 ```yaml
 packages:
-  - packages/*
+  - packages/* # libraries (@kgpacks/db … @kgpacks/backend)
+  - parity/* # dev-only parity harness (parity/diff)
+  - apps/* # applications (apps/frontend — the React SPA)
 ```
+
+> The frontend lives under `apps/`, not `packages/`, because it is a deployable
+> application rather than a library — and because the structural governance suites
+> (`test/scaffold.test.ts`) and the python-free guard only scan `packages/*`.
 
 ### `.npmrc`
 
@@ -350,3 +364,7 @@ Phase 0 packages are deliberately uniform, so adding one is mechanical:
 - [docs/packages/backend.md](./packages/backend.md) — `@kgpacks/backend` HTTP API
   reference: the `/api/v1` route contract, the chat SSE protocol, configuration,
   rate limiting, and the per-request connection lifecycle.
+- [docs/packages/frontend.md](./packages/frontend.md) — `@kgpacks/frontend` web app
+  (`apps/frontend/`): the Vite + React 18 SPA, the typed `/api/v1` client, the chat
+  SSE streaming contract, the UI components, the `apps/` placement and `apps/**`
+  ESLint override, and the build/test strategy.
