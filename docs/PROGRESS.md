@@ -1,32 +1,45 @@
 # Execution Progress
 
-Tracks the TypeScript port against [PLAN.md](./PLAN.md).
+The TypeScript port of agent-kgpacks is **functionally complete end-to-end**.
 
-## Spikes (de-risking) — all validated
+## De-risking spikes — validated
+- **A** LadybugDB vector read (`@ladybugdb/core`) — passes in CI (`@kgpacks/db` Spike A).
+- **B** BGE embedding parity — Transformers.js `Xenova/bge-base-en-v1.5` (CLS pooling) =
+  cosine 1.0 vs Python; gated by `@kgpacks/embeddings`.
+- **D** cross-encoder `ms-marco-MiniLM-L-12-v2` ONNX — exact match vs Python.
+- **C** Copilot SDK — `@github/copilot-sdk@1.0.3` integrated in `@kgpacks/agent`.
 
-- **Spike A** (LadybugDB vector read via `@ladybugdb/core`): ✅ passes in CI (`@kgpacks/db` Spike A test).
-- **Spike B** (BGE embedding parity): ✅ Transformers.js `Xenova/bge-base-en-v1.5` + CLS pooling = cosine 1.0 vs Python (gated by `@kgpacks/embeddings` parity test).
-- **Spike D** (cross-encoder `ms-marco-MiniLM-L-12-v2` ONNX): ✅ exact match vs Python.
-- **Spike C** (Copilot SDK throughput): pending formal bench; `@github/copilot-sdk@1.0.3` confirmed installable and used by `@kgpacks/agent`.
+## Phase 0 — Foundations ✅
+pnpm monorepo (Node 22, strict ESM), CI with **python-free guard**, parity harness
+(`@kgpacks/parity`: stage-diff + dev-only Python oracle).
 
-## Phase 0 — Foundations: DONE
+## Phase 1 — Runtime ✅ (all merged, green CI)
+| Package | Tests | Notes |
+|---|---|---|
+| `@kgpacks/db` | 11 | LadybugDB wrapper; Spike A vector test |
+| `@kgpacks/embeddings` | 11 | BGE; cosine-parity gate |
+| `@kgpacks/agent` | 60 | Copilot SDK transport (BYOK), structural parity |
+| `@kgpacks/packs` | 93 | manifest/installer/registry; zip-slip security |
+| `@kgpacks/query` | 105 | vector+hybrid retrieval, reranker, cross-encoder, multi-doc, few-shot, cypher-RAG, cypher-safety |
+| `@kgpacks/mcp` | 28 | stdio MCP server, 3 tools, schema-contract snapshots |
+| `@kgpacks/backend` | 50 | Fastify + SSE; chat/search/graph/hybrid/articles; rate limit |
+| `@kgpacks/cli` | 108 | `wikigr` runtime + ingestion subcommands |
+| `@kgpacks/eval` | 56 | runner + LLM judge + baselines + stratified sampling |
+| `apps/frontend` | 32 | Vite + React 18 SPA, typed `/api/v1` client, SSE chat |
 
-- pnpm monorepo (Node 22, strict ESM), CI (build + **python-free guard**), 9 package skeletons.
-- Parity harness (`@kgpacks/parity`): stage-localizing diff + dev-only Python oracle.
+## Phase 2 — Ingestion ✅
+`@kgpacks/ingestion` (77 tests): Wikipedia/web sources, SSRF-safe fetcher
+(per-hop validation), Copilot-SDK extraction, document-mode BGE embeddings,
+LadybugDB schema + loader with HNSW vector index + FTS, bounded expansion,
+`buildPack()`. Wired into the CLI (`create`/`update`/`research-sources`/`pack eval`).
 
-## Phase 1 — Runtime packages
+## Phase 3 — Deploy ✅ / Cutover (operational)
+- ✅ Multi-stage **Dockerfile** (glibc base), docker-compose, `docs/deployment.md`,
+  and a CI **docker-image** job (build + no-Python + non-root).
+- **Operational follow-ups (gated, not code):**
+  - Consolidate the original 68 per-domain build scripts into the data-driven CLI.
+  - Rebuild the 48-pack catalog with the TS pipeline and run the full
+    2,716-question eval to confirm ≤2pp parity (requires LLM budget + network).
+  - Decommission the Python repo after a shadow/canary window (manual decision).
 
-| Package                         | Status                                           | Tests (CI) |
-| ------------------------------- | ------------------------------------------------ | ---------- |
-| `@kgpacks/db`                   | ✅ done                                          | 11         |
-| `@kgpacks/embeddings`           | ✅ done (Spike B parity gate)                    | 11         |
-| `@kgpacks/agent`                | ✅ done (Copilot SDK, structural parity)         | 60         |
-| `@kgpacks/packs`                | ✅ done (incl. zip-slip security parity)         | 93         |
-| `@kgpacks/query` (core)         | ✅ done (vector+hybrid retrieval, cypher-safety) | 51         |
-| `@kgpacks/query` (enhancements) | ⏳ next                                          | —          |
-| `@kgpacks/backend`              | ⏳ skeleton                                      | —          |
-| `@kgpacks/mcp`                  | ✅ done (3-tool stdio server, schema-locked)     | 28         |
-| `@kgpacks/cli`                  | ⏳ skeleton                                      | —          |
-| `@kgpacks/eval`                 | ⏳ skeleton                                      | —          |
-
-## Phase 2 (ingestion) / Phase 3 (cutover): not started
+> ~700 unit/integration tests pass in CI across the workspace.
