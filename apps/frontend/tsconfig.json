@@ -16,8 +16,8 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "useDefineForClassFields": true,
-    "noEmit": true,
     "composite": true,
+    "outDir": "./node_modules/.tmp/tsc-app",
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
     "types": ["vite/client", "vitest/globals", "@testing-library/jest-dom"]
   },

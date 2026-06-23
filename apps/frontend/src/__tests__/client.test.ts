@@ -102,10 +102,10 @@ describe('ApiClient — error model', () => {
   });
 
   it('maps a fetch rejection (transport failure) to NETWORK_ERROR with a null status', async () => {
-    const fetch = (async () => {
+    const failingFetch = (async () => {
       throw new TypeError('Failed to fetch');
     }) as unknown as typeof fetch;
-    const api = new ApiClient({ baseUrl: 'http://api.test', fetch });
+    const api = new ApiClient({ baseUrl: 'http://api.test', fetch: failingFetch });
 
     await expect(api.stats()).rejects.toMatchObject({
       name: 'ApiClientError',
