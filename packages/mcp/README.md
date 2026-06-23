@@ -85,8 +85,11 @@ testable with a fixture runner.
 
 ## Parity notes
 
-- Server identity (`name: "agent-kgpacks"`, `instructions`) and the tool
-  descriptions are ported from the Python source.
+- Server identity (`name: "agent-kgpacks"`, `instructions`) is ported verbatim
+  from the Python source. The human-readable tool descriptions are adapted from
+  the upstream docstrings (example pack renamed to one the TS port ships, query
+  description condensed); they are locked by the schema snapshot but are not part
+  of the load-bearing config contract.
 - Success payloads use `JSON.stringify(value, null, 2)` (byte-identical to Python
   `json.dumps(..., indent=2)` for ASCII content); error payloads reproduce
   Python's compact `", "` / `": "` separators.
@@ -94,5 +97,7 @@ testable with a fixture runner.
   traversal attempts are rejected with the same "not found" message as an unknown
   pack.
 
-See [docs/PLAN.md](../../docs/PLAN.md) ("External Contracts") and
-[docs/monorepo.md](../../docs/monorepo.md) for the workspace conventions.
+See [docs/packages/mcp.md](../../docs/packages/mcp.md) for the full design and
+parity contract, [docs/PLAN.md](../../docs/PLAN.md) ("External Contracts") for the
+parity requirement, and [docs/monorepo.md](../../docs/monorepo.md) for the
+workspace conventions.
