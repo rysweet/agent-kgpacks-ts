@@ -21,6 +21,10 @@ import type {
   ProviderConfig as SdkProviderConfig,
 } from '@github/copilot-sdk';
 
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import type {
   CopilotTransportOptions,
   Transport,
@@ -109,14 +113,19 @@ function toUsage(usageData: AssistantUsageData | undefined, messageOutputTokens?
 export function createCopilotTransport(options: CopilotTransportOptions = {}): Transport {
   const systemMessage = options.systemMessage ?? DEFAULT_SECURITY_SYSTEM_MESSAGE;
   let client: SdkClient | undefined;
+  // `mode: 'empty'` requires an explicit per-session persistence location. We use
+  // an ephemeral temp directory (no custom instructions / project context leak in)
+  // and remove it on shutdown.
+  let baseDir: string | undefined;
 
   return {
     async open(config: TransportOpenConfig): Promise<TransportSession> {
       const sdk = (await import('@github/copilot-sdk')) as unknown as {
-        CopilotClient: new (opts: { mode: 'empty' }) => SdkClient;
+        CopilotClient: new (opts: { mode: 'empty'; baseDirectory: string }) => SdkClient;
         approveAll: unknown;
       };
-      const c = new sdk.CopilotClient({ mode: 'empty' });
+      baseDir = await mkdtemp(join(tmpdir(), 'kgpacks-agent-'));
+      const c = new sdk.CopilotClient({ mode: 'empty', baseDirectory: baseDir });
       await c.start();
       client = c;
 
@@ -136,11 +145,17 @@ export function createCopilotTransport(options: CopilotTransportOptions = {}): T
       if (!client) return;
       const c = client;
       client = undefined;
-      const errors = await c.stop();
-      if (Array.isArray(errors) && errors.length > 0) {
-        // Surface (count only) — the agent layer wraps this as AgentTransportError.
-        // Underlying messages are intentionally not embedded to avoid leaking secrets.
-        throw new Error(`Copilot client reported ${errors.length} error(s) during shutdown.`);
+      const dir = baseDir;
+      baseDir = undefined;
+      try {
+        const errors = await c.stop();
+        if (Array.isArray(errors) && errors.length > 0) {
+          // Surface (count only) — the agent layer wraps this as AgentTransportError.
+          // Underlying messages are intentionally not embedded to avoid leaking secrets.
+          throw new Error(`Copilot client reported ${errors.length} error(s) during shutdown.`);
+        }
+      } finally {
+        if (dir) await rm(dir, { recursive: true, force: true }).catch(() => undefined);
       }
     },
   };

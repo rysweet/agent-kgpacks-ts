@@ -36,11 +36,18 @@ export type Responder = (cypher: string, params?: Record<string, unknown>) => Ro
  */
 export class RecordingConnection {
   readonly calls: RunCall[] = [];
+  /** Extensions loaded via {@link loadExtension}, in call order (e.g. 'vector', 'fts'). */
+  readonly loadedExtensions: string[] = [];
   constructor(private readonly responder: Responder = () => []) {}
 
   async run<T = Row>(cypher: string, params?: Record<string, unknown>): Promise<T[]> {
     this.calls.push({ cypher, params });
     return this.responder(cypher, params) as T[];
+  }
+
+  /** Records the extension load the read path performs before vector/FTS calls. */
+  async loadExtension(name: string): Promise<void> {
+    this.loadedExtensions.push(name);
   }
 
   asConnection(): Connection {

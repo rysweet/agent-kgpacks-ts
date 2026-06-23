@@ -279,14 +279,18 @@ export function createLlmExtractor(options: LlmExtractorOptions = {}): Extractor
   const model = options.model ?? DEFAULT_SYNTHESIS_MODEL;
   const maxArticleChars = options.maxArticleChars ?? DEFAULT_MAX_ARTICLE_CHARS;
   let session: TransportSession | undefined;
+  // The transport WE create (default path) owns a Copilot CLI subprocess that must
+  // be shut down in close(), or the process never exits. An injected transport is
+  // the caller's to manage, so we only close the session for it.
+  let ownTransport: Transport | undefined;
 
   async function getSession(): Promise<TransportSession> {
     const transport = options.transport;
     if (transport === undefined) {
       // Lazy import keeps the heavy SDK out of the offline test/build path.
       const { createCopilotTransport } = await import('@kgpacks/agent');
-      const realTransport = createCopilotTransport();
-      session = await realTransport.open({ model });
+      ownTransport = createCopilotTransport();
+      session = await ownTransport.open({ model });
       return session;
     }
     session ??= await transport.open({ model });
@@ -302,9 +306,14 @@ export function createLlmExtractor(options: LlmExtractorOptions = {}): Extractor
     },
     async close(): Promise<void> {
       const s = session;
+      const t = ownTransport;
       session = undefined;
-      if (s) {
-        await s.close();
+      ownTransport = undefined;
+      try {
+        if (s) await s.close();
+      } finally {
+        // Tear down the Copilot client/subprocess we spawned (idempotent, best-effort).
+        if (t) await t.shutdown();
       }
     },
   };

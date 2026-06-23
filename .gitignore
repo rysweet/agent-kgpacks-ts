@@ -17,3 +17,8 @@ coverage/
 
 # git worktrees used by tooling
 worktrees/
+
+# built pack databases (data artifacts, not source)
+data/packs/**/*.db
+data/packs/**/*.db.wal
+.scratch/
