@@ -64,6 +64,9 @@ pnpm --filter @kgpacks/frontend dev
 - [docs/catalog.md](docs/catalog.md) — the knowledge-pack catalog: the `catalog/`
   layout, the data-driven `catalog:build` / `catalog:eval` workflow, the pinned
   synthesis and judge models, and what is (and isn't) committed.
+- [docs/cve.md](docs/cve.md) — building a knowledge pack from the MITRE / CVE
+  Program vulnerability corpus: the structured (LLM-free) ingestion path, the
+  CVE→graph mapping, and the `cve:build` workflow.
 - [docs/PLAN.md](docs/PLAN.md) — the architecture, parity methodology, external
   contracts, and acceptance criteria for the port.
 
