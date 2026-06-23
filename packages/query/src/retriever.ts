@@ -142,6 +142,25 @@ export function createRetriever(conn: Connection, opts: CreateRetrieverOptions =
     return crossEncoder;
   };
 
+  // A pack's vector/FTS index lives in LadybugDB extensions that a fresh read
+  // connection must LOAD before `QUERY_VECTOR_INDEX` / FTS calls resolve. The
+  // build path loads them at write time; the read path must do so too. We load
+  // lazily and once per retriever (VECTOR always; FTS only when hybrid needs it),
+  // and skip it entirely for connections that don't expose `loadExtension`
+  // (e.g. fakes injected by unit tests).
+  const loader = conn as { loadExtension?: (name: string) => Promise<void> };
+  let vectorReady: Promise<void> | undefined;
+  let ftsReady: Promise<void> | undefined;
+  async function ensureExtensions(hybrid: boolean): Promise<void> {
+    if (typeof loader.loadExtension !== 'function') return;
+    vectorReady ??= loader.loadExtension('vector');
+    await vectorReady;
+    if (hybrid) {
+      ftsReady ??= loader.loadExtension('fts');
+      await ftsReady;
+    }
+  }
+
   async function runCandidateStages(
     query: string,
     options: RetrieveOptions,
@@ -150,6 +169,7 @@ export function createRetriever(conn: Connection, opts: CreateRetrieverOptions =
     assertValidK(k);
 
     // Stage 0: CORE vector/hybrid retrieval (always runs).
+    await ensureExtensions((options.mode ?? 'vector') === 'hybrid');
     let results: RetrieverResult[];
     if ((options.mode ?? 'vector') === 'hybrid') {
       const weights = options.weights ?? DEFAULT_WEIGHTS;
