@@ -140,16 +140,24 @@ describe.each(PACKAGES)('scaffold — package @kgpacks/%s', (name) => {
   });
 });
 
-describe('scaffold — @kgpacks/db dependency pin', () => {
+describe('scaffold — third-party runtime dependency pins', () => {
   it('pins @ladybugdb/core to an exact 0.17.1 (no range) as a runtime dependency', () => {
     const p = readJson('packages/db/package.json');
     const deps = (p.dependencies ?? {}) as Record<string, string>;
     expect(deps['@ladybugdb/core']).toBe('0.17.1');
   });
 
-  it('is the only Phase 0 package carrying a third-party runtime dependency', () => {
+  it('@kgpacks/embeddings carries @huggingface/transformers as its only third-party runtime dependency', () => {
+    const p = readJson('packages/embeddings/package.json');
+    const deps = (p.dependencies ?? {}) as Record<string, string>;
+    expect(deps['@huggingface/transformers']).toBeDefined();
+    const external = Object.keys(deps).filter((d) => !d.startsWith('@kgpacks/'));
+    expect(external).toEqual(['@huggingface/transformers']);
+  });
+
+  it('no package other than db and embeddings carries a third-party runtime dependency', () => {
     for (const name of PACKAGES) {
-      if (name === 'db') continue;
+      if (name === 'db' || name === 'embeddings') continue;
       const p = readJson(`packages/${name}/package.json`);
       const deps = (p.dependencies ?? {}) as Record<string, string>;
       const external = Object.keys(deps).filter((d) => !d.startsWith('@kgpacks/'));

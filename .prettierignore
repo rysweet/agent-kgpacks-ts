@@ -2,3 +2,7 @@ dist/
 coverage/
 pnpm-lock.yaml
 docs/PLAN.md
+
+# Frozen golden parity oracle — read-only Spike B output; never reformat or
+# regenerate (whitespace changes would touch the immutable fixture).
+packages/embeddings/test/fixtures/bge-golden.json
