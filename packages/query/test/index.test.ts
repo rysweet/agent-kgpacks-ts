@@ -54,3 +54,23 @@ describe('@kgpacks/query public surface', () => {
     expect(query.DEFAULT_WEIGHTS).toBe(query.DEFAULT_WEIGHTS);
   });
 });
+
+describe('@kgpacks/query ENHANCEMENTS surface', () => {
+  it('exports the five enhancement stage entry points', () => {
+    expect(typeof query.graphRerank).toBe('function');
+    expect(typeof query.createCrossEncoder).toBe('function');
+    expect(typeof query.selectFewShot).toBe('function');
+    expect(typeof query.cypherRagRetrieve).toBe('function');
+    expect(typeof query.synthesizeFromResults).toBe('function');
+  });
+
+  it('exports the agent->CypherGenerator adapter', () => {
+    expect(typeof query.cypherGeneratorFromAgent).toBe('function');
+  });
+
+  it('still does NOT leak the package-internal locked constants', () => {
+    for (const name of ['GRAPH_MATCH', 'KEYWORD_MATCH', 'DEFAULT_SIMILARITY']) {
+      expect(name in query).toBe(false);
+    }
+  });
+});
