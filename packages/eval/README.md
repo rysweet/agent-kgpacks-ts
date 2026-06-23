@@ -21,7 +21,7 @@ workspace packages (`@kgpacks/query`, `@kgpacks/agent`, `@kgpacks/packs` as
 `workspace:*`), so the `test/scaffold.test.ts` allowlist is left untouched.
 
 ```ts
-import { CopilotAgent } from '@kgpacks/agent';
+import { CopilotAgent, createCopilotTransport } from '@kgpacks/agent';
 import { createRetriever } from '@kgpacks/query';
 import {
   runEval,
@@ -29,10 +29,19 @@ import {
   trainingOnlyArm,
   createLlmJudge,
   createDirQuestionLoader,
+  DEFAULT_JUDGE_MODEL,
 } from '@kgpacks/eval';
 
 const agent = new CopilotAgent();
 await agent.start();
+
+// The judge runs on its own model via a dedicated tool-less completion session,
+// pinned independently of the synthesis model and identical for both arms.
+const judge = createLlmJudge({
+  transport: createCopilotTransport(),
+  model: DEFAULT_JUDGE_MODEL,
+});
+
 try {
   const retriever = createRetriever(conn, { agent });
 
@@ -41,13 +50,14 @@ try {
     packIds: ['world-history'],
     withPack: withPackArm(retriever), // full retrieve + synthesize
     trainingOnly: trainingOnlyArm(agent), // synthesize with empty context
-    judge: createLlmJudge(agent), // pinned judge model + fixed prompt
+    judge, // pinned judge model + fixed prompt, identical for both arms
     sample: { mode: 'stratified', perPack: 3 }, // bound cost during dev
   });
 
   console.log(report.comparison.deltaAccuracy); // the pack's lift
   console.log(report.comparison.winRate); // wins / (wins + losses)
 } finally {
+  await judge.close();
   await agent.stop();
 }
 ```
