@@ -14,6 +14,10 @@ Commands:
   info <pack>        Print a pack's full manifest.
   validate <pack>    Validate a pack's manifest.
   remove <pack>      Remove an installed pack.
+  create [options]   Build a new pack database from seed URLs or a config file.
+  eval [options]     Evaluate a pack: with-pack vs training-only, scored by a
+                     pinned judge.
+  update [options]   Resume / extend an existing pack's graph from new seeds.
 "
 `;
 
@@ -31,6 +35,10 @@ Commands:
   info <pack>        Print a pack's full manifest.
   validate <pack>    Validate a pack's manifest.
   remove <pack>      Remove an installed pack.
+  create [options]   Build a new pack database from seed URLs or a config file.
+  eval [options]     Evaluate a pack: with-pack vs training-only, scored by a
+                     pinned judge.
+  update [options]   Resume / extend an existing pack's graph from new seeds.
 "
 `;
 
@@ -116,7 +124,7 @@ Options:
 exports[`help/usage golden snapshots > matches the root help snapshot > root 1`] = `
 "Usage: wikigr [options] [command]
 
-Knowledge-pack command-line interface (query + pack management).
+Knowledge-pack command-line interface (query, ingestion, and pack management).
 
 Options:
   -V, --version                      output the version number
@@ -128,6 +136,12 @@ Commands:
                                      retrieval results as JSON.
   status                             Report the resolved packs directory and
                                      the installed packs.
+  create [options]                   Build a new pack database from seed URLs
+                                     or a config file.
+  update [options]                   Resume / extend an existing pack's graph
+                                     from new seeds.
+  research-sources [options]         Discover candidate source URLs reachable
+                                     from the seeds (fetch-only).
   pack                               Manage installed knowledge packs.
   help [command]                     display help for command
 "

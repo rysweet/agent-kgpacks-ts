@@ -1,0 +1,105 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Phase-2 help/usage golden snapshots > matches the create help snapshot > create 1`] = `
+"Usage: wikigr create [options]
+
+Build a new pack database from seed URLs or a config file.
+
+Options:
+  --pack <name>        pack directory name
+  --seeds <url...>     seed article URLs (HTTPS)
+  --config <file>      JSON config file (a subset of BuildPackConfig)
+  --max-depth <n>      maximum link-expansion depth from the seeds (default: 1)
+  --max-articles <n>   hard cap on the number of articles ingested (default:
+                       50)
+  --chunk-size <n>     section→chunk window size (characters)
+  --chunk-overlap <n>  overlap between consecutive chunks (characters)
+  -h, --help           display help for command
+"
+`;
+
+exports[`Phase-2 help/usage golden snapshots > matches the pack create help snapshot > pack create 1`] = `
+"Usage: wikigr pack create [options]
+
+Build a new pack database from seed URLs or a config file.
+
+Options:
+  --pack <name>        pack directory name
+  --seeds <url...>     seed article URLs (HTTPS)
+  --config <file>      JSON config file (a subset of BuildPackConfig)
+  --max-depth <n>      maximum link-expansion depth from the seeds (default: 1)
+  --max-articles <n>   hard cap on the number of articles ingested (default:
+                       50)
+  --chunk-size <n>     section→chunk window size (characters)
+  --chunk-overlap <n>  overlap between consecutive chunks (characters)
+  -h, --help           display help for command
+"
+`;
+
+exports[`Phase-2 help/usage golden snapshots > matches the pack eval help snapshot > pack eval 1`] = `
+"Usage: wikigr pack eval [options]
+
+Evaluate a pack: with-pack vs training-only, scored by a pinned judge.
+
+Options:
+  --pack <name>       pack directory name to evaluate
+  --questions <dir>   base directory for per-pack eval_questions.json (default:
+                      the packs dir)
+  --sample <mode>     sampling mode (choices: "full", "stratified", default:
+                      "full")
+  --per-pack <n>      questions per pack in stratified mode (default: 3)
+  --judge-model <id>  judge model id, held constant across both arms (default:
+                      "claude-opus-4.1")
+  -h, --help          display help for command
+"
+`;
+
+exports[`Phase-2 help/usage golden snapshots > matches the pack update help snapshot > pack update 1`] = `
+"Usage: wikigr pack update [options]
+
+Resume / extend an existing pack's graph from new seeds.
+
+Options:
+  --pack <name>        pack directory name
+  --seeds <url...>     seed article URLs (HTTPS)
+  --config <file>      JSON config file (a subset of BuildPackConfig)
+  --max-depth <n>      maximum link-expansion depth from the seeds (default: 1)
+  --max-articles <n>   hard cap on the number of articles ingested (default:
+                       50)
+  --chunk-size <n>     section→chunk window size (characters)
+  --chunk-overlap <n>  overlap between consecutive chunks (characters)
+  -h, --help           display help for command
+"
+`;
+
+exports[`Phase-2 help/usage golden snapshots > matches the research-sources help snapshot > research-sources 1`] = `
+"Usage: wikigr research-sources [options]
+
+Discover candidate source URLs reachable from the seeds (fetch-only).
+
+Options:
+  --seeds <url...>    seed article URLs to crawl from (HTTPS)
+  --max-depth <n>     maximum link-expansion depth from the seeds (default: 1)
+  --max-articles <n>  hard cap on the number of articles fetched during
+                      discovery (default: 50)
+  -h, --help          display help for command
+"
+`;
+
+exports[`Phase-2 help/usage golden snapshots > matches the update help snapshot > update 1`] = `
+"Usage: wikigr update [options]
+
+Resume / extend an existing pack's graph from new seeds.
+
+Options:
+  --pack <name>        pack directory name
+  --seeds <url...>     seed article URLs (HTTPS)
+  --config <file>      JSON config file (a subset of BuildPackConfig)
+  --max-depth <n>      maximum link-expansion depth from the seeds (default: 1)
+  --max-articles <n>   hard cap on the number of articles ingested (default:
+                       50)
+  --chunk-size <n>     section→chunk window size (characters)
+  --chunk-overlap <n>  overlap between consecutive chunks (characters)
+  -h, --help           display help for command
+"
+`;

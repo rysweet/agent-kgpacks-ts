@@ -120,9 +120,18 @@ importers:
 
   packages/cli:
     dependencies:
+      '@kgpacks/agent':
+        specifier: workspace:*
+        version: link:../agent
       '@kgpacks/db':
         specifier: workspace:*
         version: link:../db
+      '@kgpacks/eval':
+        specifier: workspace:*
+        version: link:../eval
+      '@kgpacks/ingestion':
+        specifier: workspace:*
+        version: link:../ingestion
       '@kgpacks/packs':
         specifier: workspace:*
         version: link:../packs

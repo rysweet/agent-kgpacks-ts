@@ -5,6 +5,8 @@
 // `--packs-dir` flag into the configured precedence (flag → injection → env →
 // default).
 
+import type { EvalSeam } from './eval-runner.js';
+import type { BuildPackSeam, DiscoverSourcesSeam } from './ingestion-runner.js';
 import type { Io } from './io.js';
 import type { QueryRunner } from './query-runner.js';
 
@@ -14,6 +16,12 @@ export interface CliContext {
   io: Io;
   /** `query` execution seam. */
   runQuery: QueryRunner;
+  /** `create` / `update` build seam (write-side ingestion pipeline). */
+  buildPack: BuildPackSeam;
+  /** `research-sources` URL-discovery seam. */
+  discoverSources: DiscoverSourcesSeam;
+  /** `pack eval` execution seam. */
+  evalPack: EvalSeam;
   /** Resolves the packs directory given the global `--packs-dir` flag value. */
   packsDirFor: (flag?: string) => string;
 }

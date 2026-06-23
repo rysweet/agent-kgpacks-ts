@@ -5,10 +5,10 @@
 // stable and part of the package's public contract.
 //
 // Underlying package errors are matched by their `name` (every error class in
-// `@kgpacks/packs` / `@kgpacks/query` sets `this.name` to its class name). This
-// keeps this module dependency-free: it never imports `@kgpacks/query`, whose
-// module graph eagerly loads the embeddings/ONNX runtime — that stays behind the
-// lazy query runner.
+// `@kgpacks/packs` / `@kgpacks/query` / `@kgpacks/ingestion` / `@kgpacks/eval`
+// sets `this.name` to its class name). This keeps this module dependency-free: it
+// never imports those packages, whose module graphs eagerly load the
+// embeddings/ONNX/model runtime — that stays behind the lazy command seams.
 
 import { CliError } from './errors.js';
 
@@ -26,6 +26,10 @@ export const EXIT_VALIDATION = 4;
 export const EXIT_INSTALL = 5;
 /** Query / retrieval runtime failure. */
 export const EXIT_QUERY = 6;
+/** Ingestion failure (`create` / `update` / `research-sources`). */
+export const EXIT_INGESTION = 7;
+/** Evaluation failure (`pack eval`). */
+export const EXIT_EVAL = 8;
 
 const NAME_TO_CODE: Readonly<Record<string, number>> = {
   PackNotFoundError: EXIT_PACK_NOT_FOUND,
@@ -33,6 +37,11 @@ const NAME_TO_CODE: Readonly<Record<string, number>> = {
   CypherValidationError: EXIT_VALIDATION,
   PackInstallError: EXIT_INSTALL,
   QueryError: EXIT_QUERY,
+  IngestionError: EXIT_INGESTION,
+  BlockedUrlError: EXIT_INGESTION,
+  FetchError: EXIT_INGESTION,
+  ExtractionError: EXIT_INGESTION,
+  EvalError: EXIT_EVAL,
 };
 
 /** Maps a thrown value to the CLI exit code that should terminate the process. */
