@@ -1,0 +1,22 @@
+{
+  "name": "vscode-extensions",
+  "version": "1.0.0",
+  "description": "Expert knowledge of the Vercel AI SDK for building AI-powered applications in TypeScript, covering generateText, streamText, tool calling, agents, provider integrations, and AI SDK UI.",
+  "graph_stats": {
+    "articles": 41,
+    "entities": 235,
+    "relationships": 197,
+    "size_mb": 2.08
+  },
+  "eval_scores": {
+    "accuracy": 0.0,
+    "hallucination_rate": 0.0,
+    "citation_quality": 0.0
+  },
+  "source_urls": [
+    "https://code.visualstudio.com/api",
+    "https://code.visualstudio.com/api/references/vscode-api"
+  ],
+  "created": "2026-03-03T20:17:09.559680Z",
+  "license": "MIT"
+}

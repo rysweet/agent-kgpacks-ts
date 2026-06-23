@@ -46,6 +46,7 @@ export const DEFAULT_PER_PACK = 3;
 
 /**
  * Default judge model for `pack eval`, held constant across both arms. Mirrors
- * `@kgpacks/eval`'s `DEFAULT_JUDGE_MODEL`; overriding it re-baselines the eval.
+ * `@kgpacks/eval`'s `DEFAULT_JUDGE_MODEL` (`claude-opus-4.5`, the Opus model served
+ * by the authenticated Copilot CLI); overriding it re-baselines the eval.
  */
-export const DEFAULT_JUDGE_MODEL = 'claude-opus-4.1';
+export const DEFAULT_JUDGE_MODEL = 'claude-opus-4.5';

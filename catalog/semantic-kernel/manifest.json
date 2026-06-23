@@ -1,0 +1,22 @@
+{
+  "name": "semantic-kernel",
+  "version": "1.0.0",
+  "description": "Expert knowledge of Microsoft Semantic Kernel covering the kernel, plugins, functions, planners, vector store connectors, and agent orchestration.",
+  "graph_stats": {
+    "articles": 25,
+    "entities": 128,
+    "relationships": 110,
+    "size_mb": 2.08
+  },
+  "eval_scores": {
+    "accuracy": 0.0,
+    "hallucination_rate": 0.0,
+    "citation_quality": 0.0
+  },
+  "source_urls": [
+    "https://learn.microsoft.com/en-us/semantic-kernel/",
+    "https://github.com/microsoft/semantic-kernel"
+  ],
+  "created": "2026-03-03T20:03:19.641463Z",
+  "license": "MIT"
+}

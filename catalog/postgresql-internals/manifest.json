@@ -1,0 +1,23 @@
+{
+  "name": "postgresql-internals",
+  "version": "1.0.0",
+  "description": "Deep knowledge of PostgreSQL internals covering MVCC, WAL, query planner, EXPLAIN analysis, index types (B-tree, GIN, GiST, BRIN), partitioning, VACUUM/autovacuum, and performance tuning.",
+  "graph_stats": {
+    "articles": 45,
+    "entities": 250,
+    "relationships": 203,
+    "size_mb": 2.08
+  },
+  "eval_scores": {
+    "accuracy": 0.0,
+    "hallucination_rate": 0.0,
+    "citation_quality": 0.0
+  },
+  "source_urls": [
+    "https://www.postgresql.org/docs/current/mvcc.html",
+    "https://www.postgresql.org/docs/current/wal.html",
+    "https://pganalyze.com/docs/explain/basics-of-postgres-query-planning"
+  ],
+  "created": "2026-03-03T19:53:05.809638Z",
+  "license": "MIT"
+}

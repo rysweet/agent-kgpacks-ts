@@ -1,0 +1,22 @@
+{
+  "name": "microsoft-agent-framework",
+  "version": "1.0.0",
+  "description": "Expert knowledge of Microsoft Agent Framework covering agent creation, graph-based workflows, orchestration patterns, state management, and Azure deployment.",
+  "graph_stats": {
+    "articles": 19,
+    "entities": 88,
+    "relationships": 89,
+    "size_mb": 2.08
+  },
+  "eval_scores": {
+    "accuracy": 0.0,
+    "hallucination_rate": 0.0,
+    "citation_quality": 0.0
+  },
+  "source_urls": [
+    "https://learn.microsoft.com/en-us/agent-framework/overview/",
+    "https://github.com/microsoft/agent-framework"
+  ],
+  "created": "2026-03-03T19:42:40.918163Z",
+  "license": "MIT"
+}

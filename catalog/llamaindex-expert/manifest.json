@@ -1,0 +1,22 @@
+{
+  "name": "llamaindex-expert",
+  "version": "1.0.0",
+  "description": "Expert knowledge of LlamaIndex framework covering RAG pipelines, indexing, embeddings, AgentWorkflow, and agentic document workflows.",
+  "graph_stats": {
+    "articles": 44,
+    "entities": 200,
+    "relationships": 188,
+    "size_mb": 2.08
+  },
+  "eval_scores": {
+    "accuracy": 0.0,
+    "hallucination_rate": 0.0,
+    "citation_quality": 0.0
+  },
+  "source_urls": [
+    "https://developers.llamaindex.ai/python/framework/getting_started/",
+    "https://github.com/run-llama/llama_index"
+  ],
+  "created": "2026-03-03T19:43:24.281640Z",
+  "license": "MIT"
+}

@@ -1,0 +1,22 @@
+{
+  "name": "typescript-expert",
+  "version": "1.0.0",
+  "description": "Expert TypeScript programming knowledge covering TypeScript 5.x type system, generics, decorators, satisfies operator, const assertions, template literal types, conditional types, mapped types, and utility types",
+  "graph_stats": {
+    "articles": 45,
+    "entities": 248,
+    "relationships": 202,
+    "size_mb": 2.08
+  },
+  "eval_scores": {
+    "accuracy": 0.0,
+    "hallucination_rate": 0.0,
+    "citation_quality": 0.0
+  },
+  "source_urls": [
+    "https://www.typescriptlang.org/docs/",
+    "https://devblogs.microsoft.com/typescript/"
+  ],
+  "created": "2026-03-03T20:12:51.898347Z",
+  "license": "MIT"
+}

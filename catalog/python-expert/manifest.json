@@ -1,0 +1,23 @@
+{
+  "name": "python-expert",
+  "version": "1.0.0",
+  "description": "Expert Python programming knowledge covering Python 3.12+ features including structural pattern matching, modern typing (PEP 695), asyncio patterns, dataclasses, packaging with pyproject.toml, and essential standard library modules",
+  "graph_stats": {
+    "articles": 50,
+    "entities": 322,
+    "relationships": 263,
+    "size_mb": 2.08
+  },
+  "eval_scores": {
+    "accuracy": 0.0,
+    "hallucination_rate": 0.0,
+    "citation_quality": 0.0
+  },
+  "source_urls": [
+    "https://docs.python.org/3/",
+    "https://realpython.com/",
+    "https://peps.python.org/"
+  ],
+  "created": "2026-03-03T19:55:56.022281Z",
+  "license": "MIT"
+}

@@ -1,0 +1,22 @@
+{
+  "name": "openai-api-expert",
+  "version": "1.0.0",
+  "description": "Expert knowledge of the OpenAI API covering Chat Completions, Responses API, function calling, structured outputs, embeddings, fine-tuning, and Batch API.",
+  "graph_stats": {
+    "articles": 8,
+    "entities": 35,
+    "relationships": 31,
+    "size_mb": 2.08
+  },
+  "eval_scores": {
+    "accuracy": 0.0,
+    "hallucination_rate": 0.0,
+    "citation_quality": 0.0
+  },
+  "source_urls": [
+    "https://platform.openai.com/docs/api-reference/chat",
+    "https://platform.openai.com/docs/guides/function-calling"
+  ],
+  "created": "2026-03-03T19:44:06.294908Z",
+  "license": "MIT"
+}

@@ -1,0 +1,22 @@
+{
+  "name": "kubernetes-networking",
+  "version": "1.0.0",
+  "description": "Expert knowledge of Kubernetes networking covering CNI plugins, service mesh, ingress controllers, Gateway API, network policies, DNS, EndpointSlices, and topology-aware routing.",
+  "graph_stats": {
+    "articles": 34,
+    "entities": 171,
+    "relationships": 161,
+    "size_mb": 2.08
+  },
+  "eval_scores": {
+    "accuracy": 0.0,
+    "hallucination_rate": 0.0,
+    "citation_quality": 0.0
+  },
+  "source_urls": [
+    "https://kubernetes.io/docs/concepts/services-networking/service/",
+    "https://gateway-api.sigs.k8s.io/"
+  ],
+  "created": "2026-03-03T19:40:21.865198Z",
+  "license": "MIT"
+}

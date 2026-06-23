@@ -1,0 +1,25 @@
+{
+  "name": "dotnet-expert",
+  "version": "1.0.0",
+  "description": "Expert .NET programming knowledge covering C#, ASP.NET Core, Entity Framework, Blazor, async/await, dependency injection, and common .NET patterns from official Microsoft documentation",
+  "graph_stats": {
+    "articles": 204,
+    "entities": 1089,
+    "relationships": 888,
+    "size_mb": 2.08
+  },
+  "eval_scores": {
+    "accuracy": 0.0,
+    "hallucination_rate": 0.0,
+    "citation_quality": 0.0
+  },
+  "source_urls": [
+    "https://learn.microsoft.com/en-us/dotnet/csharp/",
+    "https://learn.microsoft.com/en-us/aspnet/core/",
+    "https://learn.microsoft.com/en-us/ef/core/",
+    "https://learn.microsoft.com/en-us/dotnet/core/",
+    "https://learn.microsoft.com/en-us/dotnet/architecture/"
+  ],
+  "created": "2026-03-03T19:47:21.047036Z",
+  "license": "MIT"
+}

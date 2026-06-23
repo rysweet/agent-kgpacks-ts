@@ -1,0 +1,22 @@
+{
+  "name": "opentelemetry-expert",
+  "version": "1.0.0",
+  "description": "Expert knowledge of OpenTelemetry covering SDK instrumentation, collector pipeline configuration, OTLP protocol, semantic conventions, context propagation, and observability best practices.",
+  "graph_stats": {
+    "articles": 32,
+    "entities": 175,
+    "relationships": 155,
+    "size_mb": 2.08
+  },
+  "eval_scores": {
+    "accuracy": 0.0,
+    "hallucination_rate": 0.0,
+    "citation_quality": 0.0
+  },
+  "source_urls": [
+    "https://opentelemetry.io/docs/what-is-opentelemetry/",
+    "https://opentelemetry.io/docs/collector/"
+  ],
+  "created": "2026-03-03T19:47:49.331915Z",
+  "license": "MIT"
+}

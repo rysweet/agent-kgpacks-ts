@@ -1,0 +1,23 @@
+{
+  "name": "wasm-components",
+  "version": "1.0.0",
+  "description": "Expert knowledge of the WebAssembly Component Model, WASI P2, WIT interface definitions, wit-bindgen, guest/host interfaces, and wasmtime runtime embedding.",
+  "graph_stats": {
+    "articles": 37,
+    "entities": 158,
+    "relationships": 163,
+    "size_mb": 2.08
+  },
+  "eval_scores": {
+    "accuracy": 0.0,
+    "hallucination_rate": 0.0,
+    "citation_quality": 0.0
+  },
+  "source_urls": [
+    "https://component-model.bytecodealliance.org/",
+    "https://docs.wasmtime.dev/examples-wasip2.html",
+    "https://github.com/bytecodealliance/wit-bindgen"
+  ],
+  "created": "2026-03-03T20:17:08.113781Z",
+  "license": "MIT"
+}

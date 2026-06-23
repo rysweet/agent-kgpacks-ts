@@ -1,0 +1,32 @@
+{
+  "name": "opencypher-expert",
+  "version": "1.0.0",
+  "description": "Expert knowledge pack for writing efficient OpenCypher/Kuzu graph queries, covering Cypher syntax, query clauses, pattern matching, path traversal, aggregation, data manipulation, optimization, and graph algorithms",
+  "domain": "graph-databases",
+  "source_type": "web",
+  "graph_stats": {
+    "articles": 66,
+    "entities": 306,
+    "relationships": 262,
+    "size_mb": 2.08
+  },
+  "eval_scores": {
+    "accuracy": 0.0,
+    "hallucination_rate": 0.0,
+    "citation_quality": 0.0
+  },
+  "tags": [
+    "cypher",
+    "ladybugdb",
+    "graph-database",
+    "query-language",
+    "opencypher"
+  ],
+  "source_urls": [
+    "https://docs.ladybugdb.com/cypher/",
+    "https://opencypher.org/",
+    "https://neo4j.com/docs/cypher-manual/current/introduction/"
+  ],
+  "created": "2026-03-03T19:49:53.864260Z",
+  "license": "MIT"
+}

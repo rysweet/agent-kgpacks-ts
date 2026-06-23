@@ -7,12 +7,12 @@
 
 /**
  * Default judge model id, held CONSTANT across both arms. docs/PLAN.md calls for
- * "Claude Opus"; the reference (wikigr) judge model is not vendored in this repo,
- * so this is a documented, overridable placeholder — mirroring `@kgpacks/agent`'s
- * `DEFAULT_SYNTHESIS_MODEL`. It is pinned via the judge transport's
+ * "Claude Opus"; `claude-opus-4.5` is the Opus model served by the authenticated
+ * GitHub Copilot CLI, so it is the concrete pin here (mirroring `@kgpacks/agent`'s
+ * `DEFAULT_SYNTHESIS_MODEL`). It is pinned via the judge transport's
  * `open({ model })`; overriding it is a re-baseline event.
  */
-export const DEFAULT_JUDGE_MODEL = 'claude-opus-4.1';
+export const DEFAULT_JUDGE_MODEL = 'claude-opus-4.5';
 
 /** Default questions-per-pack for stratified sampling. */
 export const DEFAULT_PER_PACK = 3;

@@ -1,0 +1,23 @@
+{
+  "name": "zig-expert",
+  "version": "1.0.0",
+  "description": "Expert Zig programming knowledge covering comptime metaprogramming, error unions, explicit allocators, the build system, safety features, and C interoperability from official documentation and community guides.",
+  "graph_stats": {
+    "articles": 26,
+    "entities": 149,
+    "relationships": 96,
+    "size_mb": 2.08
+  },
+  "eval_scores": {
+    "accuracy": 0.0,
+    "hallucination_rate": 0.0,
+    "citation_quality": 0.0
+  },
+  "source_urls": [
+    "https://ziglang.org/documentation/master/",
+    "https://zig.guide/",
+    "https://ziglang.org/learn/overview/"
+  ],
+  "created": "2026-03-03T20:20:07.686752Z",
+  "license": "MIT"
+}
