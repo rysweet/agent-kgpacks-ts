@@ -70,7 +70,7 @@ candidate list (synthesis excepted), so a disabled stage is a pass-through:
  query ───▶ retrieve() │ vector | hybrid   (CORE — always runs)               │
                        │   │                                                   │
                        │   ▼  enableCypherRag                                  │
-                       │ agent.generateCypher ─▶ validateCypher ─▶ conn.run    │
+                       │ cypherGen(agent) ─▶ validateCypher ─▶ conn.run        │
                        │   │  (merge + dedupe by id into candidate set)        │
                        │   ▼  enableReranker                                   │
                        │ graphRerank  (LINKS_TO neighbour boost, re-sort)      │
@@ -218,7 +218,7 @@ enhancements layer adds the following optional fields to `CreateRetrieverOptions
 
 | Field             | Type               | Default                                | Used by                         |
 | ----------------- | ------------------ | -------------------------------------- | ------------------------------- |
-| `embedder`        | `FewShotEmbedder`  | fresh `BgeEmbedder`                    | vector retrieval **+** few-shot |
+| `embedder`        | `Embedder`         | fresh `BgeEmbedder`                    | vector retrieval **+** few-shot |
 | `agent`           | `QueryAgent`       | _unset_                                | multi-doc synthesis, Cypher-RAG |
 | `crossEncoder`    | `CrossEncoder`     | lazy singleton `createCrossEncoder()`  | cross-encoder stage             |
 | `fewShotExamples` | `FewShotExample[]` | `[]`                                   | few-shot stage                  |
@@ -227,7 +227,7 @@ enhancements layer adds the following optional fields to `CreateRetrieverOptions
 ```ts
 export interface CreateRetrieverOptions {
   // ── CORE (unchanged) ──────────────────────────────────────────────────────
-  embedder?: FewShotEmbedder; // widened from Embedder; BgeEmbedder satisfies both
+  embedder?: Embedder; // CORE type, unchanged; the default BgeEmbedder also satisfies FewShotEmbedder
   nodeTable?: string; // default 'Section'
   vectorIndex?: string; // default 'embedding_idx'
   stopWords?: ReadonlySet<string>;
@@ -254,8 +254,12 @@ export interface CreateRetrieverOptions {
 
 > **Fail-closed on missing resources.** Enabling a stage without its resource
 > throws a `QueryError` at call time — e.g. `enableMultidoc: true` with no `agent`
-> throws `QueryError('multi-doc synthesis requires an agent')`. The flag is never
-> silently ignored.
+> throws `QueryError('multi-doc synthesis requires an agent')`, and
+> `enableFewshot: true` with a query-only embedder lacking `generate` throws
+> `QueryError('few-shot selection requires a document embedder')`. The flag is
+> never silently ignored. (The default `BgeEmbedder` provides `generate`, so
+> few-shot works out of the box; the throw only guards an injected, query-only
+> `Embedder`.)
 
 ### `RetrieveOptions` — the five enable flags
 
@@ -376,6 +380,14 @@ Spike D** configuration: `Xenova/ms-marco-MiniLM-L-12-v2` loaded with
 against the Python `cross-encoder/ms-marco-MiniLM-L-12-v2` at **max |diff| =
 0.0000** with identical ranking — so this stage is **exact parity**, not merely
 structural.
+
+> **Package placement.** `docs/PLAN.md` (Default Stack) nominally lists the
+> cross-encoder under `@kgpacks/embeddings`. This slice keeps it in
+> `@kgpacks/query` (`cross-encoder.ts`) because it is a query-time re-ranking
+> concern and the work is scoped to `packages/query/`; it reuses the
+> `@huggingface/transformers` runtime already pulled in transitively by
+> `@kgpacks/embeddings`. If a future slice consolidates model loaders, this is the
+> natural seam to move — the public `CrossEncoder` contract stays the same.
 
 ```ts
 export interface CrossEncoder {
@@ -500,11 +512,24 @@ When wired into the pipeline (`enableCypherRag: true`), the merged set flows int
 the reranker/cross-encoder stages. On validation failure the stage **throws** —
 the retriever does not silently fall back, matching the mandatory safety gate.
 
+> **Agent adapter.** A `CopilotAgent` has **no** `generateCypher` method (see
+> [`@kgpacks/agent`](../../../docs/packages/agent.md), whose operations are
+> synthesis, query-expansion, multi-query, and seed-article ID). When
+> `enableCypherRag` is set on the retriever, it adapts the configured `agent` with
+> [`cypherGeneratorFromAgent`](#structural-contracts) automatically. The
+> lower-level `cypherRagRetrieve` takes a `CypherGenerator` directly, so callers
+> wrap the agent themselves, as below.
+
 ```ts
-import { cypherRagRetrieve, CypherValidationError } from '@kgpacks/query';
+import { cypherRagRetrieve, cypherGeneratorFromAgent, CypherValidationError } from '@kgpacks/query';
 
 try {
-  const rows = await cypherRagRetrieve(conn, agent, 'articles linking to "HNSW"', { k: 10 });
+  const rows = await cypherRagRetrieve(
+    conn,
+    cypherGeneratorFromAgent(agent),
+    'articles linking to "HNSW"',
+    { k: 10 },
+  );
 } catch (err) {
   if (err instanceof CypherValidationError) {
     // The agent proposed a non-read-only query — rejected by design.
@@ -545,11 +570,12 @@ The enhancements layer depends on **minimal structural interfaces**, not concret
 classes, so every stage is injectable and testable offline.
 
 ```ts
-/** Document-and-query embedder. `BgeEmbedder` satisfies it. Widens the CORE
- *  `Embedder` (query-only) with `generate` for embedding example texts. */
-export interface FewShotEmbedder {
+/** Document-and-query embedder. `BgeEmbedder` satisfies it. Extends the CORE
+ *  `Embedder` (query-only) with `generate` for embedding example texts. The
+ *  retriever is *constructed* with the CORE `Embedder`; few-shot additionally
+ *  requires this richer shape and fails closed otherwise. */
+export interface FewShotEmbedder extends Embedder {
   generate(texts: string[]): Promise<Float32Array[]>;
-  generateQuery(queries: string[]): Promise<Float32Array[]>;
 }
 
 /** Synthesis capability — satisfied directly by `CopilotAgent`. */

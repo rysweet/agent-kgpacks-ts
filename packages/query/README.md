@@ -19,7 +19,7 @@ see [docs/enhancements.md](docs/enhancements.md). Ported from the upstream
 import { Database } from '@kgpacks/db';
 import { createRetriever } from '@kgpacks/query';
 
-const db = new Database('pack.kuzu');
+const db = new Database('pack.lbug');
 const conn = db.connect();
 await conn.loadExtension('vector');
 
