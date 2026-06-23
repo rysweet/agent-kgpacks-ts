@@ -1,7 +1,79 @@
-// @kgpacks/embeddings — Phase 0 placeholder entry point.
+// @kgpacks/embeddings — local, in-process BGE text embeddings.
 //
-// Intentionally minimal: this package is a buildable skeleton. Real exports are
-// added in a later phase (see docs/PLAN.md). The constant below gives the module
-// a stable, typed export so it compiles under the strict shared tsconfig.
+// Wraps Transformers.js (@huggingface/transformers, ONNX Runtime) with the
+// validated Spike B configuration so TS query/document vectors reproduce the
+// reference sentence-transformers BAAI/bge-base-en-v1.5 vectors closely enough to
+// clear the retrieval-parity gate (cosine >= 0.999). See docs/PLAN.md and the
+// package README for the full contract.
 
-export const PACKAGE_NAME = '@kgpacks/embeddings';
+import { pipeline, type FeatureExtractionPipeline } from '@huggingface/transformers';
+
+// Validated Spike B configuration (cosine = 1.000000 vs the reference oracle).
+// These are locked constants — there is intentionally nothing to configure.
+const MODEL_ID = 'Xenova/bge-base-en-v1.5';
+const DIM = 768;
+const QUERY_PREFIX = 'Represent this sentence for searching relevant passages: ';
+
+// Memoized pipeline construction promise, shared across every BgeEmbedder
+// instance and both methods so the ONNX model is downloaded and loaded exactly
+// once per process. Constructed lazily on first embed call.
+let pipelinePromise: Promise<FeatureExtractionPipeline> | null = null;
+
+function getPipeline(): Promise<FeatureExtractionPipeline> {
+  pipelinePromise ??= pipeline('feature-extraction', MODEL_ID);
+  return pipelinePromise;
+}
+
+// Encodes the whole batch in a single pipeline call, then slices the flat
+// [n * DIM] output tensor into n order-preserving 768-dim Float32Array rows.
+async function embed(texts: string[]): Promise<Float32Array[]> {
+  if (texts.length === 0) {
+    return [];
+  }
+  const extractor = await getPipeline();
+  const output = await extractor(texts, { pooling: 'cls', normalize: true });
+  const flat = output.data as Float32Array;
+  const vectors: Float32Array[] = [];
+  for (let i = 0; i < texts.length; i++) {
+    vectors.push(flat.slice(i * DIM, i * DIM + DIM));
+  }
+  return vectors;
+}
+
+/**
+ * Local BGE text embedder (Transformers.js / ONNX), validated Spike B config:
+ * `Xenova/bge-base-en-v1.5`, `pooling: 'cls'`, L2-normalized, 768-dimensional.
+ *
+ * BGE is an asymmetric retrieval model: documents are embedded raw while queries
+ * are embedded with an instruction prefix. The two-method API makes the correct
+ * usage the only easy usage — embed documents with {@link BgeEmbedder.generate}
+ * and queries with {@link BgeEmbedder.generateQuery}.
+ *
+ * Constructing one is cheap and loads nothing; the underlying pipeline is created
+ * lazily on first use and shared across all instances (load-once per process).
+ */
+export class BgeEmbedder {
+  /**
+   * Embeds documents / passages. Texts are encoded verbatim — no prefix.
+   *
+   * Returns one L2-normalized 768-dim `Float32Array` per input, in input order.
+   * An empty input array resolves to `[]` without loading the model.
+   */
+  async generate(texts: string[]): Promise<Float32Array[]> {
+    return embed(texts);
+  }
+
+  /**
+   * Embeds search queries. Each query is internally prefixed with the BGE query
+   * instruction before encoding; the prefix is never applied to documents.
+   *
+   * Returns one L2-normalized 768-dim `Float32Array` per input, in input order.
+   * An empty input array resolves to `[]` without loading the model.
+   */
+  async generateQuery(queries: string[]): Promise<Float32Array[]> {
+    if (queries.length === 0) {
+      return [];
+    }
+    return embed(queries.map((query) => QUERY_PREFIX + query));
+  }
+}
