@@ -43,10 +43,13 @@ the Python `_track_response`. The SDK changes _transport only_: per
 > **API stability caveat.** The SDK method/event names below
 > (`CopilotClient.createSession`, `CopilotSession.sendAndWait`,
 > `assistant.message` / `assistant.usage` events) are **verified against
-> `@github/copilot-sdk@1.0.3`** at design time. The `CopilotAgent` surface is the
-> _intended_ Phase 1 contract; the prompt strings and the exact mapping of SDK
-> events to `Usage` fields are confirmed empirically during implementation and
-> back-filled here if the runtime differs.
+> `@github/copilot-sdk@1.0.3`** at design time. BYOK uses the stable singular
+> `provider` (`SessionConfig.provider`); the plural `providers`/`models`
+> multi-provider surface is flagged `@experimental` upstream and is used only as
+> an optional override. The `CopilotAgent` surface is the _intended_ Phase 1
+> contract; the prompt strings and the exact mapping of SDK events to `Usage`
+> fields are confirmed empirically during implementation and back-filled here if
+> the runtime differs.
 
 ## Installation
 
@@ -76,7 +79,7 @@ pnpm --filter @kgpacks/agent test   # offline — transport is mocked
 ```ts
 import { CopilotAgent } from '@kgpacks/agent';
 
-// BYOK the pinned synthesis model (default). Construct → start → use → stop.
+// BYOK provider + pinned model resolved from env. Construct → start → use → stop.
 const agent = new CopilotAgent();
 await agent.start();
 
@@ -128,12 +131,13 @@ closed** (see [Error handling](#error-handling)).
 Constructs an agent. Cheap and side-effect-free: it creates **no** SDK client and
 opens **no** session until [`start()`](#agentstart-promisevoid) is called.
 
-| Field       | Type                    | Default                    | Description                                                                                                              |
-| ----------- | ----------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `model`     | `string`                | `DEFAULT_SYNTHESIS_MODEL`  | BYOK model id used for **all** operations, held constant per run. Overriding it is a re-baseline event (see Versioning). |
-| `transport` | `Transport`             | `createCopilotTransport()` | The injectable transport seam. Tests pass a mock so the suite runs **fully offline**.                                    |
-| `providers` | `NamedProviderConfig[]` | _unset_                    | Optional BYOK provider routing passed through to `createSession({ providers })`.                                         |
-| `timeoutMs` | `number`                | _SDK default_              | Default per-request timeout forwarded to `sendAndWait`. Overridable per call.                                            |
+| Field       | Type                    | Default                    | Description                                                                                                                                                                         |
+| ----------- | ----------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `model`     | `string`                | `DEFAULT_SYNTHESIS_MODEL`  | BYOK model id used for **all** operations, held constant per run. Overriding it is a re-baseline event (see Versioning).                                                            |
+| `transport` | `Transport`             | `createCopilotTransport()` | The injectable transport seam. Tests pass a mock so the suite runs **fully offline**.                                                                                               |
+| `provider`  | `ProviderConfig`        | _unset_                    | BYOK provider (endpoint + `apiKey`/`bearerToken`) for the held-constant model. Makes the session **fully BYOK** (bypasses Copilot API auth); maps to `createSession({ provider })`. |
+| `providers` | `NamedProviderConfig[]` | _unset_                    | **Experimental** SDK multi-provider BYOK (`createSession({ providers })`) — additive and may change/be removed upstream. Mutually exclusive with `provider`.                        |
+| `timeoutMs` | `number`                | _SDK default_              | Default per-request timeout forwarded to `sendAndWait`. Overridable per call.                                                                                                       |
 
 #### `agent.start(): Promise<void>`
 
@@ -157,7 +161,7 @@ Synthesizes a grounded, citation-bearing answer from retrieved context.
 | --------- | ------------------ | ------------------------------------------ |
 | `request` | `SynthesisRequest` | Question + retrieved context (see schema). |
 
-Returns a [`SynthesisResult`](#synthesisresult). Throws
+Returns a [`SynthesisResult`](#request--response-schemas). Throws
 [`AgentResponseFormatError`](#error-handling) if the model returns empty or absent
 (`undefined`) content. `metadata.citedIds` is derived by the agent layer by
 matching the supplied `ContextChunk.id`s against the answer text (it is **not** the
@@ -296,8 +300,12 @@ export interface TransportResponse {
 
 /** The injectable boundary. The real adapter wraps CopilotClient. */
 export interface Transport {
-  /** Opens a session pinned to a model/providers (CopilotClient.createSession). */
-  open(config: { model: string; providers?: NamedProviderConfig[] }): Promise<TransportSession>;
+  /** Opens a tool-less session pinned to a model/provider (CopilotClient.createSession). */
+  open(config: {
+    model: string;
+    provider?: ProviderConfig;
+    providers?: NamedProviderConfig[];
+  }): Promise<TransportSession>;
   /** Stops the underlying client (CopilotClient.stop). */
   shutdown(): Promise<void>;
 }
@@ -308,14 +316,14 @@ export function createCopilotTransport(options?: CopilotTransportOptions): Trans
 
 **Adapter mapping (verified against `@github/copilot-sdk@1.0.3`):**
 
-| Transport concept               | SDK call                                                                                                   |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `Transport.open({model})`       | `new CopilotClient()` → `client.start()` → `client.createSession({ model, providers })`                    |
-| `TransportSession.send(prompt)` | `session.sendAndWait(prompt, timeout)` → `AssistantMessageEvent`                                           |
-| response `content`              | `event.data.content` (`assistant.message`)                                                                 |
-| response `usage`                | `event.data.outputTokens` + the `assistant.usage` event (`inputTokens`, `outputTokens`, `reasoningTokens`) |
-| `TransportSession.close()`      | `session.disconnect()`                                                                                     |
-| `Transport.shutdown()`          | `client.stop()` (surfaces non-empty `Error[]`)                                                             |
+| Transport concept                   | SDK call                                                                                                                    |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `Transport.open({model, provider})` | `new CopilotClient({ mode: 'empty' })` → `client.start()` → `client.createSession({ model, provider, availableTools: [] })` |
+| `TransportSession.send(prompt)`     | `session.sendAndWait(prompt, timeout)` → `AssistantMessageEvent`                                                            |
+| response `content`                  | `event.data.content` (`assistant.message`)                                                                                  |
+| response `usage`                    | `event.data.outputTokens` + the `assistant.usage` event (`inputTokens`, `outputTokens`, `reasoningTokens`)                  |
+| `TransportSession.close()`          | `session.disconnect()`                                                                                                      |
+| `Transport.shutdown()`              | `client.stop()` (surfaces non-empty `Error[]`)                                                                              |
 
 > **Usage requires event subscription.** `sendAndWait` resolves with only the
 > `assistant.message` event (and may resolve `undefined`). The adapter subscribes
@@ -380,17 +388,20 @@ out in [docs/PLAN.md](../PLAN.md) ("explicit budget/quota check before batch run
 The agent processes **untrusted retrieved context** (poisonable `ContextChunk.text`)
 and talks to a BYOK provider, so the contract is fail-closed and hardened:
 
-- **Tool-less runtime (primary cross-prompt-injection defense).** The Copilot
-  session runs with **fs/shell/network/tools disabled** — pure completion only.
-  Poisoned context can influence wording but **cannot trigger actions or
-  exfiltration**. Prompts delimit context as **data, not instructions**, and
-  instruct the model to ignore embedded instructions and never disclose the
-  prompt or credentials.
-- **BYOK key hygiene.** Keys/tokens are sourced **only** from env/secret store via
-  providers — never hard-coded, defaulted, or committed (no keys in `constants.ts`
-  or tests). They are never logged, never placed in `Usage`, and never attached to
-  an error: `AgentTransportError.cause` is **redacted** of provider config, API
-  keys, and tokens before it is surfaced.
+- **Tool-less runtime (primary cross-prompt-injection defense).** The client is
+  created with `mode: 'empty'` and every session pins **`availableTools: []`**
+  (empty allow-list) plus `skipCustomInstructions: true`, so the Copilot session
+  has **no fs/shell/network/MCP tools** — pure completion only. Poisoned context
+  can influence wording but **cannot trigger actions or exfiltration**. The
+  synthesis prompt is supplied via `systemMessage` (`mode: 'replace'`) and
+  delimits context as **data, not instructions**, telling the model to ignore
+  embedded instructions and never disclose the prompt or credentials.
+- **BYOK key hygiene.** The `ProviderConfig.apiKey` / `bearerToken` / `headers`
+  are sourced **only** from env/secret store — never hard-coded, defaulted, or
+  committed (no keys in `constants.ts` or tests). They are never logged, never
+  placed in `Usage`, and never attached to an error: `AgentTransportError.cause`
+  is **redacted** of the provider config (`apiKey`, `bearerToken`, `headers`)
+  before it is surfaced.
 - **Output is untrusted.** Returned `answer`/arrays are raw model output. Downstream
   consumers (`@kgpacks/query`, `@kgpacks/eval`) **must escape/validate** them to
   prevent XSS and Cypher/SQL/command injection. The agent guarantees only shape.

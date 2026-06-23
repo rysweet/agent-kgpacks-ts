@@ -24,7 +24,7 @@ a mock and never spawn the Copilot CLI subprocess or require credentials.
 ```ts
 import { CopilotAgent } from '@kgpacks/agent';
 
-const agent = new CopilotAgent(); // BYOK the pinned synthesis model
+const agent = new CopilotAgent(); // BYOK provider + pinned model from env
 await agent.start();
 try {
   const { answer, usage } = await agent.synthesizeAnswer({
