@@ -1,7 +1,38 @@
-// @kgpacks/agent — Phase 0 placeholder entry point.
+// @kgpacks/agent — public entry point.
 //
-// Intentionally minimal: this package is a buildable skeleton. Real exports are
-// added in a later phase (see docs/PLAN.md). The constant below gives the module
-// a stable, typed export so it compiles under the strict shared tsconfig.
+// The LLM layer of the port: a strict-ESM wrapper around the GitHub Copilot SDK
+// (@github/copilot-sdk) exposing answer synthesis, query expansion, multi-query
+// generation, and seed-article identification, plus usage accounting. The SDK
+// changes transport only — the model is held constant via BYOK.
 
-export const PACKAGE_NAME = '@kgpacks/agent';
+export { CopilotAgent } from './copilot-agent.js';
+export { createCopilotTransport } from './transport.js';
+export { DEFAULT_SYNTHESIS_MODEL } from './constants.js';
+export {
+  AgentError,
+  AgentNotStartedError,
+  AgentResponseFormatError,
+  AgentTransportError,
+} from './errors.js';
+export { safeParseJson, stripMarkdownFences } from './json.js';
+export { UsageTracker } from './usage.js';
+
+export type {
+  ContextChunk,
+  CopilotAgentOptions,
+  CopilotTransportOptions,
+  ExpandQueryOptions,
+  MultiQueryOptions,
+  NamedProviderConfig,
+  ProviderConfig,
+  SeedArticleRequest,
+  SynthesisMetadata,
+  SynthesisRequest,
+  SynthesisResult,
+  Transport,
+  TransportOpenConfig,
+  TransportResponse,
+  TransportSession,
+  Usage,
+  UsageSnapshot,
+} from './types.js';

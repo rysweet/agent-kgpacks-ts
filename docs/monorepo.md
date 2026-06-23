@@ -60,8 +60,10 @@ pnpm install             # installs all workspace dependencies (frozen in CI)
 ├── docs/
 │   ├── PLAN.md                 # end-to-end port plan
 │   ├── monorepo.md             # this document
-│   ├── packages/db.md          # @kgpacks/db API + Spike A tutorial
-│   └── packages/packs.md       # @kgpacks/packs API + installer/security model
+│   └── packages/
+│       ├── db.md               # @kgpacks/db API + Spike A tutorial
+│       ├── agent.md            # @kgpacks/agent Copilot SDK API contract
+│       └── packs.md            # @kgpacks/packs API + installer/security model
 └── packages/
     ├── db/                     # @kgpacks/db   — LadybugDB wrapper (+ Spike A)
     ├── embeddings/             # @kgpacks/embeddings
@@ -335,6 +337,9 @@ Phase 0 packages are deliberately uniform, so adding one is mechanical:
   methodology, acceptance criteria).
 - [docs/packages/db.md](./packages/db.md) — `@kgpacks/db` API reference and the
   Spike A vector smoke-test tutorial.
+- [docs/packages/agent.md](./packages/agent.md) — `@kgpacks/agent` Copilot SDK
+  LLM-layer API contract (synthesis, query expansion, multi-query, seed-article
+  identification, usage accounting).
 - [docs/packages/packs.md](./packages/packs.md) — `@kgpacks/packs` API reference
   (manifest, versioning, installer, registry) and the archive-extraction security
   model.

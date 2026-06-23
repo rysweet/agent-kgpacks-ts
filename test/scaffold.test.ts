@@ -155,9 +155,18 @@ describe('scaffold — third-party runtime dependency pins', () => {
     expect(external).toEqual(['@huggingface/transformers']);
   });
 
-  it('no package other than db and embeddings carries a third-party runtime dependency', () => {
+  it('@kgpacks/agent carries @github/copilot-sdk as its only third-party runtime dependency', () => {
+    const p = readJson('packages/agent/package.json');
+    const deps = (p.dependencies ?? {}) as Record<string, string>;
+    expect(deps['@github/copilot-sdk']).toBeDefined();
+    expect(deps['@github/copilot-sdk']).toBe('1.0.3');
+    const external = Object.keys(deps).filter((d) => !d.startsWith('@kgpacks/'));
+    expect(external).toEqual(['@github/copilot-sdk']);
+  });
+
+  it('no package other than db, embeddings and agent carries a third-party runtime dependency', () => {
     for (const name of PACKAGES) {
-      if (name === 'db' || name === 'embeddings') continue;
+      if (name === 'db' || name === 'embeddings' || name === 'agent') continue;
       const p = readJson(`packages/${name}/package.json`);
       const deps = (p.dependencies ?? {}) as Record<string, string>;
       const external = Object.keys(deps).filter((d) => !d.startsWith('@kgpacks/'));
