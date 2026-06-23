@@ -1,13 +1,17 @@
 # @kgpacks/query
 
-CORE retrieval pipeline for the agent-kgpacks TypeScript port (Phase 1): vector
-search, hybrid (vector + graph + keyword) retrieval, and read-only Cypher safety
-validation. Ported from the Python `wikigr/agent` read path
+Retrieval pipeline for the agent-kgpacks TypeScript port (Phase 1). The **CORE**
+slice — vector search, hybrid (vector + graph + keyword) retrieval, and read-only
+Cypher safety validation — is documented below. The **ENHANCEMENTS** slice —
+graph reranker, cross-encoder reranking, multi-document synthesis, few-shot
+selection, and Cypher-RAG — builds on top of CORE as five optional, opt-in stages;
+see [docs/enhancements.md](docs/enhancements.md). Ported from the upstream
+`wikigr/agent` read path
 ([rysweet/agent-kgpacks](https://github.com/rysweet/agent-kgpacks)).
 
-> Reranker, multi-document synthesis, few-shot prompting, cross-encoder
-> reranking, and Cypher-RAG are a later slice (query-enhancements) and are not
-> implemented here. See [docs/PLAN.md](../../docs/PLAN.md).
+> The enhancements stages are **off by default**: with no `enable*` flags set,
+> `retrieve()` is byte-for-byte identical to the CORE pipeline described here. See
+> [docs/enhancements.md](docs/enhancements.md) and [docs/PLAN.md](../../docs/PLAN.md).
 
 ## Usage
 
@@ -15,7 +19,7 @@ validation. Ported from the Python `wikigr/agent` read path
 import { Database } from '@kgpacks/db';
 import { createRetriever } from '@kgpacks/query';
 
-const db = new Database('pack.kuzu');
+const db = new Database('pack.lbug');
 const conn = db.connect();
 await conn.loadExtension('vector');
 
@@ -44,6 +48,51 @@ Retrieval expects a node table (default `Section`) with `id`, `content`, and
 (default `embedding_idx`), and `LINKS_TO` edges between nodes for the graph
 signal. Override the table/index names via `createRetriever(conn, { nodeTable,
 vectorIndex })`.
+
+## Enhancements (optional stages)
+
+Five opt-in stages re-rank, augment, and synthesize over the CORE results. They
+are **off by default** — supply per-query `enable*` flags to turn them on — and
+share heavyweight resources (BGE embedder, cross-encoder, agent) constructed once
+on the retriever:
+
+```ts
+import { CopilotAgent } from '@kgpacks/agent';
+import { createRetriever } from '@kgpacks/query';
+
+const agent = new CopilotAgent();
+await agent.start();
+
+const retriever = createRetriever(conn, { agent, fewShotExamples });
+
+// Re-rank candidates (graph proximity + ms-marco cross-encoder).
+const reranked = await retriever.retrieve('quantum entanglement', {
+  k: 5,
+  enableReranker: true,
+  enableCrossEncoder: true,
+});
+
+// Full pipeline + a synthesized, cited answer.
+const { results, synthesis } = await retriever.retrieveAndSynthesize('how does HNSW search work?', {
+  enableCypherRag: true,
+  enableReranker: true,
+  enableCrossEncoder: true,
+  enableFewshot: true,
+  enableMultidoc: true,
+});
+```
+
+| Flag                 | Stage                                                                 |
+| -------------------- | --------------------------------------------------------------------- |
+| `enableCypherRag`    | Agent-generated Cypher → `validateCypher` (fail-closed) → merge rows. |
+| `enableReranker`     | Deterministic `LINKS_TO` graph-proximity re-rank.                     |
+| `enableCrossEncoder` | `Xenova/ms-marco-MiniLM-L-12-v2` (fp32) relevance re-score (Spike D). |
+| `enableFewshot`      | Top-`n` BGE-cosine exemplar selection for the synthesis prompt.       |
+| `enableMultidoc`     | Multi-document answer synthesis via `@kgpacks/agent`.                 |
+
+With all flags unset, `retrieve()` is identical to the CORE pipeline. Full
+contract, API reference, configuration, parity gate, and examples:
+**[docs/enhancements.md](docs/enhancements.md)**.
 
 ## Cypher safety
 
