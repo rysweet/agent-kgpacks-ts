@@ -9,8 +9,18 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "build": "tsc -b tsconfig.json",
+    "typecheck": "tsc -b tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10",
+    "@fastify/rate-limit": "^10",
+    "@kgpacks/agent": "workspace:*",
+    "@kgpacks/db": "workspace:*",
+    "@kgpacks/embeddings": "workspace:*",
+    "@kgpacks/query": "workspace:*",
+    "fastify": "^5",
+    "ipaddr.js": "^2"
   }
 }

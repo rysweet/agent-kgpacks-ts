@@ -164,6 +164,17 @@ describe('scaffold — third-party runtime dependency pins', () => {
     expect(external).toEqual(['@github/copilot-sdk']);
   });
 
+  it('@kgpacks/backend carries the Fastify HTTP stack as its third-party runtime dependencies', () => {
+    const p = readJson('packages/backend/package.json');
+    const deps = (p.dependencies ?? {}) as Record<string, string>;
+    const external = Object.keys(deps)
+      .filter((d) => !d.startsWith('@kgpacks/'))
+      .sort();
+    expect(external).toEqual(
+      ['@fastify/cors', '@fastify/rate-limit', 'fastify', 'ipaddr.js'].sort(),
+    );
+  });
+
   it('@kgpacks/query carries @huggingface/transformers (cross-encoder reranker) as its only third-party runtime dependency', () => {
     const p = readJson('packages/query/package.json');
     const deps = (p.dependencies ?? {}) as Record<string, string>;
@@ -184,8 +195,8 @@ describe('scaffold — third-party runtime dependency pins', () => {
     expect(external.sort()).toEqual(['@modelcontextprotocol/sdk', 'zod']);
   });
 
-  it('no package other than db, embeddings, agent, mcp and query carries a third-party runtime dependency', () => {
-    const allowed = new Set(['db', 'embeddings', 'agent', 'mcp', 'query']);
+  it('no package other than db, embeddings, agent, mcp, query and backend carries a third-party runtime dependency', () => {
+    const allowed = new Set(['db', 'embeddings', 'agent', 'mcp', 'query', 'backend']);
     for (const name of PACKAGES) {
       if (allowed.has(name)) continue;
       const p = readJson(`packages/${name}/package.json`);
