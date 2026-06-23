@@ -1,0 +1,18 @@
+# Real-mode dependencies for the agent-kgpacks Python parity oracle.
+#
+# IMPORTANT: the committed stub exporter (export_fixtures.py) runs on the Python
+# standard library ALONE. You do NOT need to install anything to regenerate the
+# sample fixture. These pins describe the REAL oracle environment used when the
+# `_stage_*` stubs are wired to the upstream Python agent-kgpacks modules.
+#
+# This is a development-only file and is intentionally OUTSIDE every runtime
+# package's dependency graph (packages/*); shipped TypeScript code never installs
+# or invokes it.
+#
+# Install (real mode only):
+#   python3 -m venv .venv && . .venv/bin/activate
+#   pip install -r parity/oracle/requirements.txt
+sentence-transformers==3.3.1
+torch==2.5.1
+transformers==4.46.3
+numpy==2.1.3

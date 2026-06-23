@@ -65,6 +65,8 @@ importers:
 
   packages/query: {}
 
+  parity/diff: {}
+
 packages:
 
   '@ampproject/remapping@2.3.0':
