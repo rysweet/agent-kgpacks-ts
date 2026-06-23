@@ -64,7 +64,8 @@ pnpm install             # installs all workspace dependencies (frozen in CI)
 │       ├── db.md               # @kgpacks/db API + Spike A tutorial
 │       ├── agent.md            # @kgpacks/agent Copilot SDK API contract
 │       ├── packs.md            # @kgpacks/packs API + installer/security model
-│       └── mcp.md              # @kgpacks/mcp stdio server + external contract
+│       ├── mcp.md              # @kgpacks/mcp stdio server + external contract
+│       └── eval.md             # @kgpacks/eval runner + judge + baselines
 └── packages/
     ├── db/                     # @kgpacks/db   — LadybugDB wrapper (+ Spike A)
     ├── embeddings/             # @kgpacks/embeddings
@@ -350,3 +351,7 @@ Phase 0 packages are deliberately uniform, so adding one is mechanical:
 - [docs/packages/backend.md](./packages/backend.md) — `@kgpacks/backend` HTTP API
   reference: the `/api/v1` route contract, the chat SSE protocol, configuration,
   rate limiting, and the per-request connection lifecycle.
+- [docs/packages/eval.md](./packages/eval.md) — `@kgpacks/eval` evaluation layer:
+  the `runEval` runner, the with-pack/training-only baseline arms, the pinned LLM
+  judge, skill evaluators, the deterministic stratified sampler, and the metric
+  definitions.

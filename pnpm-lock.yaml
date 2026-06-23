@@ -99,7 +99,17 @@ importers:
         specifier: ^3.8.1
         version: 3.8.1
 
-  packages/eval: {}
+  packages/eval:
+    dependencies:
+      '@kgpacks/agent':
+        specifier: workspace:*
+        version: link:../agent
+      '@kgpacks/packs':
+        specifier: workspace:*
+        version: link:../packs
+      '@kgpacks/query':
+        specifier: workspace:*
+        version: link:../query
 
   packages/mcp:
     dependencies:

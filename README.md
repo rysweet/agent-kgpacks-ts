@@ -45,6 +45,10 @@ Requires **Node 22 LTS or newer**. No C/C++ toolchain needed —
 - [docs/packages/parity.md](docs/packages/parity.md) — the dev-time
   `@kgpacks/parity` harness: golden-fixture schema, stage comparison contract,
   TypeScript API, the Python oracle, and regeneration tutorials.
+- [docs/packages/eval.md](docs/packages/eval.md) — the `@kgpacks/eval` evaluation
+  layer: the `runEval` runner, with-pack/training-only baselines, the pinned LLM
+  judge, skill evaluators, deterministic stratified sampling, and metric
+  definitions.
 - [docs/PLAN.md](docs/PLAN.md) — the end-to-end TypeScript port plan.
 
 ## License
