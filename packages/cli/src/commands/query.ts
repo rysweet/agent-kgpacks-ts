@@ -9,7 +9,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { RetrieveMode } from '@kgpacks/query';
-import { Command, InvalidArgumentError, Option } from 'commander';
+import { Command, Option } from 'commander';
 
 import { DB_FILENAME, DEFAULT_K, DEFAULT_MODE, RETRIEVE_MODES } from '../constants.js';
 import type { CliContext } from '../context.js';
@@ -17,14 +17,7 @@ import { CliError } from '../errors.js';
 import { EXIT_QUERY } from '../exit-codes.js';
 import { printJson } from '../io.js';
 import { resolveExistingPackDir } from '../pack-dir.js';
-
-function parsePositiveInt(value: string): number {
-  const n = Number(value);
-  if (!Number.isInteger(n) || n < 1) {
-    throw new InvalidArgumentError('must be a positive integer');
-  }
-  return n;
-}
+import { parsePositiveInt } from '../parse.js';
 
 /** Registers the `query` command on `parent`. */
 export function registerQuery(parent: Command, ctx: CliContext): void {

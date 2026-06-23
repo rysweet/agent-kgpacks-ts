@@ -17,7 +17,10 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@kgpacks/agent": "workspace:*",
     "@kgpacks/db": "workspace:*",
+    "@kgpacks/eval": "workspace:*",
+    "@kgpacks/ingestion": "workspace:*",
     "@kgpacks/packs": "workspace:*",
     "@kgpacks/query": "workspace:*",
     "commander": "^12.1.0"

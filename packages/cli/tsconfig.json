@@ -5,6 +5,13 @@
     "outDir": "dist",
     "rootDir": "src"
   },
-  "references": [{ "path": "../db" }, { "path": "../packs" }, { "path": "../query" }],
+  "references": [
+    { "path": "../agent" },
+    { "path": "../db" },
+    { "path": "../eval" },
+    { "path": "../ingestion" },
+    { "path": "../packs" },
+    { "path": "../query" }
+  ],
   "include": ["src"]
 }

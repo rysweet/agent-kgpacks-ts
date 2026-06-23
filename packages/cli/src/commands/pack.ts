@@ -23,6 +23,8 @@ import { CliError } from '../errors.js';
 import { EXIT_PACK_NOT_FOUND } from '../exit-codes.js';
 import { printJson } from '../io.js';
 import { resolveExistingPackDir } from '../pack-dir.js';
+import { registerCreate, registerUpdate } from './build.js';
+import { registerEval } from './eval.js';
 
 /** Registers the `pack` command group on `parent`. */
 export function registerPack(parent: Command, ctx: CliContext): void {
@@ -88,6 +90,13 @@ export function registerPack(parent: Command, ctx: CliContext): void {
       removePack(packsDirOf(command), name);
       printJson(ctx.io, { removed: name });
     });
+
+  // INGESTION verbs, mounted under the `pack` group as well as top-level. The
+  // shared factories give `pack create` / `pack update` identical behaviour to
+  // `create` / `update`; `eval` lives only under the group.
+  registerCreate(pack, ctx);
+  registerEval(pack, ctx);
+  registerUpdate(pack, ctx);
 
   // `pack` with no subcommand → print usage to stderr and exit 2.
   pack.action((_opts: unknown, command: Command) => {
