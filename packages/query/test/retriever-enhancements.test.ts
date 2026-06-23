@@ -288,3 +288,37 @@ describe('retrieveAndSynthesize — full pipeline', () => {
     );
   });
 });
+
+// ── VECTOR/FTS extension loading (read-path regression) ───────────────────────
+// A fresh read connection must LOAD the VECTOR (and, for hybrid, FTS) extension
+// before QUERY_VECTOR_INDEX / FTS calls resolve. The build path loads them at
+// write time; previously the read path did not, so querying a pack from a fresh
+// connection failed with "function QUERY_VECTOR_INDEX is not defined".
+describe('retrieve — VECTOR/FTS extension loading', () => {
+  const responder: Responder = (cypher) =>
+    cypher.includes('QUERY_VECTOR_INDEX') ? [{ id: 1, content: 'aaa', distance: 0.1 }] : [];
+
+  it('loads the VECTOR extension before vector retrieval (and not FTS)', async () => {
+    const conn = new RecordingConnection(responder);
+    const retriever = createRetriever(conn.asConnection(), { embedder: queryEmbedder() });
+    await retriever.retrieve('q');
+    expect(conn.loadedExtensions).toContain('vector');
+    expect(conn.loadedExtensions).not.toContain('fts');
+  });
+
+  it('also loads the FTS extension for hybrid retrieval', async () => {
+    const conn = new RecordingConnection(responder);
+    const retriever = createRetriever(conn.asConnection(), { embedder: queryEmbedder() });
+    await retriever.retrieve('q', { mode: 'hybrid' });
+    expect(conn.loadedExtensions).toContain('vector');
+    expect(conn.loadedExtensions).toContain('fts');
+  });
+
+  it('loads each extension at most once across multiple retrievals', async () => {
+    const conn = new RecordingConnection(responder);
+    const retriever = createRetriever(conn.asConnection(), { embedder: queryEmbedder() });
+    await retriever.retrieve('q');
+    await retriever.retrieve('q2');
+    expect(conn.loadedExtensions.filter((e) => e === 'vector')).toHaveLength(1);
+  });
+});
