@@ -197,28 +197,28 @@ at every stage, plus a **provenance** stamp that makes a stale fixture obvious.
 
 ### Field reference
 
-| Path                           | Type     | Compared? | Notes                                                                                              |
-| ------------------------------ | -------- | --------- | -------------------------------------------------------------------------------------------------- |
-| `schemaVersion`                | `1`      | —         | Validated on load; any other value is rejected.                                                    |
-| `provenance.gitSha`            | string   | —         | `git rev-parse HEAD` of the oracle checkout.                                                       |
-| `provenance.generatedAt`       | string   | —         | ISO-8601 UTC timestamp.                                                                            |
-| `provenance.oracle`            | string   | —         | Human-readable oracle id (`… (stub)` for the bundled exporter).                                    |
-| `provenance.models.*`          | string   | —         | Embedder / reranker / answer model ids.                                                            |
-| `provenance.bindingVersion`    | string   | —         | Native binding (`@ladybugdb/core@x.y.z`).                                                          |
-| `provenance.storageVersion`    | string   | —         | On-disk storage/pack version.                                                                      |
-| `case.id`                      | string   | —         | Fixture/case identifier.                                                                           |
-| `case.query`                   | string   | —         | The query text the stages were produced for.                                                       |
-| `case.config.topK`             | number   | —         | Candidate count the oracle used.                                                                   |
-| `case.config.cosineThreshold`  | number   | **input** | Default embedding-match threshold (overridable per compare call).                                  |
-| `case.config.seed`             | number   | —         | Run seed (the answer's own `seed` is the compared value).                                          |
-| `stages.queryEmbedding.dim`    | number   | —         | Recorded vector dimensionality; **not** read by the harness (the comparator uses `vector.length`). |
-| `stages.queryEmbedding.vector` | number[] | **yes**   | Cosine-compared against the actual embedding.                                                      |
-| `stages.retrievedIds`          | string[] | **yes**   | Exact ordered equality.                                                                            |
-| `stages.rerankedIds`           | string[] | **yes**   | Exact ordered equality.                                                                            |
-| `stages.finalAnswer.citations` | string[] | **yes**   | Set equality (order-independent).                                                                  |
-| `stages.finalAnswer.topK`      | string[] | **yes**   | Ordered equality.                                                                                  |
-| `stages.finalAnswer.seed`      | number   | **yes**   | Exact equality.                                                                                    |
-| `stages.finalAnswer.text`      | string   | **no**    | Recorded for context; deliberately **ignored** by the comparator.                                  |
+| Path                           | Type     | Compared? | Notes                                                                                                            |
+| ------------------------------ | -------- | --------- | ---------------------------------------------------------------------------------------------------------------- |
+| `schemaVersion`                | `1`      | —         | Validated on load; any other value is rejected.                                                                  |
+| `provenance.gitSha`            | string   | —         | `git rev-parse HEAD` of the oracle checkout.                                                                     |
+| `provenance.generatedAt`       | string   | —         | ISO-8601 UTC timestamp.                                                                                          |
+| `provenance.oracle`            | string   | —         | Human-readable oracle id (`… (stub)` for the bundled exporter).                                                  |
+| `provenance.models.*`          | string   | —         | Embedder / reranker / answer model ids.                                                                          |
+| `provenance.bindingVersion`    | string   | —         | Native binding (`@ladybugdb/core@x.y.z`).                                                                        |
+| `provenance.storageVersion`    | string   | —         | On-disk storage/pack version.                                                                                    |
+| `case.id`                      | string   | —         | Fixture/case identifier.                                                                                         |
+| `case.query`                   | string   | —         | The query text the stages were produced for.                                                                     |
+| `case.config.topK`             | number   | —         | Candidate count the oracle used.                                                                                 |
+| `case.config.cosineThreshold`  | number   | **input** | Embedding-match threshold; **required** by fixture validation (overridable per call via `opts.cosineThreshold`). |
+| `case.config.seed`             | number   | —         | Run seed (the answer's own `seed` is the compared value).                                                        |
+| `stages.queryEmbedding.dim`    | number   | —         | Recorded vector dimensionality; **not** read by the harness (the comparator uses `vector.length`).               |
+| `stages.queryEmbedding.vector` | number[] | **yes**   | Cosine-compared against the actual embedding.                                                                    |
+| `stages.retrievedIds`          | string[] | **yes**   | Exact ordered equality.                                                                                          |
+| `stages.rerankedIds`           | string[] | **yes**   | Exact ordered equality.                                                                                          |
+| `stages.finalAnswer.citations` | string[] | **yes**   | Set equality (order-independent).                                                                                |
+| `stages.finalAnswer.topK`      | string[] | **yes**   | Ordered equality.                                                                                                |
+| `stages.finalAnswer.seed`      | number   | **yes**   | Exact equality.                                                                                                  |
+| `stages.finalAnswer.text`      | string   | **no**    | Recorded for context; deliberately **ignored** by the comparator.                                                |
 
 > Fixtures are **tiny synthetic JSON** by design — the committed sample uses an
 > 8-dimensional embedding and five nodes. **No scraped corpora, no binaries, no
@@ -367,6 +367,11 @@ The effective embedding threshold is resolved as:
 opts.cosineThreshold  ??  golden.case.config.cosineThreshold  ??  0.999
 ```
 
+Because `loadFixture` / `assertGoldenFixture` reject any fixture whose
+`case.config.cosineThreshold` is not numeric, a loaded fixture **always** supplies
+the threshold. The trailing `?? 0.999` is therefore a defensive fallback that is
+only reachable for a hand-built `GoldenFixture` that bypasses validation.
+
 ```ts
 const report = compareStages(actualOutput, golden);
 
@@ -438,7 +443,10 @@ with this precedence:
 
 1. `opts.cosineThreshold` passed to `compareStages` (highest);
 2. `golden.case.config.cosineThreshold` from the fixture;
-3. the built-in default `0.999` (only if the fixture omits it).
+3. the built-in default `0.999` — a defensive fallback. Since `loadFixture` /
+   `assertGoldenFixture` require a numeric `case.config.cosineThreshold`, a
+   validated fixture always carries one, so this default is only reachable for a
+   hand-built `GoldenFixture` that skips validation.
 
 ```ts
 // Loosen for noisy embedders:
