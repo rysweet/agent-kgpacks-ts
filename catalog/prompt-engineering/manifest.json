@@ -1,0 +1,23 @@
+{
+  "name": "prompt-engineering",
+  "version": "1.0.0",
+  "description": "Comprehensive prompt engineering knowledge covering system prompts, tool use, chain-of-thought, few-shot prompting, constitutional AI, evaluation techniques, and best practices from Anthropic and OpenAI.",
+  "graph_stats": {
+    "articles": 21,
+    "entities": 101,
+    "relationships": 88,
+    "size_mb": 2.08
+  },
+  "eval_scores": {
+    "accuracy": 0.0,
+    "hallucination_rate": 0.0,
+    "citation_quality": 0.0
+  },
+  "source_urls": [
+    "https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/overview",
+    "https://platform.openai.com/docs/guides/prompt-engineering",
+    "https://github.com/anthropics/prompt-eng-interactive-tutorial"
+  ],
+  "created": "2026-03-03T19:50:58.464957Z",
+  "license": "MIT"
+}

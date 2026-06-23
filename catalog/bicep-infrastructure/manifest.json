@@ -1,0 +1,23 @@
+{
+  "name": "bicep-infrastructure",
+  "version": "1.0.0",
+  "description": "Expert knowledge of Azure Bicep infrastructure-as-code covering modules, deployment stacks, what-if operations, registry, user-defined types, linter rules, and Azure Verified Modules.",
+  "graph_stats": {
+    "articles": 39,
+    "entities": 177,
+    "relationships": 160,
+    "size_mb": 2.08
+  },
+  "eval_scores": {
+    "accuracy": 0.0,
+    "hallucination_rate": 0.0,
+    "citation_quality": 0.0
+  },
+  "source_urls": [
+    "https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/overview",
+    "https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/modules",
+    "https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/deployment-stacks"
+  ],
+  "created": "2026-03-03T19:24:31.623958Z",
+  "license": "MIT"
+}

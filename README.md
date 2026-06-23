@@ -61,6 +61,9 @@ pnpm --filter @kgpacks/frontend dev
   multi-stage build, `docker compose` run, the GLIBC (no-Alpine) requirement, env
   vars, persistence, the VECTOR/FTS first-load network prerequisite, and version
   pinning.
+- [docs/catalog.md](docs/catalog.md) — the knowledge-pack catalog: the `catalog/`
+  layout, the data-driven `catalog:build` / `catalog:eval` workflow, the pinned
+  synthesis and judge models, and what is (and isn't) committed.
 - [docs/PLAN.md](docs/PLAN.md) — the architecture, parity methodology, external
   contracts, and acceptance criteria for the port.
 

@@ -1,0 +1,32 @@
+{
+  "name": "ladybugdb-expert",
+  "version": "1.0.0",
+  "description": "Comprehensive knowledge of LadybugDB, the active community fork of the archived Kuzu graph database. Covers the Python SDK (real_ladybug package), Cypher query language, vector search extensions, full-text search, graph algorithms, import/export, and migration from Kuzu.",
+  "graph_stats": {
+    "articles": 5,
+    "entities": 25,
+    "relationships": 19,
+    "size_mb": 2.08
+  },
+  "eval_scores": {
+    "accuracy": 0.0,
+    "hallucination_rate": 0.0,
+    "citation_quality": 0.0
+  },
+  "tags": [
+    "ladybugdb",
+    "graph-database",
+    "cypher",
+    "vector-search",
+    "python-sdk",
+    "embedded-database"
+  ],
+  "source_urls": [
+    "https://docs.ladybugdb.com/",
+    "https://docs.ladybugdb.com/client-apis/python/",
+    "https://docs.ladybugdb.com/extensions/vector/",
+    "https://github.com/LadybugDB/ladybug"
+  ],
+  "created": "2026-03-06T22:07:25.533634Z",
+  "license": "MIT"
+}

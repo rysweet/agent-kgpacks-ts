@@ -58,7 +58,7 @@ export function makeEvalReport(): Record<string, unknown> {
 export const EVAL_DEFAULTS = {
   sample: 'full',
   perPack: 3,
-  judgeModel: 'claude-opus-4.1',
+  judgeModel: 'claude-opus-4.5',
 } as const;
 
 /** Default ingestion bounds surfaced by `create`/`update`/`research-sources` help + seam calls. */

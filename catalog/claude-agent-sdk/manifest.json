@@ -1,0 +1,22 @@
+{
+  "name": "claude-agent-sdk",
+  "version": "1.0.0",
+  "description": "Expert knowledge of the Claude Agent SDK for building autonomous AI agents with Claude's tools, agent loop, context management, MCP integration, and subagent orchestration.",
+  "graph_stats": {
+    "articles": 29,
+    "entities": 135,
+    "relationships": 121,
+    "size_mb": 2.08
+  },
+  "eval_scores": {
+    "accuracy": 0.0,
+    "hallucination_rate": 0.0,
+    "citation_quality": 0.0
+  },
+  "source_urls": [
+    "https://platform.claude.com/docs/en/agent-sdk/overview",
+    "https://github.com/anthropics/claude-agent-sdk-python"
+  ],
+  "created": "2026-03-03T19:24:05.670256Z",
+  "license": "MIT"
+}

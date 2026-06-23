@@ -1,0 +1,22 @@
+{
+  "name": "nextjs-expert",
+  "version": "1.0.0",
+  "description": "Expert knowledge of the Vercel AI SDK for building AI-powered applications in TypeScript, covering generateText, streamText, tool calling, agents, provider integrations, and AI SDK UI.",
+  "graph_stats": {
+    "articles": 36,
+    "entities": 152,
+    "relationships": 149,
+    "size_mb": 2.08
+  },
+  "eval_scores": {
+    "accuracy": 0.0,
+    "hallucination_rate": 0.0,
+    "citation_quality": 0.0
+  },
+  "source_urls": [
+    "https://nextjs.org/docs/app",
+    "https://nextjs.org/docs/app/api-reference/turbopack"
+  ],
+  "created": "2026-03-03T19:46:36.790541Z",
+  "license": "MIT"
+}

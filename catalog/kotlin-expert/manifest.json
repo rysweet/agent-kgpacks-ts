@@ -1,0 +1,23 @@
+{
+  "name": "kotlin-expert",
+  "version": "1.0.0",
+  "description": "Expert Kotlin programming knowledge covering Kotlin 2.x with K2 compiler, coroutines, multiplatform development, Compose Multiplatform, sealed classes, null safety, extensions, and Android development.",
+  "graph_stats": {
+    "articles": 42,
+    "entities": 286,
+    "relationships": 212,
+    "size_mb": 2.08
+  },
+  "eval_scores": {
+    "accuracy": 0.0,
+    "hallucination_rate": 0.0,
+    "citation_quality": 0.0
+  },
+  "source_urls": [
+    "https://kotlinlang.org/docs/home.html",
+    "https://developer.android.com/kotlin",
+    "https://kotlinlang.org/docs/coroutines-guide.html"
+  ],
+  "created": "2026-03-03T19:38:40.539371Z",
+  "license": "MIT"
+}

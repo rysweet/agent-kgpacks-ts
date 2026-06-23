@@ -1,0 +1,23 @@
+{
+  "name": "cpp-expert",
+  "version": "1.0.0",
+  "description": "Expert C++ programming knowledge covering C++23/26 features including modules, ranges, std::expected, coroutines with std::generator, constexpr, mdspan, concepts, and the modern standard library.",
+  "graph_stats": {
+    "articles": 47,
+    "entities": 235,
+    "relationships": 197,
+    "size_mb": 2.08
+  },
+  "eval_scores": {
+    "accuracy": 0.0,
+    "hallucination_rate": 0.0,
+    "citation_quality": 0.0
+  },
+  "source_urls": [
+    "https://en.cppreference.com/w/cpp/23.html",
+    "https://en.cppreference.com/w/cpp/20.html",
+    "https://isocpp.org/std/the-standard"
+  ],
+  "created": "2026-03-03T19:25:16.944577Z",
+  "license": "MIT"
+}

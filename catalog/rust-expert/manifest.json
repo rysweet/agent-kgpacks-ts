@@ -1,0 +1,25 @@
+{
+  "name": "rust-expert",
+  "version": "1.0.0",
+  "description": "Expert Rust programming knowledge covering ownership, traits, async programming, unsafe code, and common patterns from official Rust documentation",
+  "graph_stats": {
+    "articles": 294,
+    "entities": 1388,
+    "relationships": 1190,
+    "size_mb": 2.08
+  },
+  "eval_scores": {
+    "accuracy": 0.0,
+    "hallucination_rate": 0.0,
+    "citation_quality": 0.0
+  },
+  "source_urls": [
+    "https://doc.rust-lang.org/book/",
+    "https://doc.rust-lang.org/rust-by-example/",
+    "https://doc.rust-lang.org/reference/",
+    "https://doc.rust-lang.org/nomicon/",
+    "https://doc.rust-lang.org/std/"
+  ],
+  "created": "2026-03-03T20:25:18.333122Z",
+  "license": "MIT"
+}

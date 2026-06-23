@@ -3,6 +3,12 @@ coverage/
 pnpm-lock.yaml
 docs/PLAN.md
 
+# Knowledge-pack catalog — imported corpus data (urls.txt / eval.jsonl have no
+# Prettier parser; manifest.json is upstream data we don't reformat). Built pack
+# DBs live under data/ and are gitignored.
+catalog/
+data/
+
 # Frozen golden parity oracle — read-only Spike B output; never reformat or
 # regenerate (whitespace changes would touch the immutable fixture).
 packages/embeddings/test/fixtures/bge-golden.json

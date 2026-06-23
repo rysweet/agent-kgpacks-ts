@@ -1,0 +1,22 @@
+{
+  "name": "azure-ai-foundry",
+  "version": "1.0.0",
+  "description": "Expert knowledge of Azure AI Foundry (Microsoft Foundry) covering model catalog, prompt flow, fine-tuning, deployments, Foundry Agent Service, evaluations, responsible AI, and SDK integration.",
+  "graph_stats": {
+    "articles": 33,
+    "entities": 183,
+    "relationships": 147,
+    "size_mb": 2.08
+  },
+  "eval_scores": {
+    "accuracy": 0.0,
+    "hallucination_rate": 0.0,
+    "citation_quality": 0.0
+  },
+  "source_urls": [
+    "https://learn.microsoft.com/en-us/azure/ai-foundry/what-is-foundry",
+    "https://learn.microsoft.com/en-us/azure/ai-foundry/concepts/foundry-models-overview"
+  ],
+  "created": "2026-03-03T19:20:58.223833Z",
+  "license": "MIT"
+}

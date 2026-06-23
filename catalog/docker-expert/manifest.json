@@ -1,0 +1,22 @@
+{
+  "name": "docker-expert",
+  "version": "1.0.0",
+  "description": "Expert knowledge of the Vercel AI SDK for building AI-powered applications in TypeScript, covering generateText, streamText, tool calling, agents, provider integrations, and AI SDK UI.",
+  "graph_stats": {
+    "articles": 38,
+    "entities": 193,
+    "relationships": 147,
+    "size_mb": 2.08
+  },
+  "eval_scores": {
+    "accuracy": 0.0,
+    "hallucination_rate": 0.0,
+    "citation_quality": 0.0
+  },
+  "source_urls": [
+    "https://docs.docker.com/reference/dockerfile/",
+    "https://docs.docker.com/compose/"
+  ],
+  "created": "2026-03-03T19:28:01.590937Z",
+  "license": "MIT"
+}

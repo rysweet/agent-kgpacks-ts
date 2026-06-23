@@ -1,0 +1,23 @@
+{
+  "name": "swift-expert",
+  "version": "1.0.0",
+  "description": "Expert Swift programming knowledge covering Swift 6 strict concurrency, typed throws, noncopyable types, macros, SwiftUI, actors, async/await, and the Swift standard library from official documentation.",
+  "graph_stats": {
+    "articles": 8,
+    "entities": 54,
+    "relationships": 40,
+    "size_mb": 2.08
+  },
+  "eval_scores": {
+    "accuracy": 0.0,
+    "hallucination_rate": 0.0,
+    "citation_quality": 0.0
+  },
+  "source_urls": [
+    "https://docs.swift.org/swift-book/documentation/the-swift-programming-language/",
+    "https://developer.apple.com/documentation/swift",
+    "https://www.swift.org/documentation/"
+  ],
+  "created": "2026-03-03T20:04:48.269805Z",
+  "license": "MIT"
+}

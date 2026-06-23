@@ -1,0 +1,22 @@
+{
+  "name": "github-actions-advanced",
+  "version": "1.0.0",
+  "description": "Advanced GitHub Actions knowledge covering reusable workflows, composite actions, OIDC authentication, environments, matrix strategies, caching, artifacts, and security hardening.",
+  "graph_stats": {
+    "articles": 32,
+    "entities": 186,
+    "relationships": 131,
+    "size_mb": 2.08
+  },
+  "eval_scores": {
+    "accuracy": 0.0,
+    "hallucination_rate": 0.0,
+    "citation_quality": 0.0
+  },
+  "source_urls": [
+    "https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions",
+    "https://docs.github.com/en/actions/concepts/workflows-and-actions/reusable-workflows"
+  ],
+  "created": "2026-03-03T19:32:52.864165Z",
+  "license": "MIT"
+}
