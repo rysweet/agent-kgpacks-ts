@@ -157,6 +157,18 @@ importers:
         specifier: workspace:*
         version: link:../query
 
+  packages/ingestion:
+    dependencies:
+      '@kgpacks/agent':
+        specifier: workspace:*
+        version: link:../agent
+      '@kgpacks/db':
+        specifier: workspace:*
+        version: link:../db
+      '@kgpacks/embeddings':
+        specifier: workspace:*
+        version: link:../embeddings
+
   packages/mcp:
     dependencies:
       '@kgpacks/db':

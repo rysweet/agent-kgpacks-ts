@@ -45,9 +45,8 @@ describe('scaffold — workspace wiring', () => {
     expect(exists('pnpm-lock.yaml')).toBe(true);
   });
 
-  it('does NOT scaffold the Phase 2 / migration-only members', () => {
-    // @kgpacks/ingestion (Phase 2) and frontend are intentionally absent now.
-    expect(exists('packages/ingestion')).toBe(false);
+  it('keeps the React SPA out of packages/ (it lives under apps/frontend)', () => {
+    // The Vite + React frontend SPA is an app, not a library package.
     expect(exists('packages/frontend')).toBe(false);
   });
 });
