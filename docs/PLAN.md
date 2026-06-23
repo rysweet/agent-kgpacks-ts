@@ -188,14 +188,15 @@ changes *before* Phase 1, not after.
   `Connection`, or whether the backend needs a **connection pool / worker_threads**.
   *Kill: cannot reproduce a known query's results.* (Read path already de-risked;
   concurrency is the open question.)
-- **Spike B — Embedding pooling parity (highest sleeper risk):** reproduce the Python
-  vectors in TS. The repo's sentence-transformers BGE uses **CLS pooling, NOT
-  normalized** (`generator.py` calls `model.encode` without `normalize_embeddings`);
-  the generic Transformers.js "best practice" is mean-pooling + normalize, which would
-  produce **different vectors** and silently break retrieval. Confirm Transformers.js
-  can do CLS pooling, unnormalized, with the BGE query prefix, and matches frozen Python
-  vectors (cosine ≥ ~0.999). *Kill: cannot match pooling/normalization → re-embed all
-  packs with the TS embedder (TS becomes canonical) or reject Transformers.js.*
+- **Spike B — Embedding pooling parity (highest sleeper risk):** ✅ **PASS (validated
+  2026-06-23, cosine = 1.000000).** Transformers.js `Xenova/bge-base-en-v1.5` (ONNX) with
+  **`pooling: 'cls'`** reproduces the Python sentence-transformers `BAAI/bge-base-en-v1.5`
+  vectors exactly for both documents (no prefix) and queries (with the BGE query prefix).
+  Correction to an earlier assumption: the sentence-transformers output **is L2-normalized**
+  (a `Normalize` module in the model's `modules.json` → `‖v‖ = 1.0`), so the TS embedder
+  should set `pooling:'cls'` and **normalize** for byte-level stored-vector parity. (Cosine
+  / HNSW-cosine is scale-invariant, so retrieval parity holds even if normalization is
+  skipped — but match it anyway.) *Residual kill criterion retired.*
 - **Spike C — Copilot SDK throughput/cost/latency:** the SDK drives the Copilot CLI as
   a subprocess (JSON-RPC), not a raw HTTP completion API. Measure latency, max
   concurrency, failure modes, and cost for the actual call shapes (synthesis +
@@ -206,9 +207,11 @@ changes *before* Phase 1, not after.
   extraction (Phase 2), (c) request coalescing/caching for expansion, and/or (d) BYOK
   routing within the SDK. *Kill criterion here means "escalate to the mandate owner with
   measured numbers," not "silently switch to Anthropic."*
-- **Spike D — cross-encoder ONNX:** confirm `ms-marco-MiniLM-L-12-v2` is available/
-  convertible to ONNX for Transformers.js (L-6 is the easy fallback). *Kill: no viable
-  L-12 ONNX → use L-6 and re-baseline reranking quality.*
+- **Spike D — cross-encoder ONNX:** ✅ **PASS (validated 2026-06-23, exact match).**
+  `Xenova/ms-marco-MiniLM-L-12-v2` ships full ONNX builds (fp32 + quantized);
+  Transformers.js (`AutoModelForSequenceClassification`, fp32) reproduces the Python
+  `cross-encoder/ms-marco-MiniLM-L-12-v2` logits **identically** (max |diff| = 0.0000,
+  same ranking). No L-6 fallback required.
 - **Walking skeleton:** stand up the thinnest end-to-end vertical slice — open fixture
   pack → embed query (TS) → vector search → Copilot-SDK synthesis → return answer —
   wired through a trivial backend route. This proves the seams between the four risky
@@ -241,7 +244,8 @@ behavior in TS before any restructuring.
   graph expansion/link discovery/work queue, schema creation, DB loader,
   `CREATE_VECTOR_INDEX`/FTS.
 - **Write-side embedding parity:** the builder must produce vectors consistent with the
-  query embedder decided in Spike B (CLS, unnormalized, no query prefix for documents).
+  query embedder validated in Spike B — Transformers.js `Xenova/bge-base-en-v1.5`,
+  `pooling:'cls'`, L2-normalized, **no** query prefix for documents (prefix is query-only).
 - **Storage-write version:** decide DB write version; if Node writes v41 while the old
   Python builder read v40, treat the builder swap as a **one-way cutover** (Node becomes
   the only builder). Re-build the catalog with the TS pipeline; gate on **eval parity**
@@ -276,11 +280,10 @@ behavior in TS before any restructuring.
   before any breadth work, because they can each invalidate the architecture.
 
 ## Key Risks & Mitigations
-- **Embedding pooling/normalization mismatch** (sleeper risk): stored vectors are
-  CLS-pooled, unnormalized; a naive Transformers.js port (mean-pool + normalize) breaks
-  retrieval silently. Mitigate via Spike B parity gate. The shipped artifact stays
-  Python-free — if parity can't be met, re-embed packs with the TS embedder (TS
-  canonical), **not** a runtime Python embedding service.
+- **Embedding pooling/normalization** (Spike B — RESOLVED ✅): stored vectors are
+  **CLS-pooled and L2-normalized**; Transformers.js `Xenova/bge-base-en-v1.5` with
+  `pooling:'cls'` (+ normalize) reproduces them at cosine 1.0. Use that config in the TS
+  embedder. The shipped artifact stays Python-free; no runtime Python embedding service.
 - **Copilot SDK is an agentic CLI-subprocess runtime**, not a raw completion API:
   heavier concurrency/latency, esp. for batch extraction (Phase 2). Mitigate with a
   session pool + concurrency limits; validate in Spike C with a kill criterion.
@@ -304,8 +307,9 @@ behavior in TS before any restructuring.
   check before Phase 2 batch runs.
 - **`apache-arrow` transitive weight**: `@ladybugdb/core` depends on Arrow; account for
   bundle size/cold-start and pin it.
-- **cross-encoder L-12 ONNX** may need manual conversion (L-6 is the easy fallback);
-  resolved in Spike D.
+- **cross-encoder L-12 ONNX** (Spike D — RESOLVED ✅): `Xenova/ms-marco-MiniLM-L-12-v2`
+  exists with ONNX builds and matches the Python cross-encoder exactly (fp32). Use it
+  directly; L-6 fallback unnecessary.
 
 ## COE Review — Sharp Edges & Adjustments
 **Review status: PASS after 3 rounds** (proxy COE review). The plan is defensible.
