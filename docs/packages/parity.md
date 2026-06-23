@@ -197,28 +197,28 @@ at every stage, plus a **provenance** stamp that makes a stale fixture obvious.
 
 ### Field reference
 
-| Path                           | Type     | Compared? | Notes                                                             |
-| ------------------------------ | -------- | --------- | ----------------------------------------------------------------- |
-| `schemaVersion`                | `1`      | —         | Validated on load; any other value is rejected.                   |
-| `provenance.gitSha`            | string   | —         | `git rev-parse HEAD` of the oracle checkout.                      |
-| `provenance.generatedAt`       | string   | —         | ISO-8601 UTC timestamp.                                           |
-| `provenance.oracle`            | string   | —         | Human-readable oracle id (`… (stub)` for the bundled exporter).   |
-| `provenance.models.*`          | string   | —         | Embedder / reranker / answer model ids.                           |
-| `provenance.bindingVersion`    | string   | —         | Native binding (`@ladybugdb/core@x.y.z`).                         |
-| `provenance.storageVersion`    | string   | —         | On-disk storage/pack version.                                     |
-| `case.id`                      | string   | —         | Fixture/case identifier.                                          |
-| `case.query`                   | string   | —         | The query text the stages were produced for.                      |
-| `case.config.topK`             | number   | —         | Candidate count the oracle used.                                  |
-| `case.config.cosineThreshold`  | number   | **input** | Default embedding-match threshold (overridable per compare call). |
-| `case.config.seed`             | number   | —         | Run seed (the answer's own `seed` is the compared value).         |
-| `stages.queryEmbedding.dim`    | number   | —         | Vector dimensionality (sanity-checked against `vector.length`).   |
-| `stages.queryEmbedding.vector` | number[] | **yes**   | Cosine-compared against the actual embedding.                     |
-| `stages.retrievedIds`          | string[] | **yes**   | Exact ordered equality.                                           |
-| `stages.rerankedIds`           | string[] | **yes**   | Exact ordered equality.                                           |
-| `stages.finalAnswer.citations` | string[] | **yes**   | Set equality (order-independent).                                 |
-| `stages.finalAnswer.topK`      | string[] | **yes**   | Ordered equality.                                                 |
-| `stages.finalAnswer.seed`      | number   | **yes**   | Exact equality.                                                   |
-| `stages.finalAnswer.text`      | string   | **no**    | Recorded for context; deliberately **ignored** by the comparator. |
+| Path                           | Type     | Compared? | Notes                                                                                              |
+| ------------------------------ | -------- | --------- | -------------------------------------------------------------------------------------------------- |
+| `schemaVersion`                | `1`      | —         | Validated on load; any other value is rejected.                                                    |
+| `provenance.gitSha`            | string   | —         | `git rev-parse HEAD` of the oracle checkout.                                                       |
+| `provenance.generatedAt`       | string   | —         | ISO-8601 UTC timestamp.                                                                            |
+| `provenance.oracle`            | string   | —         | Human-readable oracle id (`… (stub)` for the bundled exporter).                                    |
+| `provenance.models.*`          | string   | —         | Embedder / reranker / answer model ids.                                                            |
+| `provenance.bindingVersion`    | string   | —         | Native binding (`@ladybugdb/core@x.y.z`).                                                          |
+| `provenance.storageVersion`    | string   | —         | On-disk storage/pack version.                                                                      |
+| `case.id`                      | string   | —         | Fixture/case identifier.                                                                           |
+| `case.query`                   | string   | —         | The query text the stages were produced for.                                                       |
+| `case.config.topK`             | number   | —         | Candidate count the oracle used.                                                                   |
+| `case.config.cosineThreshold`  | number   | **input** | Default embedding-match threshold (overridable per compare call).                                  |
+| `case.config.seed`             | number   | —         | Run seed (the answer's own `seed` is the compared value).                                          |
+| `stages.queryEmbedding.dim`    | number   | —         | Recorded vector dimensionality; **not** read by the harness (the comparator uses `vector.length`). |
+| `stages.queryEmbedding.vector` | number[] | **yes**   | Cosine-compared against the actual embedding.                                                      |
+| `stages.retrievedIds`          | string[] | **yes**   | Exact ordered equality.                                                                            |
+| `stages.rerankedIds`           | string[] | **yes**   | Exact ordered equality.                                                                            |
+| `stages.finalAnswer.citations` | string[] | **yes**   | Set equality (order-independent).                                                                  |
+| `stages.finalAnswer.topK`      | string[] | **yes**   | Ordered equality.                                                                                  |
+| `stages.finalAnswer.seed`      | number   | **yes**   | Exact equality.                                                                                    |
+| `stages.finalAnswer.text`      | string   | **no**    | Recorded for context; deliberately **ignored** by the comparator.                                  |
 
 > Fixtures are **tiny synthetic JSON** by design — the committed sample uses an
 > 8-dimensional embedding and five nodes. **No scraped corpora, no binaries, no
