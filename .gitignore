@@ -14,3 +14,6 @@ coverage/
 *.kuzu/
 *.lbug/
 *.wal
+
+# git worktrees used by tooling
+worktrees/
