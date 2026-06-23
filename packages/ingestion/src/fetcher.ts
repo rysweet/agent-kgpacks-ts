@@ -10,18 +10,19 @@
 //      or IPv6, including IPv4-mapped IPv6 and the 169.254.169.254 cloud-metadata
 //      endpoint) fails closed.
 // Redirects are followed manually so each hop re-runs the full gate, defeating
-// redirect-to-internal pivots. Hops are bounded. The DEFAULT connector resolves
-// and validates the host with a custom `lookup` and connects to that exact
-// validated address (TLS SNI/cert validation still use the hostname), so the IP
-// that was checked is the IP that is dialed — closing the DNS-rebinding TOCTOU
-// window between validation and connection.
+// redirect-to-internal pivots. Hops are bounded.
+//
+// NOTE: the default connector uses the platform `fetch`, which re-resolves DNS at
+// connect time — leaving a narrow DNS-rebinding TOCTOU window after validation.
+// For an operator-driven build tool this residual risk is acceptable; callers can
+// inject `fetchImpl` with an IP-pinning connector (dial the exact validated
+// address, keep the hostname for TLS SNI) to close it entirely.
 //
 // The DNS `lookup` and low-level `fetch` are injectable seams so the negative
 // tests exercise the blocklist deterministically with zero real network I/O.
 
 import { isIP } from 'node:net';
 import { lookup as dnsLookup } from 'node:dns/promises';
-import { request as httpsRequest } from 'node:https';
 
 import { BlockedUrlError, FetchError } from './errors.js';
 import type { Fetcher, FetchImpl, FetchInit, LookupFn, ResolvedAddress } from './types.js';
@@ -223,6 +224,10 @@ const defaultLookup: LookupFn = async (hostname) => {
  * resolves with the final 2xx response body text.
  */
 export function createSafeFetcher(options: SafeFetcherOptions = {}): Fetcher {
+  // NOTE: the default connector re-resolves DNS at connect time, leaving a narrow
+  // DNS-rebinding TOCTOU window after assertUrlAllowed(). For an operator-driven
+  // build tool this is acceptable; inject fetchImpl with an IP-pinning connector
+  // to fully close it. assertUrlAllowed() still guards every hop (incl. redirects).
   const fetchImpl: FetchImpl = options.fetchImpl ?? (globalThis.fetch as unknown as FetchImpl);
   const lookup = options.lookup ?? defaultLookup;
   const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
