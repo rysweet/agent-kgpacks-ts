@@ -1,0 +1,61 @@
+# Production-style single-service run of @kgpacks/backend.
+#
+#   docker compose up --build -d
+#
+# The backend is published on the LOOPBACK interface only (127.0.0.1). Front it
+# with a reverse proxy (TLS, auth) to expose it beyond localhost. The container
+# itself binds 0.0.0.0:8000 inside the container network; host exposure is
+# governed solely by the loopback-scoped port mapping. See docs/deployment.md.
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: kgpacks-backend:local
+    platform: linux/amd64
+    restart: unless-stopped
+    # Loopback-only publish; in-container bind is 0.0.0.0 (see WIKIGR_HOST).
+    ports:
+      - '127.0.0.1:8000:8000'
+    environment:
+      WIKIGR_HOST: '0.0.0.0'
+      WIKIGR_PORT: '8000'
+      WIKIGR_DATABASE_PATH: '/data/kgpacks.db'
+      # Optional bring-your-own-key chat credentials. Never baked into the image:
+      # forwarded from the host environment only, and empty ('') when unset.
+      COPILOT_API_KEY: '${COPILOT_API_KEY:-}'
+      OPENAI_API_KEY: '${OPENAI_API_KEY:-}'
+      ANTHROPIC_API_KEY: '${ANTHROPIC_API_KEY:-}'
+    volumes:
+      - kgpacks-data:/data
+    # Health probe via Node's built-in fetch — the image installs no extra HTTP
+    # client, which keeps it minimal.
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:8000/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    # Container hardening.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1g
+
+volumes:
+  kgpacks-data:

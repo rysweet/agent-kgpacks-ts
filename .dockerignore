@@ -1,0 +1,60 @@
+# Keep the Docker build context minimal, deterministic, and secret-free.
+# Dependencies are reinstalled and every package is rebuilt inside the image, so
+# host-side node_modules / dist / caches must never enter a build layer.
+
+# Dependencies and build output (reinstalled and rebuilt in the image)
+node_modules
+**/node_modules
+dist
+**/dist
+*.tsbuildinfo
+**/*.tsbuildinfo
+coverage
+**/coverage
+.pnpm-store
+
+# Version control and CI metadata
+.git
+.gitignore
+.gitattributes
+.github
+
+# Tests and test fixtures (never part of the runtime image)
+test
+**/test
+tests
+**/tests
+**/*.test.*
+**/*.spec.*
+
+# Dev-only Python parity oracle (has no package.json; pnpm ignores it). Excluding
+# it keeps the build context free of the parity tooling entirely.
+parity/oracle
+
+# Nested git worktrees created during development
+worktrees
+
+# Local agent, editor, and tooling state
+.claude
+.vscode
+.idea
+
+# Secrets and credentials — must never be copied into a build layer
+.env
+.env.*
+*.env
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets
+
+# Docker and documentation artifacts (not needed inside the image)
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.*.yml
+docs
+*.md
+LICENSE

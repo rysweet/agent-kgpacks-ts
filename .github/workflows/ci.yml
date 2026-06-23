@@ -61,3 +61,40 @@ jobs:
 
       - name: Fail if any runtime package declares or invokes Python
         run: node scripts/check-no-python.mjs
+
+  docker-image:
+    name: docker image (build + no-Python + non-root)
+    runs-on: ubuntu-latest
+    env:
+      DOCKER_BUILDKIT: '1'
+      IMAGE: kgpacks-backend:ci
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # Build with the runner-bundled docker (BuildKit). No extra build-driver or
+      # other unpinned Action is introduced; the only Action used is the same
+      # SHA-pinned actions/checkout as the other jobs. Building on the amd64 runner
+      # produces a linux/amd64 image and catches any Dockerfile breakage.
+      - name: Build image (linux/amd64)
+        run: docker build --platform=linux/amd64 -t "$IMAGE" .
+
+      # The native @ladybugdb/core binding is a direct dependency of @kgpacks/db,
+      # so resolve it from that package's directory inside the image.
+      - name: Assert the @ladybugdb/core native binding loads
+        run: |
+          docker run --rm --workdir /app/node_modules/@kgpacks/db --entrypoint node "$IMAGE" \
+            -e "require('@ladybugdb/core')"
+
+      # Image-level complement to scripts/check-no-python.mjs: the shipped image
+      # must contain no Python interpreter. Entrypoint is overridden so the server
+      # (which needs a database) is not started.
+      - name: Assert the image contains no Python
+        run: |
+          docker run --rm --entrypoint sh "$IMAGE" -c '! command -v python && ! command -v python3'
+
+      - name: Assert the runtime user is non-root
+        run: |
+          uid="$(docker run --rm --entrypoint sh "$IMAGE" -c 'id -u')"
+          echo "runtime uid=$uid"
+          test "$uid" != "0"
