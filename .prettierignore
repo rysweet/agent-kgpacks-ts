@@ -6,3 +6,7 @@ docs/PLAN.md
 # Frozen golden parity oracle — read-only Spike B output; never reformat or
 # regenerate (whitespace changes would touch the immutable fixture).
 packages/embeddings/test/fixtures/bge-golden.json
+
+# Frozen cross-encoder parity oracle — read-only Spike D logits; never reformat
+# or regenerate (the fixture is the oracle the cross-encoder must reproduce).
+packages/query/test/fixtures/cross-encoder-golden.json

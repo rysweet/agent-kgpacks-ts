@@ -164,6 +164,25 @@ describe('scaffold — third-party runtime dependency pins', () => {
     expect(external).toEqual(['@github/copilot-sdk']);
   });
 
+  it('@kgpacks/backend carries the Fastify HTTP stack as its third-party runtime dependencies', () => {
+    const p = readJson('packages/backend/package.json');
+    const deps = (p.dependencies ?? {}) as Record<string, string>;
+    const external = Object.keys(deps)
+      .filter((d) => !d.startsWith('@kgpacks/'))
+      .sort();
+    expect(external).toEqual(
+      ['@fastify/cors', '@fastify/rate-limit', 'fastify', 'ipaddr.js'].sort(),
+    );
+  });
+
+  it('@kgpacks/query carries @huggingface/transformers (cross-encoder reranker) as its only third-party runtime dependency', () => {
+    const p = readJson('packages/query/package.json');
+    const deps = (p.dependencies ?? {}) as Record<string, string>;
+    expect(deps['@huggingface/transformers']).toBeDefined();
+    const external = Object.keys(deps).filter((d) => !d.startsWith('@kgpacks/'));
+    expect(external).toEqual(['@huggingface/transformers']);
+  });
+
   it('@kgpacks/mcp carries the MCP SDK and zod as its only third-party runtime dependencies', () => {
     // Phase 1: @kgpacks/mcp implements the MCP server, so it now legitimately
     // depends on the TypeScript MCP SDK (and zod for its tool input schemas).
@@ -187,8 +206,8 @@ describe('scaffold — third-party runtime dependency pins', () => {
     expect(external).toEqual(['commander']);
   });
 
-  it('no package other than db, embeddings, agent, mcp and cli carries a third-party runtime dependency', () => {
-    const allowed = new Set(['db', 'embeddings', 'agent', 'mcp', 'cli']);
+  it('no package other than db, embeddings, agent, mcp, query, backend and cli carries a third-party runtime dependency', () => {
+    const allowed = new Set(['db', 'embeddings', 'agent', 'mcp', 'query', 'backend', 'cli']);
     for (const name of PACKAGES) {
       if (allowed.has(name)) continue;
       const p = readJson(`packages/${name}/package.json`);

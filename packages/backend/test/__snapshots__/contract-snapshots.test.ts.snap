@@ -1,0 +1,177 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`contract snapshots > GET /articles/:title shape 1`] = `
+{
+  "backlinks": [
+    "string",
+  ],
+  "categories": [
+    "string",
+  ],
+  "category": "string",
+  "last_updated": "string",
+  "links": [
+    "string",
+  ],
+  "sections": [
+    {
+      "content": "string",
+      "level": "number",
+      "title": "string",
+      "word_count": "number",
+    },
+  ],
+  "title": "string",
+  "wikipedia_url": "string",
+  "word_count": "number",
+}
+`;
+
+exports[`contract snapshots > GET /autocomplete shape 1`] = `
+{
+  "query": "string",
+  "suggestions": [
+    {
+      "category": "string",
+      "match_type": "string",
+      "title": "string",
+    },
+  ],
+  "total": "number",
+}
+`;
+
+exports[`contract snapshots > GET /categories shape 1`] = `
+{
+  "categories": [
+    {
+      "article_count": "number",
+      "name": "string",
+    },
+  ],
+  "total": "number",
+}
+`;
+
+exports[`contract snapshots > GET /graph shape 1`] = `
+{
+  "edges": [
+    {
+      "source": "string",
+      "target": "string",
+      "type": "string",
+      "weight": "number",
+    },
+  ],
+  "execution_time_ms": "number",
+  "nodes": [
+    {
+      "category": "string",
+      "depth": "number",
+      "id": "string",
+      "links_count": "number",
+      "summary": "string",
+      "title": "string",
+      "word_count": "number",
+    },
+  ],
+  "seed": "string",
+  "total_edges": "number",
+  "total_nodes": "number",
+}
+`;
+
+exports[`contract snapshots > GET /health shape 1`] = `
+{
+  "database": "string",
+  "status": "string",
+  "timestamp": "string",
+  "version": "string",
+}
+`;
+
+exports[`contract snapshots > GET /hybrid-search shape 1`] = `
+{
+  "execution_time_ms": "number",
+  "query": "string",
+  "results": [
+    {
+      "article": "string",
+      "category": "string",
+      "similarity": "number",
+      "summary": "string",
+      "word_count": "number",
+    },
+  ],
+  "total": "number",
+}
+`;
+
+exports[`contract snapshots > GET /search shape 1`] = `
+{
+  "execution_time_ms": "number",
+  "query": "string",
+  "results": [
+    {
+      "article": "string",
+      "category": "string",
+      "similarity": "number",
+      "summary": "string",
+      "word_count": "number",
+    },
+  ],
+  "total": "number",
+}
+`;
+
+exports[`contract snapshots > GET /stats shape 1`] = `
+{
+  "articles": {
+    "by_category": {
+      "Biology": "number",
+      "Physics": "number",
+    },
+    "by_depth": {
+      "0": "number",
+      "1": "number",
+      "2": "number",
+    },
+    "total": "number",
+  },
+  "database": {
+    "last_updated": "string",
+    "size_mb": "number",
+  },
+  "links": {
+    "avg_per_article": "number",
+    "total": "number",
+  },
+  "performance": "null",
+  "sections": {
+    "avg_per_article": "number",
+    "total": "number",
+  },
+}
+`;
+
+exports[`contract snapshots > POST /chat shape 1`] = `
+{
+  "answer": "string",
+  "execution_time_ms": "number",
+  "query_type": "string",
+  "sources": [
+    "string",
+  ],
+}
+`;
+
+exports[`contract snapshots > error envelope shape 1`] = `
+{
+  "error": {
+    "code": "string",
+    "details": "null",
+    "message": "string",
+  },
+  "timestamp": "string",
+}
+`;
