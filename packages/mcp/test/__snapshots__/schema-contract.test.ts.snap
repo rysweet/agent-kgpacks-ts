@@ -1,0 +1,89 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`tools/list schema contract > matches the locked snapshot 1`] = `
+[
+  {
+    "_meta": undefined,
+    "annotations": undefined,
+    "description": "List all available knowledge packs with article counts.
+
+Returns a JSON array of objects with name, description, and article_count
+for every pack found under data/packs/.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {},
+      "type": "object",
+    },
+    "name": "list_packs",
+    "title": undefined,
+  },
+  {
+    "_meta": undefined,
+    "annotations": undefined,
+    "description": "Return full manifest details for a specific knowledge pack.
+
+Args:
+    pack_name: Directory name of the pack (e.g. 'rust-expert').",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false,
+      "properties": {
+        "pack_name": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "pack_name",
+      ],
+      "type": "object",
+    },
+    "name": "pack_info",
+    "title": undefined,
+  },
+  {
+    "_meta": undefined,
+    "annotations": undefined,
+    "description": "Query a knowledge pack's graph and return an answer with sources.
+
+Performs vector + graph search over the pack's LadybugDB database and
+synthesizes a natural-language answer.
+
+Args:
+    pack_name: Directory name of the pack (e.g. 'rust-expert').
+    question: Natural language question to answer.
+    max_results: Maximum number of graph results to retrieve (1-1000).",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false,
+      "properties": {
+        "max_results": {
+          "default": 5,
+          "type": "integer",
+        },
+        "pack_name": {
+          "type": "string",
+        },
+        "question": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "pack_name",
+        "question",
+      ],
+      "type": "object",
+    },
+    "name": "query_knowledge_pack",
+    "title": undefined,
+  },
+]
+`;
