@@ -66,7 +66,8 @@ pnpm install             # installs all workspace dependencies (frozen in CI)
 │       ├── packs.md            # @kgpacks/packs API + installer/security model
 │       ├── backend.md          # @kgpacks/backend HTTP API + SSE contract
 │       ├── frontend.md         # @kgpacks/frontend SPA + /api/v1 client contract
-│       └── mcp.md              # @kgpacks/mcp stdio server + external contract
+│       ├── mcp.md              # @kgpacks/mcp stdio server + external contract
+│       └── eval.md             # @kgpacks/eval runner + judge + baselines
 ├── apps/
 │   └── frontend/               # @kgpacks/frontend — Vite + React 18 SPA
 └── packages/
@@ -368,3 +369,7 @@ Phase 0 packages are deliberately uniform, so adding one is mechanical:
   (`apps/frontend/`): the Vite + React 18 SPA, the typed `/api/v1` client, the chat
   SSE streaming contract, the UI components, the `apps/` placement and `apps/**`
   ESLint override, and the build/test strategy.
+- [docs/packages/eval.md](./packages/eval.md) — `@kgpacks/eval` evaluation layer:
+  the `runEval` runner, the with-pack/training-only baseline arms, the pinned LLM
+  judge, skill evaluators, the deterministic stratified sampler, and the metric
+  definitions.
