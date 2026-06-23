@@ -164,9 +164,22 @@ describe('scaffold — third-party runtime dependency pins', () => {
     expect(external).toEqual(['@github/copilot-sdk']);
   });
 
-  it('no package other than db, embeddings and agent carries a third-party runtime dependency', () => {
+  it('@kgpacks/backend carries the Fastify HTTP stack as its third-party runtime dependencies', () => {
+    const p = readJson('packages/backend/package.json');
+    const deps = (p.dependencies ?? {}) as Record<string, string>;
+    const external = Object.keys(deps)
+      .filter((d) => !d.startsWith('@kgpacks/'))
+      .sort();
+    expect(external).toEqual(
+      ['@fastify/cors', '@fastify/rate-limit', 'fastify', 'ipaddr.js'].sort(),
+    );
+  });
+
+  it('no package other than db, embeddings, agent and backend carries a third-party runtime dependency', () => {
     for (const name of PACKAGES) {
-      if (name === 'db' || name === 'embeddings' || name === 'agent') continue;
+      if (name === 'db' || name === 'embeddings' || name === 'agent' || name === 'backend') {
+        continue;
+      }
       const p = readJson(`packages/${name}/package.json`);
       const deps = (p.dependencies ?? {}) as Record<string, string>;
       const external = Object.keys(deps).filter((d) => !d.startsWith('@kgpacks/'));

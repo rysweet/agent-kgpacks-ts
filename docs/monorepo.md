@@ -343,3 +343,6 @@ Phase 0 packages are deliberately uniform, so adding one is mechanical:
 - [docs/packages/packs.md](./packages/packs.md) — `@kgpacks/packs` API reference
   (manifest, versioning, installer, registry) and the archive-extraction security
   model.
+- [docs/packages/backend.md](./packages/backend.md) — `@kgpacks/backend` HTTP API
+  reference: the `/api/v1` route contract, the chat SSE protocol, configuration,
+  rate limiting, and the per-request connection lifecycle.
