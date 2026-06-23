@@ -1,0 +1,144 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`help/usage golden snapshots > matches the \`pack\` no-subcommand usage snapshot (exit 2) > pack-no-subcommand 1`] = `
+"Usage: wikigr pack [options] [command]
+
+Manage installed knowledge packs.
+
+Options:
+  -h, --help         display help for command
+
+Commands:
+  install <archive>  Install a pack from a local .tar.gz archive.
+  list               List installed packs.
+  info <pack>        Print a pack's full manifest.
+  validate <pack>    Validate a pack's manifest.
+  remove <pack>      Remove an installed pack.
+"
+`;
+
+exports[`help/usage golden snapshots > matches the pack help snapshot > pack 1`] = `
+"Usage: wikigr pack [options] [command]
+
+Manage installed knowledge packs.
+
+Options:
+  -h, --help         display help for command
+
+Commands:
+  install <archive>  Install a pack from a local .tar.gz archive.
+  list               List installed packs.
+  info <pack>        Print a pack's full manifest.
+  validate <pack>    Validate a pack's manifest.
+  remove <pack>      Remove an installed pack.
+"
+`;
+
+exports[`help/usage golden snapshots > matches the pack info help snapshot > pack info 1`] = `
+"Usage: wikigr pack info [options] <pack>
+
+Print a pack's full manifest.
+
+Arguments:
+  pack        pack directory name
+
+Options:
+  -h, --help  display help for command
+"
+`;
+
+exports[`help/usage golden snapshots > matches the pack install help snapshot > pack install 1`] = `
+"Usage: wikigr pack install [options] <archive>
+
+Install a pack from a local .tar.gz archive.
+
+Arguments:
+  archive     path to a pack .tar.gz archive
+
+Options:
+  -h, --help  display help for command
+"
+`;
+
+exports[`help/usage golden snapshots > matches the pack list help snapshot > pack list 1`] = `
+"Usage: wikigr pack list [options]
+
+List installed packs.
+
+Options:
+  -h, --help  display help for command
+"
+`;
+
+exports[`help/usage golden snapshots > matches the pack remove help snapshot > pack remove 1`] = `
+"Usage: wikigr pack remove [options] <pack>
+
+Remove an installed pack.
+
+Arguments:
+  pack        pack directory name
+
+Options:
+  -h, --help  display help for command
+"
+`;
+
+exports[`help/usage golden snapshots > matches the pack validate help snapshot > pack validate 1`] = `
+"Usage: wikigr pack validate [options] <pack>
+
+Validate a pack's manifest.
+
+Arguments:
+  pack        pack directory name
+
+Options:
+  -h, --help  display help for command
+"
+`;
+
+exports[`help/usage golden snapshots > matches the query help snapshot > query 1`] = `
+"Usage: wikigr query [options] <pack> <question>
+
+Query a knowledge pack and print ranked retrieval results as JSON.
+
+Arguments:
+  pack           pack directory name
+  question       natural-language question
+
+Options:
+  -k, --k <n>    number of results to retrieve (default: 5)
+  --mode <mode>  retrieval strategy (choices: "vector", "hybrid", default:
+                 "vector")
+  -h, --help     display help for command
+"
+`;
+
+exports[`help/usage golden snapshots > matches the root help snapshot > root 1`] = `
+"Usage: wikigr [options] [command]
+
+Knowledge-pack command-line interface (query + pack management).
+
+Options:
+  -V, --version                      output the version number
+  --packs-dir <dir>                  directory containing installed packs
+  -h, --help                         display help for command
+
+Commands:
+  query [options] <pack> <question>  Query a knowledge pack and print ranked
+                                     retrieval results as JSON.
+  status                             Report the resolved packs directory and
+                                     the installed packs.
+  pack                               Manage installed knowledge packs.
+  help [command]                     display help for command
+"
+`;
+
+exports[`help/usage golden snapshots > matches the status help snapshot > status 1`] = `
+"Usage: wikigr status [options]
+
+Report the resolved packs directory and the installed packs.
+
+Options:
+  -h, --help  display help for command
+"
+`;

@@ -5,12 +5,21 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "wikigr": "dist/bin.js"
+  },
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "build": "tsc -b tsconfig.json",
+    "typecheck": "tsc -b tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@kgpacks/db": "workspace:*",
+    "@kgpacks/packs": "workspace:*",
+    "@kgpacks/query": "workspace:*",
+    "commander": "^12.1.0"
   }
 }

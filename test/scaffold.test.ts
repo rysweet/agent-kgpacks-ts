@@ -176,8 +176,19 @@ describe('scaffold — third-party runtime dependency pins', () => {
     expect(external.sort()).toEqual(['@modelcontextprotocol/sdk', 'zod']);
   });
 
-  it('no package other than db, embeddings, agent and mcp carries a third-party runtime dependency', () => {
-    const allowed = new Set(['db', 'embeddings', 'agent', 'mcp']);
+  it('@kgpacks/cli carries commander as its only third-party runtime dependency', () => {
+    // Phase 1: @kgpacks/cli implements the `wikigr` command-line interface, so it
+    // now legitimately depends on commander for argument parsing. That is its ONLY
+    // non-@kgpacks runtime dependency.
+    const p = readJson('packages/cli/package.json');
+    const deps = (p.dependencies ?? {}) as Record<string, string>;
+    expect(deps['commander']).toBeDefined();
+    const external = Object.keys(deps).filter((d) => !d.startsWith('@kgpacks/'));
+    expect(external).toEqual(['commander']);
+  });
+
+  it('no package other than db, embeddings, agent, mcp and cli carries a third-party runtime dependency', () => {
+    const allowed = new Set(['db', 'embeddings', 'agent', 'mcp', 'cli']);
     for (const name of PACKAGES) {
       if (allowed.has(name)) continue;
       const p = readJson(`packages/${name}/package.json`);
