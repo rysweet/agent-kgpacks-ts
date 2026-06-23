@@ -4,6 +4,8 @@ build/
 coverage/
 *.log
 .DS_Store
+# Agent session artifacts (not part of the deliverable)
+.claude/
 .env
 .env.*
 .turbo/
