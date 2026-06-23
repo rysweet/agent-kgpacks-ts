@@ -1,0 +1,17 @@
+# Build artifacts and local env overrides for @kgpacks/frontend.
+dist/
+node_modules/
+
+# Local env overrides are ignored; the committed example is re-included below.
+.env
+.env.*
+!.env.example
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/

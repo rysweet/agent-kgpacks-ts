@@ -23,5 +23,19 @@ export default tseslint.config(
       },
     },
   },
+  {
+    // Browser + JSX language options for the deployable apps (apps/frontend).
+    // Additive only: scopes browser globals and JSX parsing to apps/** without
+    // changing any rule. The default block above is Node-only and excludes .tsx.
+    files: ['apps/**/*.{ts,tsx}'],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+      },
+      parserOptions: {
+        ecmaFeatures: { jsx: true },
+      },
+    },
+  },
   prettier,
 );

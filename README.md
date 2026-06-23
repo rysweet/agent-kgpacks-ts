@@ -49,6 +49,9 @@ Requires **Node 22 LTS or newer**. No C/C++ toolchain needed —
   layer: the `runEval` runner, with-pack/training-only baselines, the pinned LLM
   judge, skill evaluators, deterministic stratified sampling, and metric
   definitions.
+- [docs/packages/frontend.md](docs/packages/frontend.md) — the `@kgpacks/frontend`
+  web app (`apps/frontend/`): the Vite + React 18 SPA, the typed `/api/v1` client,
+  the chat SSE streaming contract, the UI components, and the build/test strategy.
 - [docs/PLAN.md](docs/PLAN.md) — the end-to-end TypeScript port plan.
 
 ## License
