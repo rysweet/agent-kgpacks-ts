@@ -154,6 +154,11 @@ reconstructed by `dumpCompact`:
 
 ## API reference
 
+Unless a symbol is explicitly marked **(internal)**, everything below is
+re-exported from the package entry point (`src/index.ts`) and is part of the
+package's public surface. Internal helpers are documented for implementers only;
+they are not exported and may change without a contract revision.
+
 ### `createServer(options?: CreateServerOptions): McpServer`
 
 Builds a configured (but not yet connected) `McpServer` with the ported identity
@@ -259,9 +264,12 @@ interface DefaultQueryResult {
 - **`resolveDefaultPacksDir(env?, cwd?): string`** — returns the
   `KGPACKS_PACKS_DIR` override when set to a non-empty value, otherwise
   `<cwd>/data/packs`.
-- **`dumpIndented(value): string`** / **`dumpCompact(value): string`** — the two
-  JSON serializers that reproduce upstream's `json.dumps` formats (see
-  [Result & error payloads](#result--error-payloads-byte-parity)).
+- **`dumpIndented(value): string`** / **`dumpCompact(value): string`**
+  _(internal — not exported from `index.ts`)_ — the two JSON serializers that
+  reproduce upstream's `json.dumps` formats (see
+  [Result & error payloads](#result--error-payloads-byte-parity)). They live in
+  `json.ts` and are consumed by the tool functions; clients never call them
+  directly.
 
 ### Constants
 
