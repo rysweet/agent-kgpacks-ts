@@ -1,2 +1,6 @@
 packages:
   - packages/*
+  # Dev-only parity harness (golden-fixture diff utility). The Python oracle in
+  # parity/oracle has no package.json, so pnpm ignores it — only parity/diff is
+  # adopted as a workspace member.
+  - parity/*
