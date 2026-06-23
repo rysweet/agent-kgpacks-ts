@@ -7,6 +7,10 @@ that exposes the four agent operations carried over from the Python system —
 **seed-article identification** — plus **token/usage accounting** equivalent to
 the Python `_track_response`.
 
+> **Status:** this README and [docs/packages/agent.md](../../docs/packages/agent.md)
+> describe the **target Phase 1 API**. The package currently ships a buildable
+> Phase 0 placeholder (`PACKAGE_NAME`); the implementation builds to this contract.
+
 The SDK changes _transport only_. Per [docs/PLAN.md](../../docs/PLAN.md) the same
 synthesis model is used via **BYOK** and held constant, so model behavior — and
 therefore eval quality — is unchanged; only the plumbing moves from the Anthropic

@@ -28,7 +28,9 @@ the Python `_track_response`. The SDK changes _transport only_: per
   cf. `@ladybugdb/core` at `0.17.1`). The lockfile is committed. The SDK is an
   **agentic CLI-subprocess runtime** (JSON-RPC), not a raw HTTP completion API
   ([docs/PLAN.md](../PLAN.md) Spike C), so its version is **not floated**
-  mid-port; bumps are deliberate and re-validated.
+  mid-port; bumps are deliberate and re-validated. The SDK pulls the Copilot CLI
+  (`@github/copilot`), `vscode-jsonrpc`, and `zod` transitively; the CLI is the
+  spawned subprocess (supply-chain handling in [Security model](#security-model)).
 - **Module system:** native ESM. Import named exports directly; relative imports
   use the `.js` extension under `NodeNext`.
 - **Scaffold-test impact (deliberate, signed-off):** `test/scaffold.test.ts`
@@ -156,7 +158,11 @@ Synthesizes a grounded, citation-bearing answer from retrieved context.
 | `request` | `SynthesisRequest` | Question + retrieved context (see schema). |
 
 Returns a [`SynthesisResult`](#synthesisresult). Throws
-[`AgentResponseFormatError`](#error-handling) if the model returns empty content.
+[`AgentResponseFormatError`](#error-handling) if the model returns empty or absent
+(`undefined`) content. `metadata.citedIds` is derived by the agent layer by
+matching the supplied `ContextChunk.id`s against the answer text (it is **not** the
+SDK's experimental native citations); it is empty when `context` is empty or no
+chunk is referenced.
 
 #### `agent.expandQuery(query: string, options?: ExpandQueryOptions): Promise<string[]>`
 
@@ -223,7 +229,7 @@ export interface SynthesisRequest {
 }
 
 export interface SynthesisMetadata {
-  /** Context ids the answer cited, in first-appearance order. */
+  /** Context ids the answer cited (agent-derived from ContextChunk.id ↔ answer text), in first-appearance order. */
   citedIds: string[];
   /** Model id that produced the answer (echoed from the SDK message). */
   model: string;
@@ -311,35 +317,44 @@ export function createCopilotTransport(options?: CopilotTransportOptions): Trans
 | `TransportSession.close()`      | `session.disconnect()`                                                                                     |
 | `Transport.shutdown()`          | `client.stop()` (surfaces non-empty `Error[]`)                                                             |
 
+> **Usage requires event subscription.** `sendAndWait` resolves with only the
+> `assistant.message` event (and may resolve `undefined`). The adapter subscribes
+> to the separate `assistant.usage` event via `session.on('assistant.usage', …)`
+> and correlates it with the message to populate `TransportResponse.usage`.
+
 ## Error handling
 
 The agent **fails closed**: it returns valid, shape-checked data or throws. It
 never silently degrades (e.g. never returns a partial answer or quietly swaps in
 `[query]`). Consumers such as `@kgpacks/query` own any fallback policy.
 
-| Error                      | Thrown when                                                                                         | Carries                             |
-| -------------------------- | --------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| `AgentNotStartedError`     | Any operation is called before `start()` (or after `stop()`).                                       | —                                   |
-| `AgentTransportError`      | SDK start/session/`sendAndWait`/timeout/`stop` failure.                                             | `cause` (the underlying SDK error). |
-| `AgentResponseFormatError` | LLM content is empty, not valid JSON after fence-stripping, or not the expected shape (`string[]`). | `rawContent` for diagnostics.       |
-| `AgentError`               | Base class for all of the above (`instanceof AgentError` catches everything).                       | —                                   |
+| Error                      | Thrown when                                                                                         | Carries                                                                                                          |
+| -------------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `AgentNotStartedError`     | Any operation is called before `start()` (or after `stop()`).                                       | —                                                                                                                |
+| `AgentTransportError`      | SDK start/session/`sendAndWait`/timeout/`stop` failure.                                             | A **redacted** `cause` — provider config, API keys, and tokens stripped (see [Security model](#security-model)). |
+| `AgentResponseFormatError` | LLM content is empty, not valid JSON after fence-stripping, or not the expected shape (`string[]`). | Size-capped `rawContent` for diagnostics.                                                                        |
+| `AgentError`               | Base class for all of the above (`instanceof AgentError` catches everything).                       | —                                                                                                                |
 
 ```ts
 export class AgentError extends Error {}
 export class AgentNotStartedError extends AgentError {}
 export class AgentTransportError extends AgentError {
+  /** Underlying SDK error with provider config / keys / tokens redacted. */
   readonly cause: unknown;
 }
 export class AgentResponseFormatError extends AgentError {
+  /** Offending model output, truncated to a fixed cap for safe diagnostics. */
   readonly rawContent: string;
 }
 ```
 
 **JSON parsing.** List-returning operations strip Markdown code fences before
 parsing — mirroring the Python `_strip_markdown_fences` — via the exported helper
-`stripMarkdownFences(text: string): string`, then `JSON.parse`. A non-array,
-non-string-array, or unparseable result raises `AgentResponseFormatError` with
-the raw content attached.
+`stripMarkdownFences(text: string): string`, then `JSON.parse` **only** (never
+`eval`/`Function`/`vm`). Parsing is prototype-pollution guarded: results carrying
+`__proto__`/`constructor` keys are rejected. A non-array, non-string-array, or
+unparseable result raises `AgentResponseFormatError` with the (size-capped) raw
+content attached.
 
 **Timeouts.** `timeoutMs` (constructor default, overridable per call) is forwarded
 to `sendAndWait`; a timeout rejects and is wrapped as `AgentTransportError`.
@@ -354,9 +369,44 @@ even on partial calls.
 `assistant.usage` (`inputTokens`, `outputTokens`, `reasoningTokens`) and the
 per-message `outputTokens`, mirroring the Python `_track_response`. Each
 operation returns the **per-call** `Usage`; `getUsage()` returns the **cumulative**
-`UsageSnapshot` (including `requestCount`). This feeds the eval cost/quota budget
-checks called out in [docs/PLAN.md](../PLAN.md) ("explicit budget/quota check
-before batch runs").
+`UsageSnapshot` (including `requestCount`). `reasoningTokens` is sourced from the
+SDK's `assistant.usage` event and folded into `totalTokens`; it extends the Python
+`_track_response` mirror rather than contradicting it (it is `0` when the provider
+reports no reasoning tokens). This feeds the eval cost/quota budget checks called
+out in [docs/PLAN.md](../PLAN.md) ("explicit budget/quota check before batch runs").
+
+## Security model
+
+The agent processes **untrusted retrieved context** (poisonable `ContextChunk.text`)
+and talks to a BYOK provider, so the contract is fail-closed and hardened:
+
+- **Tool-less runtime (primary cross-prompt-injection defense).** The Copilot
+  session runs with **fs/shell/network/tools disabled** — pure completion only.
+  Poisoned context can influence wording but **cannot trigger actions or
+  exfiltration**. Prompts delimit context as **data, not instructions**, and
+  instruct the model to ignore embedded instructions and never disclose the
+  prompt or credentials.
+- **BYOK key hygiene.** Keys/tokens are sourced **only** from env/secret store via
+  providers — never hard-coded, defaulted, or committed (no keys in `constants.ts`
+  or tests). They are never logged, never placed in `Usage`, and never attached to
+  an error: `AgentTransportError.cause` is **redacted** of provider config, API
+  keys, and tokens before it is surfaced.
+- **Output is untrusted.** Returned `answer`/arrays are raw model output. Downstream
+  consumers (`@kgpacks/query`, `@kgpacks/eval`) **must escape/validate** them to
+  prevent XSS and Cypher/SQL/command injection. The agent guarantees only shape.
+- **Cost / DoS containment.** Context is bounded by a **max chunk count and max
+  chars/tokens** with deterministic truncation; `count`/`limit` are clamped to sane
+  ranges; `timeoutMs` and subprocess concurrency are enforced. Runtime type guards
+  protect plain-JS callers. Limits live in `constants.ts`.
+- **Supply chain.** `@github/copilot-sdk` is exact-pinned `1.0.3` with a committed
+  lockfile (integrity hashes). The SDK and its transitive `@github/copilot` are
+  **not** added to `.npmrc` `onlyBuiltDependencies` (lifecycle scripts stay
+  blocked), and the subprocess runs the **vendored** CLI binary (no PATH/arg
+  override).
+- **Data egress.** Prompts (possibly sensitive corpus/PII) egress to the BYOK
+  provider — documented; BYOK lets the operator pick a compliant provider. No full
+  prompt/answer logging (debug-gated + redacted); usage is in-memory counts only,
+  no data at rest.
 
 ## Versioning strategy
 
