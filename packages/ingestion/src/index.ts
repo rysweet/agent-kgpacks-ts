@@ -201,6 +201,8 @@ export { expandFromSeeds } from './expansion.js';
 export type { ExpansionOptions, ExpandedArticle } from './expansion.js';
 export { loadPack, createSchema, buildVectorIndexes } from './loader.js';
 export type { LoadableArticle, LoadPackInput, LoadPackStats } from './loader.js';
+export { createPackWriter } from './streaming-loader.js';
+export type { PackWriter, PackWriterOptions, PackWriterStats } from './streaming-loader.js';
 export {
   EMBEDDING_DIM,
   SECTION_TABLE,

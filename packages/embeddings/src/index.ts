@@ -24,18 +24,31 @@ function getPipeline(): Promise<FeatureExtractionPipeline> {
   return pipelinePromise;
 }
 
-// Encodes the whole batch in a single pipeline call, then slices the flat
-// [n * DIM] output tensor into n order-preserving 768-dim Float32Array rows.
+// Encodes texts in bounded SUB-BATCHES, then slices each flat [n * DIM] output
+// tensor into order-preserving 768-dim Float32Array rows.
+//
+// Self-attention memory scales with (batch * seq_len^2), so embedding a large
+// caller batch of long, variable-length texts in ONE pipeline call can allocate
+// many GB (one long text pads the whole batch). Sub-batching bounds that working
+// set to SUB_BATCH sequences per ONNX call; results are unchanged because each
+// sequence is embedded independently (padding is attention-masked). BGE caps each
+// sequence at ~512 tokens, so 64 bounded-length texts keep the attention working
+// set within memory while amortizing per-call overhead for throughput.
+const SUB_BATCH = 64;
+
 async function embed(texts: string[]): Promise<Float32Array[]> {
   if (texts.length === 0) {
     return [];
   }
   const extractor = await getPipeline();
-  const output = await extractor(texts, { pooling: 'cls', normalize: true });
-  const flat = output.data as Float32Array;
   const vectors: Float32Array[] = [];
-  for (let i = 0; i < texts.length; i++) {
-    vectors.push(flat.slice(i * DIM, i * DIM + DIM));
+  for (let start = 0; start < texts.length; start += SUB_BATCH) {
+    const slice = texts.slice(start, start + SUB_BATCH);
+    const output = await extractor(slice, { pooling: 'cls', normalize: true });
+    const flat = output.data as Float32Array;
+    for (let i = 0; i < slice.length; i++) {
+      vectors.push(flat.slice(i * DIM, i * DIM + DIM));
+    }
   }
   return vectors;
 }

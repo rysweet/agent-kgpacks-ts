@@ -77,10 +77,14 @@ Flags (`scripts/build-cve-pack.mjs`):
 It prints a JSON summary (`mapped`, `articles`, `sections`, `chunks`, `entities`,
 `relationships`, `seconds`).
 
-> **Comprehensive scale.** The full corpus is ~360k records; embedding plus the
-> per-row graph load make it a long (multi-hour) batch — run it detached on a
-> server. A single recent year (~30–45k records) is a substantial, coherent pack
-> on its own. This is runnable batch tooling, not deferred work.
+> **Comprehensive scale.** The builder **streams**: each batch is embedded,
+> bulk-loaded via `createPackWriter` (one `UNWIND` per node/edge table), and
+> discarded, so peak memory is a single batch (~9 GB on a 5k-record run) regardless
+> of corpus size, and the pack is written incrementally. The remaining cost is CPU
+> embedding (~10–15 short texts/sec on CPU), so the full ~360k corpus is an
+> overnight batch — run it detached on a server. A single recent year (~30–45k
+> records) is a substantial, coherent pack on its own. This is runnable batch
+> tooling with bounded memory, not deferred work.
 
 ## Query
 
