@@ -9,10 +9,11 @@ the Python `_track_response`. The SDK changes _transport only_: per
 [docs/PLAN.md](../PLAN.md) the same model is used via **BYOK**, so model behavior
 (and therefore eval quality) is held constant.
 
-> **Status: Phase 0 skeleton → this is the Phase 1 API design.** The package
-> currently ships only a buildable placeholder (`PACKAGE_NAME`). This document is
-> the **API contract** the Phase 1 implementation builds to; it is the agent
-> analogue of [docs/packages/db.md](./db.md). No business logic exists yet.
+> **Status: implemented (Phase 1).** The package ships the `CopilotAgent` client,
+> the four operations, usage accounting, the JSON-extraction helpers, and the
+> injectable `Transport` adapter over `@github/copilot-sdk@1.0.3`. This document is
+> the **API contract** the implementation satisfies; it is the agent analogue of
+> [docs/packages/db.md](./db.md). Unit tests mock the transport and run offline.
 
 > **The agent stack will never have exact parity** (different provider/model).
 > Per [docs/PLAN.md](../PLAN.md) §"Parity Methodology" the contract guarantees
@@ -34,11 +35,11 @@ the Python `_track_response`. The SDK changes _transport only_: per
 - **Module system:** native ESM. Import named exports directly; relative imports
   use the `.js` extension under `NodeNext`.
 - **Scaffold-test impact (deliberate, signed-off):** `test/scaffold.test.ts`
-  asserts that no package other than `db`/`embeddings` carries a third-party
-  runtime dependency. Adding the SDK requires **minimally relaxing that one
-  assertion** to exempt `@github/copilot-sdk` for `agent` — the same class of
-  necessary exception already granted to `db` and `embeddings`. This is part of
-  the implementation step's Definition of Done, not this design.
+  asserted that no package other than `db`/`embeddings` carries a third-party
+  runtime dependency. Adding the SDK **minimally relaxed that one assertion** to
+  exempt `@github/copilot-sdk` for `agent` — the same class of necessary exception
+  already granted to `db` and `embeddings` — and added an exact-pin (`1.0.3`)
+  assertion for it.
 
 > **API stability caveat.** The SDK method/event names below
 > (`CopilotClient.createSession`, `CopilotSession.sendAndWait`,
