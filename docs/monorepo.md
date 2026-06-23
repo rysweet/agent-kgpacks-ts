@@ -63,7 +63,8 @@ pnpm install             # installs all workspace dependencies (frozen in CI)
 │   └── packages/
 │       ├── db.md               # @kgpacks/db API + Spike A tutorial
 │       ├── agent.md            # @kgpacks/agent Copilot SDK API contract
-│       └── packs.md            # @kgpacks/packs API + installer/security model
+│       ├── packs.md            # @kgpacks/packs API + installer/security model
+│       └── mcp.md              # @kgpacks/mcp stdio server + external contract
 └── packages/
     ├── db/                     # @kgpacks/db   — LadybugDB wrapper (+ Spike A)
     ├── embeddings/             # @kgpacks/embeddings
@@ -343,3 +344,6 @@ Phase 0 packages are deliberately uniform, so adding one is mechanical:
 - [docs/packages/packs.md](./packages/packs.md) — `@kgpacks/packs` API reference
   (manifest, versioning, installer, registry) and the archive-extraction security
   model.
+- [docs/packages/mcp.md](./packages/mcp.md) — `@kgpacks/mcp` stdio MCP server: the
+  three knowledge-pack tools, the snapshot-locked external contract, the query
+  seam, and parity notes.
