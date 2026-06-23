@@ -52,6 +52,10 @@ Requires **Node 22 LTS or newer**. No C/C++ toolchain needed —
 - [docs/packages/frontend.md](docs/packages/frontend.md) — the `@kgpacks/frontend`
   web app (`apps/frontend/`): the Vite + React 18 SPA, the typed `/api/v1` client,
   the chat SSE streaming contract, the UI components, and the build/test strategy.
+- [docs/deployment.md](docs/deployment.md) — production Docker deployment: the
+  multi-stage build, `docker compose` run, the GLIBC (no-Alpine) requirement, env
+  vars, persistence, the VECTOR/FTS first-load network prerequisite, and version
+  pinning.
 - [docs/PLAN.md](docs/PLAN.md) — the end-to-end TypeScript port plan.
 
 ## License
