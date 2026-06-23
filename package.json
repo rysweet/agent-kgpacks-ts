@@ -20,7 +20,8 @@
     "check:no-python": "node scripts/check-no-python.mjs",
     "catalog:list": "node scripts/build-catalog.mjs --list",
     "catalog:build": "node scripts/build-catalog.mjs",
-    "catalog:eval": "node scripts/eval-catalog.mjs"
+    "catalog:eval": "node scripts/eval-catalog.mjs",
+    "cve:build": "node scripts/build-cve-pack.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
