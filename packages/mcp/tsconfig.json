@@ -5,6 +5,6 @@
     "outDir": "dist",
     "rootDir": "src"
   },
-  "references": [{ "path": "../db" }, { "path": "../query" }],
+  "references": [{ "path": "../db" }, { "path": "../packs" }, { "path": "../query" }],
   "include": ["src"]
 }
