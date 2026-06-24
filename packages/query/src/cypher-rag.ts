@@ -10,7 +10,7 @@
 import type { Connection, Row } from '@kgpacks/db';
 import { stripMarkdownFences } from '@kgpacks/agent';
 
-import { CYPHER_RAG_SCORE } from './constants.js';
+import { CYPHER_RAG_ROW_CAP, CYPHER_RAG_SCORE } from './constants.js';
 import { validateCypher } from './cypher-safety.js';
 import { coerceContent, toIdString } from './row.js';
 import type { CypherGenerator, RetrieverResult, SynthesisAgent } from './types.js';
@@ -68,11 +68,12 @@ export async function cypherRagRetrieve(
   validateCypher(cypher);
 
   const rows = await conn.run<Row>(cypher);
-  const mapped = rows.map((row) => ({
+  // Cap kept rows so a broad generated MATCH cannot balloon memory; the per-query
+  // top-k still applies on top of the hard cap.
+  const limit = Math.min(opts.k ?? CYPHER_RAG_ROW_CAP, CYPHER_RAG_ROW_CAP);
+  return rows.slice(0, limit).map((row) => ({
     id: toIdString(row.id),
     score: CYPHER_RAG_SCORE,
     content: coerceContent(row.content),
   }));
-
-  return opts.k === undefined ? mapped : mapped.slice(0, opts.k);
 }

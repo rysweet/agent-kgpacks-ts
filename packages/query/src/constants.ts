@@ -68,6 +68,13 @@ export const DEFAULT_FEW_SHOT_N = 3;
 export const CYPHER_RAG_SCORE = 1;
 
 /**
+ * Hard cap on rows kept from an agent-generated Cypher query, so a broad (but
+ * still read-only / validated) `MATCH … RETURN` cannot balloon memory. A tighter
+ * DB-side bound depends on the generator including a `LIMIT` in the query itself.
+ */
+export const CYPHER_RAG_ROW_CAP = 200;
+
+/**
  * Read-only Cypher allow-list prefixes. A validated query must start with one of
  * these (reference: `upper.startswith("MATCH") or upper.startswith("CALL")`).
  */

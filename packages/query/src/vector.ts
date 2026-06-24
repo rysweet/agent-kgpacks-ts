@@ -8,6 +8,7 @@
 import type { Connection, Row } from '@kgpacks/db';
 
 import { clamp01, coerceContent, toIdString } from './row.js';
+import { DEFAULT_SIMILARITY } from './constants.js';
 import type { Embedder, RetrieverResult } from './types.js';
 
 /** Schema coordinates for the vector index to search. */
@@ -60,12 +61,17 @@ export async function runVectorSearch(
     { emb, k },
   );
 
-  return rows.map((row) => ({
-    rawId: row.id,
-    id: toIdString(row.id),
-    score: clamp01(1 - Number(row.distance)),
-    content: coerceContent(row.content),
-  }));
+  return rows.map((row) => {
+    // A missing / non-numeric distance must NOT become a NaN score (NaN poisons
+    // hybrid accumulation and sort); fall back to the documented DEFAULT_SIMILARITY.
+    const distance = Number(row.distance);
+    return {
+      rawId: row.id,
+      id: toIdString(row.id),
+      score: Number.isFinite(distance) ? clamp01(1 - distance) : DEFAULT_SIMILARITY,
+      content: coerceContent(row.content),
+    };
+  });
 }
 
 /** Vector retrieval: top-k nodes ranked by cosine similarity (highest first). */

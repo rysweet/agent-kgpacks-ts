@@ -191,7 +191,11 @@ export function createRetriever(conn: Connection, opts: CreateRetrieverOptions =
     }
 
     // Stage 2: graph reranker -- LINKS_TO neighbour boost.
-    if (options.enableReranker === true) {
+    // Skipped when the cross-encoder is also enabled: graphRerank only re-scores a
+    // membership-preserving candidate set, and the cross-encoder then overwrites
+    // every score, so running the reranker's per-seed DB queries would be wasted
+    // work that does not change the final result.
+    if (options.enableReranker === true && options.enableCrossEncoder !== true) {
       results = await graphRerank(conn, results, {
         ...opts.reranker,
         nodeTable: opts.reranker?.nodeTable ?? config.nodeTable,
