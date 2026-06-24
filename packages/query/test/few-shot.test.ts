@@ -70,6 +70,17 @@ describe('selectFewShot — top-n by cosine, deterministic', () => {
     expect(embedder.queryCalls).toEqual([['q']]);
     expect(embedder.docCalls).toEqual([['delta', 'beta', 'gamma', 'alpha']]);
   });
+
+  it('embeds the example corpus only ONCE across repeated queries (cached), query per call', async () => {
+    const embedder = lookupEmbedder(VECTORS);
+
+    await selectFewShot(embedder, 'q1', EXAMPLES, 2);
+    await selectFewShot(embedder, 'q2', EXAMPLES, 2);
+    await selectFewShot(embedder, 'q3', EXAMPLES, 2);
+
+    expect(embedder.docCalls).toHaveLength(1); // static example corpus embedded once
+    expect(embedder.queryCalls).toHaveLength(3); // only the query is re-embedded per call
+  });
 });
 
 describe('selectFewShot — no-op without loading the model', () => {

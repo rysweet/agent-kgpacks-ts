@@ -50,14 +50,24 @@ class MsMarcoCrossEncoder implements CrossEncoder {
       return [];
     }
     const { tokenizer, model } = await load();
-    // Pair the single query against each passage in one batched forward pass.
-    const inputs = tokenizer(
-      passages.map(() => query),
-      { text_pair: passages, padding: true, truncation: true },
-    );
-    const output = (await model(inputs)) as { logits: { tolist(): number[][] } };
-    // ms-marco's relevance head emits one logit per pair (shape [n, 1]).
-    return output.logits.tolist().map((row) => row[0]);
+    // Sub-batch the forward passes (like the embedder) so a large candidate list —
+    // e.g. when Cypher-RAG inflates it before the final top-k slice — cannot spike
+    // memory by padding every passage to the single longest one.
+    const SUB_BATCH = 32;
+    const scores: number[] = [];
+    for (let start = 0; start < passages.length; start += SUB_BATCH) {
+      const slice = passages.slice(start, start + SUB_BATCH);
+      const inputs = tokenizer(
+        slice.map(() => query),
+        { text_pair: slice, padding: true, truncation: true },
+      );
+      const output = (await model(inputs)) as { logits: { tolist(): number[][] } };
+      // ms-marco's relevance head emits one logit per pair (shape [n, 1]).
+      for (const row of output.logits.tolist()) {
+        scores.push(row[0]);
+      }
+    }
+    return scores;
   }
 
   async rerank(

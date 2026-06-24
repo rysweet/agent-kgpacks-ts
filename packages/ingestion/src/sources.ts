@@ -177,8 +177,8 @@ export function extractLinks(html: string, baseUrl: string): string[] {
  * heading becomes the lead section (level 0). Sections with empty content are
  * dropped, but the lead is always kept (it may hold the article intro).
  */
-export function htmlToSections(html: string, leadTitle: string): Section[] {
-  const withoutChrome = html.replace(SKIP_BLOCKS, ' ');
+export function htmlToSections(html: string, leadTitle: string, preStripped = false): Section[] {
+  const withoutChrome = preStripped ? html : html.replace(SKIP_BLOCKS, ' ');
 
   // Mark headings, then linearize remaining block boundaries to newlines.
   const marked = withoutChrome.replace(HEADING, (_m, level: string, inner: string) => {
@@ -245,7 +245,11 @@ export function parseArticleHtml(html: string, url: string, title?: string): Art
       ? canonical
       : extractTitle(html, url);
 
-  const sections = htmlToSections(html, resolvedTitle).map((section, index) => ({
+  // Strip chrome (script/style/nav/footer/…) ONCE and reuse for both sectioning
+  // and link extraction, instead of running the SKIP_BLOCKS regex twice.
+  const withoutChrome = html.replace(SKIP_BLOCKS, ' ');
+
+  const sections = htmlToSections(withoutChrome, resolvedTitle, true).map((section, index) => ({
     ...section,
     id: `${resolvedTitle}#${index}`,
   }));
@@ -257,7 +261,7 @@ export function parseArticleHtml(html: string, url: string, title?: string): Art
     category: categories[0],
     sections,
     // Extract links from content only — chrome (nav/footer/header) is not followed.
-    links: extractLinks(html.replace(SKIP_BLOCKS, ' '), url),
+    links: extractLinks(withoutChrome, url),
   };
 }
 

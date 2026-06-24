@@ -9,6 +9,38 @@
 
 import type { FewShotEmbedder, FewShotExample } from './types.js';
 
+// The few-shot example corpus is fixed at retriever construction, so its BGE
+// embeddings are query-INDEPENDENT. Cache them keyed by (embedder, examples array)
+// — so a different embedder or corpus caches independently and entries GC with
+// their keys — instead of re-running ONNX inference over the whole corpus on every
+// query. The cached value is the in-flight promise; a failed embedding is evicted
+// so the next call retries.
+const exampleVectorCache = new WeakMap<
+  FewShotEmbedder,
+  WeakMap<FewShotExample[], Promise<Float32Array[]>>
+>();
+
+function exampleVectors(
+  embedder: FewShotEmbedder,
+  examples: FewShotExample[],
+): Promise<Float32Array[]> {
+  let perEmbedder = exampleVectorCache.get(embedder);
+  if (perEmbedder === undefined) {
+    perEmbedder = new WeakMap();
+    exampleVectorCache.set(embedder, perEmbedder);
+  }
+  let cached = perEmbedder.get(examples);
+  if (cached === undefined) {
+    const owner = perEmbedder;
+    cached = embedder.generate(examples.map((example) => example.text)).catch((err: unknown) => {
+      owner.delete(examples);
+      throw err;
+    });
+    perEmbedder.set(examples, cached);
+  }
+  return cached;
+}
+
 function cosine(a: Float32Array, b: Float32Array): number {
   let dot = 0;
   let normA = 0;
@@ -41,12 +73,12 @@ export async function selectFewShot(
   }
 
   const [queryVector] = await embedder.generateQuery([query]);
-  const exampleVectors = await embedder.generate(examples.map((example) => example.text));
+  const vectors = await exampleVectors(embedder, examples);
 
   return examples
     .map((example, index) => ({
       example,
-      score: queryVector === undefined ? 0 : cosine(queryVector, exampleVectors[index]),
+      score: queryVector === undefined ? 0 : cosine(queryVector, vectors[index]),
     }))
     .sort(
       (a, b) =>
