@@ -340,3 +340,20 @@ describe('retrieve — VECTOR/FTS extension loading', () => {
     expect(conn.loadedExtensions.filter((e) => e === 'vector')).toHaveLength(1);
   });
 });
+
+describe('vector retrieval — missing distance fallback', () => {
+  it('uses DEFAULT_SIMILARITY (0.5) when a row has no numeric distance (not NaN)', async () => {
+    // Regression: clamp01(1 - Number(undefined)) === NaN, which poisons hybrid
+    // accumulation and sort. A missing/non-numeric distance must fall back to 0.5.
+    const responder: Responder = (cypher) =>
+      cypher.includes('QUERY_VECTOR_INDEX') ? [{ id: 7, content: 'no distance here' }] : [];
+    const conn = new RecordingConnection(responder);
+    const retriever = createRetriever(conn.asConnection(), { embedder: queryEmbedder() });
+
+    const out = await retriever.retrieve('q', { k: 1 });
+
+    expect(out).toHaveLength(1);
+    expect(Number.isNaN(out[0].score)).toBe(false);
+    expect(out[0].score).toBe(0.5);
+  });
+});
