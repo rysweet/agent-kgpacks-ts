@@ -8,7 +8,7 @@ single model held constant across both arms**. Ported from the upstream Python
 `skill_evaluators.py` — onto `@kgpacks/query`, `@kgpacks/agent`, and
 `@kgpacks/db`.
 
-> **Status:** **implemented (Phase 1, read-side).** This README and
+> This README and
 > [docs/packages/eval.md](../../docs/packages/eval.md) describe the shipped API:
 > the `runEval` runner, the `withPackArm` / `trainingOnlyArm` baselines, the
 > `createLlmJudge` factory, the skill-evaluator registry, the question loader, the

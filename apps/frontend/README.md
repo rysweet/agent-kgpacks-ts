@@ -9,7 +9,7 @@ API-client contract of the original Python repo's React SPA
 ([`rysweet/agent-kgpacks/frontend/`](https://github.com/rysweet/agent-kgpacks))
 without copying its code.
 
-> **Status: implemented.** This README and
+> This README and
 > [docs/packages/frontend.md](../../docs/packages/frontend.md) describe the shipped
 > app. The SPA, the typed `ApiClient`, the `streamChat` SSE helper, the
 > `useChatStream` hook, and the `ChatPanel` / `SearchBox` / `ResultsView`

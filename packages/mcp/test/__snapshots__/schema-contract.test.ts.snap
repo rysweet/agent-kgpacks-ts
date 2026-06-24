@@ -49,15 +49,16 @@ Args:
   {
     "_meta": undefined,
     "annotations": undefined,
-    "description": "Query a knowledge pack's graph and return an answer with sources.
+    "description": "Query a knowledge pack's graph and return ranked retrieval results.
 
-Performs vector + graph search over the pack's LadybugDB database and
-synthesizes a natural-language answer.
+Performs vector + graph search over the pack's LadybugDB database and returns the
+matching passages (id, content, score). It does not synthesize a natural-language
+answer.
 
 Args:
     pack_name: Directory name of the pack (e.g. 'rust-expert').
     question: Natural language question to answer.
-    max_results: Maximum number of graph results to retrieve (1-1000).",
+    max_results: Maximum number of retrieval results (1-50).",
     "execution": {
       "taskSupport": "forbidden",
     },

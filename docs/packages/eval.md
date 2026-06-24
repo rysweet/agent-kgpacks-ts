@@ -10,7 +10,7 @@ upstream Python `wikigr/packs/eval` modules — `runner.py` (orchestration),
 **pinned to a single judge model held constant across both arms**, exactly as
 [docs/PLAN.md](../PLAN.md) Acceptance Criteria demand.
 
-> **Status: implemented (Phase 1, read-side).** The package ships the eval
+> The package ships the eval
 > `runEval` runner, the two baseline arms (`withPackArm` / `trainingOnlyArm`), the
 > `createLlmJudge` factory, the skill-evaluator registry, the question loader, the
 > deterministic stratified sampler, and the pure metric aggregators. This document
@@ -575,11 +575,11 @@ question** — `runEval` guarantees this.
 
 ```ts
 /** Default judge model id, held CONSTANT across both arms. docs/PLAN.md calls for
- *  "Claude Opus"; the reference (wikigr) judge model is not vendored in this repo,
- *  so this is a documented, overridable placeholder — mirroring @kgpacks/agent's
+ *  "Claude Opus"; `claude-opus-4.5` is the Opus model served by the authenticated
+ *  GitHub Copilot CLI, so it is the concrete pin here — mirroring @kgpacks/agent's
  *  DEFAULT_SYNTHESIS_MODEL. It is pinned via the judge transport's open({ model });
  *  overriding it is a re-baseline event. */
-export const DEFAULT_JUDGE_MODEL = 'claude-opus-4.1';
+export const DEFAULT_JUDGE_MODEL = 'claude-opus-4.5';
 
 /** Default questions-per-pack for stratified sampling. */
 export const DEFAULT_PER_PACK = 3;

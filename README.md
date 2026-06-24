@@ -66,7 +66,8 @@ wikigr create --pack quantum --seeds https://en.wikipedia.org/wiki/Quantum_entan
 wikigr query quantum "What is quantum entanglement?"
 
 # Serve the HTTP API (chat + SSE, search, graph) and the web UI
-pnpm --filter @kgpacks/backend start
+pnpm --filter @kgpacks/backend build
+WIKIGR_DATABASE_PATH=data/packs/quantum/pack.db node packages/backend/dist/index.js
 pnpm --filter @kgpacks/frontend dev
 ```
 

@@ -10,7 +10,7 @@ detail** — plus the supporting `autocomplete`, `categories`, `stats`, and
 and **preserves the exact route contract and JSON response shapes** so the
 existing frontend stays drop-in compatible.
 
-> **Status: Phase 1 — implemented.** This README and
+> This README and
 > [docs/packages/backend.md](../../docs/packages/backend.md) describe the shipped
 > API. The server, all `/api/v1` routes, the SSE stream, the per-request
 > connection manager, and per-route rate limiting are live and covered by offline

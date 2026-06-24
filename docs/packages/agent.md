@@ -9,7 +9,7 @@ the Python `_track_response`. The SDK changes _transport only_: per
 [docs/PLAN.md](../PLAN.md) the same model is used via **BYOK**, so model behavior
 (and therefore eval quality) is held constant.
 
-> **Status: implemented (Phase 1).** The package ships the `CopilotAgent` client,
+> The package ships the `CopilotAgent` client,
 > the four operations, usage accounting, the JSON-extraction helpers, and the
 > injectable `Transport` adapter over `@github/copilot-sdk@1.0.3`. This document is
 > the **API contract** the implementation satisfies; it is the agent analogue of

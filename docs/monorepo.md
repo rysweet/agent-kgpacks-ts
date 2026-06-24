@@ -1,26 +1,16 @@
-# Monorepo Foundation (Phase 0)
+# Monorepo Layout
 
 This document describes the TypeScript monorepo that hosts the `agent-kgpacks`
 TypeScript port. It covers the workspace layout, prerequisites, the everyday
 build/test/lint commands, the shared configuration, continuous integration, and
 how to add a new package.
 
-The scaffold implements **Phase 0 — Foundations** from
-[docs/PLAN.md](./PLAN.md): a pnpm workspace targeting **Node 22 LTS** with
-**strict TypeScript ESM**, a shared base `tsconfig`, ESLint + Prettier, Vitest,
-a CI pipeline, and a hard guarantee that **no runtime package depends on or
-invokes Python**. The only package containing logic at this stage is
-[`@kgpacks/db`](./packages/db.md), which carries a minimal LadybugDB wrapper and
-the first slice of **Spike A** — a synthetic vector smoke test. The remainder of
-Spike A (real-pack read, FTS + graph queries, and the concurrency-model decision)
-is still outstanding; see
-[`docs/packages/db.md`](./packages/db.md#spike-a-vector-smoke-test).
-
-> Status: the foundation is in place. No business logic exists yet beyond the
-> Spike A vector smoke-test slice in `@kgpacks/db` — every other package is a
-> buildable skeleton.
-
-## Prerequisites
+The workspace is a pnpm monorepo targeting **Node 22 LTS** with **strict
+TypeScript ESM**, a shared base `tsconfig`, ESLint + Prettier, Vitest, a CI
+pipeline, and a hard guarantee that **no runtime package depends on or invokes
+Python**. It hosts the full platform: the `@kgpacks/*` library packages (db,
+embeddings, agent, ingestion, query, eval, packs, backend, mcp, cli), the
+`wikigr` CLI, and the Vite + React frontend (`apps/frontend`).
 
 | Tool     | Version                      | Notes                                                                                                |
 | -------- | ---------------------------- | ---------------------------------------------------------------------------------------------------- |
@@ -71,13 +61,14 @@ pnpm install             # installs all workspace dependencies (frozen in CI)
 ├── apps/
 │   └── frontend/               # @kgpacks/frontend — Vite + React 18 SPA
 └── packages/
-    ├── db/                     # @kgpacks/db   — LadybugDB wrapper (+ Spike A)
+    ├── db/                     # @kgpacks/db   — LadybugDB wrapper
     ├── embeddings/             # @kgpacks/embeddings
     ├── agent/                  # @kgpacks/agent
+    ├── ingestion/              # @kgpacks/ingestion — pack build pipeline
     ├── query/                  # @kgpacks/query
     ├── packs/                  # @kgpacks/packs
     ├── backend/                # @kgpacks/backend
-    ├── cli/                    # @kgpacks/cli
+    ├── cli/                    # @kgpacks/cli (wikigr)
     ├── mcp/                    # @kgpacks/mcp
     └── eval/                   # @kgpacks/eval
 ```
@@ -88,34 +79,32 @@ Each package under `packages/` follows the same shape:
 packages/<name>/
 ├── package.json     # name "@kgpacks/<name>", "type": "module", scripts
 ├── tsconfig.json    # extends ../../tsconfig.base.json (outDir dist, rootDir src)
-├── README.md        # one-paragraph responsibility stub (from docs/PLAN.md)
+├── README.md        # the package's responsibility + public-surface reference
 └── src/
-    └── index.ts     # placeholder entry point
+    └── index.ts     # public entry point
 ```
 
 ### Packages and their responsibilities
 
-These mirror the Default Stack in [docs/PLAN.md](./PLAN.md). In Phase 0 they are
-buildable skeletons; logic is added later, gated by parity tests (see the plan's
-phase ordering).
+These implement the Default Stack in [docs/PLAN.md](./PLAN.md).
 
-| Package               | Responsibility                                                                                                                                                     |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `@kgpacks/db`         | LadybugDB wrapper over `@ladybugdb/core` (connection management, parameters, Cypher helpers, extension loading). **Contains the Spike A vector smoke-test slice.** |
-| `@kgpacks/embeddings` | Transformers.js BGE query embeddings (with the BGE query prefix) + cross-encoder reranker.                                                                         |
-| `@kgpacks/agent`      | Copilot SDK client/session management; synthesis, query expansion, multi-query, seed-article identification.                                                       |
-| `@kgpacks/query`      | Retrieval pipeline: vector search, graph reranker, multi-doc synthesis, few-shot, cross-encoder, Cypher-RAG, Cypher safety validation.                             |
-| `@kgpacks/packs`      | Manifest model, installer, validator, registry, distribution (`tar.gz`), versioning.                                                                               |
-| `@kgpacks/backend`    | Fastify + SSE service (replaces FastAPI): chat (POST + GET stream), search, graph, hybrid, articles; rate limiting.                                                |
-| `@kgpacks/cli`        | `commander`/`yargs` CLI: query + pack subcommands (ingestion subcommands arrive in Phase 2).                                                                       |
-| `@kgpacks/mcp`        | TypeScript MCP server exposing `list_packs`, `pack_info`, `query_knowledge_pack`.                                                                                  |
-| `@kgpacks/eval`       | Eval runner + judge (Copilot SDK), baselines, skill evaluators.                                                                                                    |
+| Package               | Responsibility                                                                                                                                 |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@kgpacks/db`         | LadybugDB wrapper over `@ladybugdb/core` (connection management, parameters, Cypher helpers, extension loading).                               |
+| `@kgpacks/embeddings` | Transformers.js BGE document/query embeddings (with the BGE query prefix) + cross-encoder reranker.                                            |
+| `@kgpacks/agent`      | Copilot SDK client/session management; synthesis, query expansion, multi-query, seed-article identification.                                   |
+| `@kgpacks/ingestion`  | Pack build pipeline: SSRF-safe fetch, clean/sectionize, LLM (or structured) extraction, chunk, BGE embed, and bulk load into a LadybugDB pack. |
+| `@kgpacks/query`      | Retrieval pipeline: vector search, graph reranker, multi-doc synthesis, few-shot, cross-encoder, Cypher-RAG, Cypher safety validation.         |
+| `@kgpacks/packs`      | Manifest model, installer, validator, registry, distribution (`tar.gz`), versioning.                                                           |
+| `@kgpacks/backend`    | Fastify + SSE service (replaces FastAPI): chat (POST + GET stream), search, graph, hybrid, articles; rate limiting.                            |
+| `@kgpacks/cli`        | The `wikigr` CLI: query, ingestion (`create`/`update`/`research-sources`), and pack subcommands, plus `pack eval`.                             |
+| `@kgpacks/mcp`        | TypeScript MCP server exposing `list_packs`, `pack_info`, `query_knowledge_pack`.                                                              |
+| `@kgpacks/eval`       | Eval runner + judge (Copilot SDK), baselines, skill evaluators.                                                                                |
 
-> `@kgpacks/ingestion` is intentionally **not** scaffolded in Phase 0 — it lands
-> in Phase 2. The **frontend** has since shipped as the workspace's first
-> _application_: it lives under [`apps/frontend/`](../apps/frontend/README.md)
-> (not `packages/`) because it is a deployable SPA rather than a library, and its
-> `apps/` placement keeps it out of the `packages/*`-only structural suites. See
+> The **frontend** ships as the workspace's first _application_: it lives under
+> [`apps/frontend/`](../apps/frontend/README.md) (not `packages/`) because it is a
+> deployable SPA rather than a library, and its `apps/` placement keeps it out of
+> the `packages/*`-only structural suites. See
 > [docs/packages/frontend.md](./packages/frontend.md).
 
 ## Everyday commands
@@ -135,7 +124,7 @@ across every workspace package with `pnpm -r` (recursive).
 
 ### The canonical acceptance check
 
-The Phase 0 definition of done is that the following passes from a clean clone:
+A clean clone must pass the following:
 
 ```bash
 pnpm install && pnpm -r build && pnpm -r test
@@ -247,7 +236,7 @@ Configures pnpm for reproducible, secure installs:
 
 `vitest.config.ts` lives at the root and is shared by all packages. Each
 package's `test` script is `vitest run`, and the runner is configured with
-`--passWithNoTests` so skeleton packages with no specs still report success.
+`--passWithNoTests` so a package with no specs still reports success.
 
 ## Continuous integration
 
@@ -304,7 +293,7 @@ node scripts/check-no-python.mjs
 
 ## Adding a new package
 
-Phase 0 packages are deliberately uniform, so adding one is mechanical:
+Packages are deliberately uniform, so adding one is mechanical:
 
 1. Create `packages/<name>/` with this structure:
 
@@ -339,7 +328,7 @@ Phase 0 packages are deliberately uniform, so adding one is mechanical:
 4. **`README.md`** — one paragraph describing the package's responsibility (use
    the matching row from the [responsibilities table](#packages-and-their-responsibilities)).
 
-5. **`src/index.ts`** — start with a placeholder export.
+5. **`src/index.ts`** — the package's public entry point.
 
 6. Run `pnpm install` so pnpm links the new workspace, then
    `pnpm --filter @kgpacks/<name> build` to confirm it compiles.
