@@ -37,6 +37,10 @@ export async function runEval(options: RunEvalOptions): Promise<EvalReport> {
   const withPackVerdicts: JudgeVerdict[] = [];
   const trainingOnlyVerdicts: JudgeVerdict[] = [];
 
+  // Sequential by design: both arms and the judge typically share ONE Copilot
+  // agent/session, and concurrent sends on a single session are not safe. Parallel
+  // evaluation would require independent agent instances (separate subprocesses);
+  // since the eval is an offline batch, correctness is preferred over wall-clock.
   for (const question of sampled) {
     const evaluator = registry.resolve(question.skill);
 
