@@ -67,7 +67,7 @@ strategy, and the security model. For a short overview and quick start, see the
 
 ## Status
 
-> **Status: implemented.** This document and the
+> This document and the
 > [package README](../../apps/frontend/README.md) describe the shipped app. The
 > Vite + React 18 + strict-TS SPA, the typed `ApiClient`, the `streamChat` SSE
 > helper, the `useChatStream` hook, and the `ChatPanel` / `SearchBox` /

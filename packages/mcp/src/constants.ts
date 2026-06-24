@@ -50,15 +50,16 @@ export const PACK_INFO_DESCRIPTION = `Return full manifest details for a specifi
 Args:
     pack_name: Directory name of the pack (e.g. 'rust-expert').`;
 
-export const QUERY_KNOWLEDGE_PACK_DESCRIPTION = `Query a knowledge pack's graph and return an answer with sources.
+export const QUERY_KNOWLEDGE_PACK_DESCRIPTION = `Query a knowledge pack's graph and return ranked retrieval results.
 
-Performs vector + graph search over the pack's LadybugDB database and
-synthesizes a natural-language answer.
+Performs vector + graph search over the pack's LadybugDB database and returns the
+matching passages (id, content, score). It does not synthesize a natural-language
+answer.
 
 Args:
     pack_name: Directory name of the pack (e.g. 'rust-expert').
     question: Natural language question to answer.
-    max_results: Maximum number of graph results to retrieve (1-1000).`;
+    max_results: Maximum number of retrieval results (1-50).`;
 
 /**
  * Error message for an unknown / invalid pack name. Matches the upstream

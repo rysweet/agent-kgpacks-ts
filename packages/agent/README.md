@@ -7,7 +7,7 @@ that exposes the four agent operations carried over from the Python system —
 **seed-article identification** — plus **token/usage accounting** equivalent to
 the Python `_track_response`.
 
-> **Status:** **implemented.** This README and
+> This README and
 > [docs/packages/agent.md](../../docs/packages/agent.md) describe the shipped
 > Phase 1 API; the `CopilotAgent` client, the four operations, usage accounting,
 > and the injectable `Transport` seam are live and covered by offline tests.

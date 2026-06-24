@@ -195,7 +195,7 @@ exist — otherwise exit `3`.
 | `--questions <dir>`  | no       | the packs dir (reads `<dir>/<pack>/eval_questions.json`) | question-loader base directory                |
 | `--sample <mode>`    | no       | `full`                                                   | `full` \| `stratified` (`SampleOptions.mode`) |
 | `--per-pack <n>`     | no       | `3`                                                      | questions/pack in `stratified` mode           |
-| `--judge-model <id>` | no       | `claude-opus-4.1`                                        | judge model id (overriding it re-baselines)   |
+| `--judge-model <id>` | no       | `claude-opus-4.5`                                        | judge model id (overriding it re-baselines)   |
 
 It prints the full [`EvalReport`](../eval) as JSON (per-question verdicts, per-arm
 aggregates, and the with-pack-vs-training-only comparison) and exits `0`:

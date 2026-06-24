@@ -6,7 +6,7 @@ production container. It covers the multi-stage `Dockerfile`, the
 requirement, the environment-variable contract, persistence, the VECTOR/FTS
 extension behavior, version pinning, and the CI image-build job.
 
-> Status: **Phase 3 — Infrastructure.** The container packages only the HTTP API
+> The container packages only the HTTP API
 > server (`packages/backend`, exposed as `node dist/index.js`). It is a strict-ESM,
 > **Python-free** image: the parity oracle under `parity/oracle` is a
 > development-time tool and is never part of the build context or the shipped
