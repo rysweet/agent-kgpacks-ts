@@ -285,6 +285,9 @@ export function createLlmExtractor(options: LlmExtractorOptions = {}): Extractor
   let ownTransport: Transport | undefined;
 
   async function getSession(): Promise<TransportSession> {
+    if (session !== undefined) {
+      return session;
+    }
     const transport = options.transport;
     if (transport === undefined) {
       // Lazy import keeps the heavy SDK out of the offline test/build path.
@@ -293,7 +296,7 @@ export function createLlmExtractor(options: LlmExtractorOptions = {}): Extractor
       session = await ownTransport.open({ model });
       return session;
     }
-    session ??= await transport.open({ model });
+    session = await transport.open({ model });
     return session;
   }
 

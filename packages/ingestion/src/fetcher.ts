@@ -25,11 +25,19 @@ import { isIP } from 'node:net';
 import { lookup as dnsLookup } from 'node:dns/promises';
 
 import { BlockedUrlError, FetchError } from './errors.js';
-import type { Fetcher, FetchImpl, FetchInit, LookupFn, ResolvedAddress } from './types.js';
+import type {
+  Fetcher,
+  FetchImpl,
+  FetchInit,
+  FetchResponse,
+  LookupFn,
+  ResolvedAddress,
+} from './types.js';
 
 const DEFAULT_USER_AGENT = 'kgpacks-ingestion/0.0 (+knowledge-graph-builder)';
 const DEFAULT_MAX_REDIRECTS = 5;
 const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_MAX_BYTES = 25 * 1024 * 1024; // 25 MiB
 
 /** Options for {@link createSafeFetcher}. */
 export interface SafeFetcherOptions {
@@ -43,6 +51,72 @@ export interface SafeFetcherOptions {
   userAgent?: string;
   /** Per-request timeout in milliseconds. Default 30000. */
   timeoutMs?: number;
+  /** Maximum response body size in bytes (fail closed when exceeded). Default 25 MiB. */
+  maxBytes?: number;
+}
+
+/** Releases an unconsumed response body (best-effort) so the socket isn't held until GC. */
+async function drainBody(response: FetchResponse): Promise<void> {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // Best-effort: a body that cannot be cancelled is not actionable here.
+  }
+}
+
+/**
+ * Reads a response body as text, enforcing a hard byte cap. Uses the raw stream
+ * when available (true streaming, so an oversized body is rejected mid-read before
+ * it is fully buffered); falls back to `text()` with a post-read size check for
+ * test doubles that omit `body`.
+ */
+async function readBodyCapped(
+  response: FetchResponse,
+  maxBytes: number,
+  url: string,
+): Promise<string> {
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await drainBody(response);
+    throw new FetchError(
+      `Response body too large for ${url}: ${declared} bytes exceeds cap ${maxBytes}`,
+      url,
+      response.status,
+    );
+  }
+
+  const stream = response.body;
+  if (stream == null) {
+    const text = await response.text();
+    if (Buffer.byteLength(text) > maxBytes) {
+      throw new FetchError(`Response body exceeds cap ${maxBytes} bytes for ${url}`, url);
+    }
+    return text;
+  }
+
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        total += value.byteLength;
+        if (total > maxBytes) {
+          throw new FetchError(
+            `Response body exceeds cap ${maxBytes} bytes for ${url}`,
+            url,
+            response.status,
+          );
+        }
+        chunks.push(value);
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  return Buffer.concat(chunks).toString('utf8');
 }
 
 /** Parsed IP address as raw bytes, tagged by family. */
@@ -233,6 +307,7 @@ export function createSafeFetcher(options: SafeFetcherOptions = {}): Fetcher {
   const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
   const userAgent = options.userAgent ?? DEFAULT_USER_AGENT;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
 
   if (typeof fetchImpl !== 'function') {
     throw new FetchError('No fetch implementation available', '');
@@ -245,42 +320,52 @@ export function createSafeFetcher(options: SafeFetcherOptions = {}): Fetcher {
       await assertUrlAllowed(currentUrl, lookup);
 
       const controller = new AbortController();
+      // The timer stays armed across the body read (cleared only in finally), so a
+      // slow-drip body is aborted by the timeout, not just the header exchange.
       const timer = setTimeout(() => controller.abort(), timeoutMs);
-      let response: Awaited<ReturnType<FetchImpl>>;
       try {
-        const init: FetchInit = {
-          redirect: 'manual',
-          headers: { 'User-Agent': userAgent, Accept: 'text/html,application/xhtml+xml' },
-          signal: controller.signal,
-        };
-        response = await fetchImpl(currentUrl, init);
-      } catch (err) {
-        throw new FetchError(
-          `Fetch failed for ${currentUrl}: ${(err as Error).message}`,
-          currentUrl,
-        );
+        let response: Awaited<ReturnType<FetchImpl>>;
+        try {
+          const init: FetchInit = {
+            redirect: 'manual',
+            headers: { 'User-Agent': userAgent, Accept: 'text/html,application/xhtml+xml' },
+            signal: controller.signal,
+          };
+          response = await fetchImpl(currentUrl, init);
+        } catch (err) {
+          throw new FetchError(
+            `Fetch failed for ${currentUrl}: ${(err as Error).message}`,
+            currentUrl,
+          );
+        }
+
+        const status = response.status;
+        if (status >= 300 && status < 400) {
+          const location = response.headers.get('location');
+          await drainBody(response); // release the connection before the next hop
+          if (location === null || location === '') {
+            throw new FetchError(
+              `Redirect ${status} without a Location header`,
+              currentUrl,
+              status,
+            );
+          }
+          // Resolve relative redirects against the current URL, then re-validate.
+          currentUrl = new URL(location, currentUrl).toString();
+          continue;
+        }
+        if (status < 200 || status >= 300) {
+          await drainBody(response);
+          throw new FetchError(
+            `Unexpected HTTP status ${status} for ${currentUrl}`,
+            currentUrl,
+            status,
+          );
+        }
+        return await readBodyCapped(response, maxBytes, currentUrl);
       } finally {
         clearTimeout(timer);
       }
-
-      const status = response.status;
-      if (status >= 300 && status < 400) {
-        const location = response.headers.get('location');
-        if (location === null || location === '') {
-          throw new FetchError(`Redirect ${status} without a Location header`, currentUrl, status);
-        }
-        // Resolve relative redirects against the current URL, then re-validate.
-        currentUrl = new URL(location, currentUrl).toString();
-        continue;
-      }
-      if (status < 200 || status >= 300) {
-        throw new FetchError(
-          `Unexpected HTTP status ${status} for ${currentUrl}`,
-          currentUrl,
-          status,
-        );
-      }
-      return response.text();
     }
 
     throw new FetchError(
