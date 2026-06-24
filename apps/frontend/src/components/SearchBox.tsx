@@ -22,6 +22,7 @@ export function SearchBox({ api, onResults }: SearchBoxProps) {
   const [query, setQuery] = useState('');
   const [suggestions, setSuggestions] = useState<AutocompleteSuggestion[]>([]);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -49,19 +50,31 @@ export function SearchBox({ api, onResults }: SearchBoxProps) {
     };
   }, [api, query]);
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const trimmed = query.trim();
+  const runSearch = async (raw: string): Promise<void> => {
+    const trimmed = raw.trim();
     if (trimmed.length === 0 || busy) return;
     setBusy(true);
+    setError(null);
     try {
       const results = await api.search({ query: trimmed });
       onResults(results);
     } catch {
-      // Errors are surfaced by the parent's result/empty state; nothing to do here.
+      // Surface the failure instead of leaving stale results with no feedback.
+      setError('Search failed. Please try again.');
     } finally {
       setBusy(false);
     }
+  };
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    void runSearch(query);
+  };
+
+  const selectSuggestion = (title: string): void => {
+    setQuery(title);
+    setSuggestions([]);
+    void runSearch(title);
   };
 
   return (
@@ -77,14 +90,26 @@ export function SearchBox({ api, onResults }: SearchBoxProps) {
           onChange={(event) => setQuery(event.target.value)}
         />
         <button type="submit" disabled={busy || query.trim().length === 0}>
-          Search
+          {busy ? 'Searching…' : 'Search'}
         </button>
       </form>
 
+      {error && (
+        <p role="alert" className="search-error">
+          {error}
+        </p>
+      )}
+
+      {/* Suggestions are keyboard-operable buttons (Enter/Space select); the list is
+          a polite live region so screen-reader users hear that suggestions appeared. */}
       {suggestions.length > 0 && (
-        <ul className="search-suggestions">
+        <ul className="search-suggestions" aria-live="polite" aria-label="Suggestions">
           {suggestions.map((suggestion) => (
-            <li key={suggestion.title}>{suggestion.title}</li>
+            <li key={suggestion.title}>
+              <button type="button" onClick={() => selectSuggestion(suggestion.title)}>
+                {suggestion.title}
+              </button>
+            </li>
           ))}
         </ul>
       )}
