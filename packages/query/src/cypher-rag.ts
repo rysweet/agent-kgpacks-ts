@@ -68,8 +68,12 @@ export async function cypherRagRetrieve(
   validateCypher(cypher);
 
   const rows = await conn.run<Row>(cypher);
-  // Cap kept rows so a broad generated MATCH cannot balloon memory; the per-query
-  // top-k still applies on top of the hard cap.
+  // NOTE: this cap bounds the rows we KEEP and return — it is applied after
+  // `conn.run` has already materialized the full result set, so it does not stop a
+  // broad generated MATCH from scanning/holding many rows DB-side. The DoS surface
+  // is limited instead by `validateCypher` (read-only MATCH/CALL, no var-length
+  // paths) above. A true scan-side bound would require constraining the generated
+  // query itself (e.g. an enforced LIMIT), which is deferred.
   const limit = Math.min(opts.k ?? CYPHER_RAG_ROW_CAP, CYPHER_RAG_ROW_CAP);
   return rows.slice(0, limit).map((row) => ({
     id: toIdString(row.id),

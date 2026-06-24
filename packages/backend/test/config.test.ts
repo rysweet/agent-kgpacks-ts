@@ -15,6 +15,7 @@ describe('loadConfig', () => {
     expect(config.port).toBe(8000);
     expect(config.rateLimitEnabled).toBe(true);
     expect(config.streamTimeoutMs).toBe(60_000);
+    expect(config.requestTimeoutMs).toBe(60_000);
     expect(config.corsOrigins).toHaveLength(4);
     expect(config.rateLimits).toEqual({
       chat: 5,
@@ -36,6 +37,7 @@ describe('loadConfig', () => {
       WIKIGR_CORS_ORIGINS: 'https://a.example, https://b.example',
       WIKIGR_RATE_LIMIT_SEARCH: '99',
       WIKIGR_STREAM_TIMEOUT_S: '5',
+      WIKIGR_REQUEST_TIMEOUT_S: '15',
       WIKIGR_TRUSTED_PROXIES: '10.0.0.0/8, 1.2.3.4',
       WIKIGR_DATABASE_PATH: '/data/pack.lbug',
     });
@@ -44,6 +46,7 @@ describe('loadConfig', () => {
     expect(config.corsOrigins).toEqual(['https://a.example', 'https://b.example']);
     expect(config.rateLimits.search).toBe(99);
     expect(config.streamTimeoutMs).toBe(5000);
+    expect(config.requestTimeoutMs).toBe(15_000);
     expect(config.trustedProxies).toEqual(['10.0.0.0/8', '1.2.3.4']);
     expect(config.databasePath).toBe('/data/pack.lbug');
   });

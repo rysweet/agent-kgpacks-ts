@@ -42,6 +42,13 @@ export interface Settings {
   trustedProxies: string[];
   /** SSE synthesis timeout in milliseconds (from `WIKIGR_STREAM_TIMEOUT_S`). */
   streamTimeoutMs: number;
+  /**
+   * Fastify `requestTimeout` in milliseconds (from `WIKIGR_REQUEST_TIMEOUT_S`):
+   * the maximum time to receive a complete request from the client. Bounds slow /
+   * stalled request bodies (Slowloris); it does NOT cap long-lived SSE responses,
+   * which keep streaming once the request has been received.
+   */
+  requestTimeoutMs: number;
   rateLimits: RateLimits;
   cacheTtl: CacheTtls;
 }
@@ -131,6 +138,7 @@ export function loadConfig(env: Env = process.env): Settings {
     rateLimitEnabled: bool(env, 'WIKIGR_RATE_LIMIT_ENABLED', true),
     trustedProxies: csv(env, 'WIKIGR_TRUSTED_PROXIES', []),
     streamTimeoutMs: int(env, 'WIKIGR_STREAM_TIMEOUT_S', 60) * 1000,
+    requestTimeoutMs: int(env, 'WIKIGR_REQUEST_TIMEOUT_S', 60) * 1000,
     rateLimits,
     cacheTtl,
   };

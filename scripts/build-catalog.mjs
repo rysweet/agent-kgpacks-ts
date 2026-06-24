@@ -15,6 +15,8 @@ import { fileURLToPath } from 'node:url';
 
 import { buildPack } from '../packages/ingestion/dist/index.js';
 
+import { tempDbPath, commitDb, cleanupDb } from './atomic-db.mjs';
+
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const catalogDir = join(root, 'catalog');
 const outRoot = join(root, 'data', 'packs');
@@ -59,28 +61,35 @@ for (const pack of packs) {
   const packDir = join(outRoot, pack);
   await mkdir(packDir, { recursive: true });
   const dbPath = join(packDir, 'pack.db');
+  // Build into a temp DB and atomically swap it in on success, so an interrupted
+  // pack build never leaves a partial/unindexed pack.db that a re-run can't replace.
+  const tmpPath = tempDbPath(dbPath);
+  await cleanupDb(tmpPath);
   const t0 = Date.now();
   try {
     const res = await buildPack({
       seeds,
-      dbPath,
+      dbPath: tmpPath,
       maxDepth,
       maxArticles: Math.min(maxArticles, seeds.length),
     });
+    await commitDb(tmpPath, dbPath);
     ok++;
     const summary = {
       pack,
-      dbPath: res.dbPath,
+      dbPath,
       articles: res.articles.length,
       sections: res.sections.length,
       chunks: res.chunks.length,
       entities: res.entities.length,
       relationships: res.relationships.length,
       links: res.links?.length ?? 0,
+      skipped: res.skipped?.length ?? 0,
       seconds: Math.round((Date.now() - t0) / 1000),
     };
     console.log(JSON.stringify(summary));
   } catch (err) {
+    await cleanupDb(tmpPath);
     failed++;
     console.error(`FAILED ${pack}: ${err?.message ?? err}`);
   }
