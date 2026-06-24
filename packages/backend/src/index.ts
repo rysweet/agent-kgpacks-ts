@@ -38,6 +38,18 @@ export type {
   StatsResponse,
 } from './types.js';
 
+/**
+ * True when at least one BYOK credential is present and NON-EMPTY. Empty strings
+ * count as unset (matching the project convention and the docker-compose deploy,
+ * which forwards each key as `${VAR:-}` = `''` when absent). Using `??`/first-key
+ * precedence here is wrong: `'' ?? next` short-circuits on an empty earlier key.
+ */
+export function hasByokCredentials(env: NodeJS.ProcessEnv = process.env): boolean {
+  return [env.COPILOT_API_KEY, env.OPENAI_API_KEY, env.ANTHROPIC_API_KEY].some(
+    (key) => typeof key === 'string' && key.trim() !== '',
+  );
+}
+
 /** Boots a server from environment configuration and starts listening. */
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -49,7 +61,7 @@ async function main(): Promise<void> {
   // Start a Copilot agent only when BYOK credentials are present; otherwise the
   // chat endpoints report 503 while every other endpoint serves normally.
   let agent: CopilotAgent | undefined;
-  if (process.env.COPILOT_API_KEY ?? process.env.OPENAI_API_KEY ?? process.env.ANTHROPIC_API_KEY) {
+  if (hasByokCredentials()) {
     agent = new CopilotAgent();
     await agent.start();
   }
