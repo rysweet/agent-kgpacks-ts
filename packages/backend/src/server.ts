@@ -68,7 +68,13 @@ export async function buildServer(options: BuildServerOptions): Promise<FastifyI
   const manager = new ConnectionManager(database);
   const embedder = options.embedder ?? new BgeEmbedder();
 
-  const app = Fastify({ logger: options.logger ?? false });
+  // `requestTimeout` bounds how long the server waits to receive a complete
+  // request (Slowloris protection). It does not cut off long-lived SSE responses,
+  // which stream after the request has been fully received. 0 disables it.
+  const app = Fastify({
+    logger: options.logger ?? false,
+    requestTimeout: Math.max(0, config.requestTimeoutMs),
+  });
 
   await app.register(cors, {
     origin: config.corsOrigins,

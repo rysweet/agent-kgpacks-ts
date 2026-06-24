@@ -345,6 +345,7 @@ describe('fixture sanity', () => {
       'entities',
       'relationships',
       'links',
+      'skipped',
     ]);
   });
 });

@@ -196,6 +196,14 @@ export interface BuildPackConfig {
   connection?: Connection;
 }
 
+/** An article dropped during the build because its extract/embed step failed. */
+export interface SkippedArticle {
+  /** Title of the article that could not be processed. */
+  title: string;
+  /** Human-readable reason (the thrown error's message). */
+  reason: string;
+}
+
 /** The outcome of a {@link buildPack} run: the loaded data plus simple counts. */
 export interface BuildPackResult {
   /** Database path the pack was written to (`':memory:'` when ephemeral). */
@@ -212,4 +220,9 @@ export interface BuildPackResult {
   relationships: Relationship[];
   /** Section→section graph links materialized. */
   links: ArticleLink[];
+  /**
+   * Articles that were fetched but failed to extract/embed and were skipped so
+   * the rest of the build could complete. Empty on a fully clean run.
+   */
+  skipped: SkippedArticle[];
 }

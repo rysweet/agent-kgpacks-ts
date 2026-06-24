@@ -126,6 +126,7 @@ async function runBuild(
     entities: result.entities.length,
     relationships: result.relationships.length,
     links: result.links.length,
+    skipped: result.skipped.length,
   });
 }
 

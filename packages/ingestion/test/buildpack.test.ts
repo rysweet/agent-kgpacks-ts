@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Database, type Connection } from '@kgpacks/db';
 
 import { buildPack } from '../src/index.js';
-import type { BuildPackResult } from '../src/types.js';
+import type { Article, BuildPackResult, ExtractionResult, Extractor } from '../src/types.js';
 import { makeEmbedder, makeExtractor, makeFetcher, wikiHtml } from './helpers.js';
 
 const A_URL = 'https://en.wikipedia.org/wiki/A';
@@ -76,5 +76,65 @@ describe('buildPack — offline end-to-end', () => {
       { id: 'A#0' },
     );
     expect(rows.map((r) => r.id)).toEqual(['B#0']);
+  });
+});
+
+describe('buildPack — per-article fault isolation', () => {
+  const db = new Database();
+  let conn: Connection;
+  let result: BuildPackResult;
+  const embedder = makeEmbedder();
+
+  beforeAll(async () => {
+    conn = db.connect();
+
+    const fetcher = makeFetcher({
+      [A_URL]: wikiHtml('A', 'A is a topic about light.', [B_URL]),
+      [B_URL]: wikiHtml('B', 'B is a topic about sport.', [A_URL]),
+    });
+    // Extraction fails for B only — one bad article must not abort the build.
+    const flakyExtractor: Extractor = {
+      async extract(article: Article): Promise<ExtractionResult> {
+        if (article.title === 'B') {
+          throw new Error('extraction blew up on B');
+        }
+        return {
+          entities: [{ name: 'Shared Entity', type: 'concept' }],
+          relationships: [],
+          keyFacts: [],
+        };
+      },
+    };
+
+    result = await buildPack({
+      seeds: [A_URL],
+      maxDepth: 1,
+      maxArticles: 10,
+      fetcher,
+      embedder,
+      extractor: flakyExtractor,
+      connection: conn,
+    });
+  });
+
+  afterAll(() => {
+    conn.close();
+    db.close();
+  });
+
+  it('skips the failing article but still loads the healthy one', () => {
+    expect(result.articles.map((a) => a.title)).toEqual(['A']);
+    expect(result.skipped).toEqual([{ title: 'B', reason: 'extraction blew up on B' }]);
+  });
+
+  it('drops links to/from the skipped article (it is not a node)', () => {
+    // A→B and B→A both reference B, which never loaded ⇒ no edges survive.
+    expect(result.links).toHaveLength(0);
+  });
+
+  it('produces a queryable pack containing only the loaded article', async () => {
+    const rows = await conn.run<{ id: string }>(`MATCH (s:Section) RETURN s.id AS id ORDER BY id`);
+    expect(rows.every((r) => r.id.startsWith('A#'))).toBe(true);
+    expect(rows.length).toBeGreaterThan(0);
   });
 });

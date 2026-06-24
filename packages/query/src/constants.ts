@@ -46,6 +46,15 @@ export const DEFAULT_NODE_TABLE = 'Section';
 /** Vector index name (reference schema `embedding_idx`). */
 export const DEFAULT_VECTOR_INDEX = 'embedding_idx';
 
+// Single-format assumption (accepted limitation): the reader targets exactly ONE
+// pack schema — a `Section` node table with a 768-dim `FLOAT[]` vector under the
+// `embedding_idx` index, as produced by @kgpacks/ingestion. There is deliberately
+// no on-disk format/schema-version field or negotiation: packs are built and read
+// by the same repo at the same version, so speculative versioning would be dead
+// weight. If the schema ever changes incompatibly, introduce a version marker and
+// branch here; until then a mismatched/foreign pack fails fast at query time
+// rather than being silently mis-read.
+
 // ── ENHANCEMENTS constants ──────────────────────────────────────────────────
 
 /** Default graph-reranker boost coefficient. */

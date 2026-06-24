@@ -30,7 +30,13 @@ import type {
   Extractor,
   Relationship,
   Section,
+  SkippedArticle,
 } from './types.js';
+
+/** Normalizes a thrown value to a string message for the skipped-article report. */
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 /** Embeds a list of texts, tolerating an empty input (no model load). */
 async function embedAll(embedder: Embedder, texts: string[]): Promise<Float32Array[]> {
@@ -74,33 +80,46 @@ export async function buildPack(config: BuildPackConfig): Promise<BuildPackResul
       maxArticles,
     });
     const articles = expanded.map((e) => e.article);
-    const loadedTitles = new Set(articles.map((a) => a.title));
 
     // 3–5. Extract, chunk, and embed each article into a loadable record.
+    // Fail-soft per article: one article's extract/embed failure (a transient LLM
+    // error, a model OOM, a malformed section) must not abort the whole build, the
+    // same way an unreachable source is skipped in expansion.ts. Skipped articles
+    // are reported in the result rather than silently dropped.
     const loadables: LoadableArticle[] = [];
+    const skipped: SkippedArticle[] = [];
     for (const article of articles) {
-      const chunks = chunkArticle(article, config.chunk);
-      const [sectionEmbeddings, chunkEmbeddings, extraction] = await Promise.all([
-        embedAll(
-          embedder,
-          article.sections.map((s) => embeddableSectionText(s.title, s.content)),
-        ),
-        embedAll(
-          embedder,
-          chunks.map((c) => c.content),
-        ),
-        extractor.extract(article),
-      ]);
-      loadables.push({ article, sectionEmbeddings, chunkEmbeddings, chunks, extraction });
+      try {
+        const chunks = chunkArticle(article, config.chunk);
+        const [sectionEmbeddings, chunkEmbeddings, extraction] = await Promise.all([
+          embedAll(
+            embedder,
+            article.sections.map((s) => embeddableSectionText(s.title, s.content)),
+          ),
+          embedAll(
+            embedder,
+            chunks.map((c) => c.content),
+          ),
+          extractor.extract(article),
+        ]);
+        loadables.push({ article, sectionEmbeddings, chunkEmbeddings, chunks, extraction });
+      } catch (error) {
+        skipped.push({ title: article.title, reason: errorMessage(error) });
+      }
     }
 
-    // 6. Article→article links (only between ingested articles) for the graph edges.
-    const links = collectLinks(articles, loadedTitles);
+    // 6. Article→article links, restricted to the articles that actually loaded
+    // (a skipped article is not a node, so links to/from it must be dropped).
+    const loadedTitles = new Set(loadables.map((l) => l.article.title));
+    const links = collectLinks(
+      loadables.map((l) => l.article),
+      loadedTitles,
+    );
 
     // 7. Write the pack (schema, nodes/edges, vector indexes).
     await loadPack(conn, { articles: loadables, links });
 
-    return summarize(dbPath, loadables, links);
+    return summarize(dbPath, loadables, links, skipped);
   } finally {
     if (extractor.close) {
       await extractor.close();
@@ -143,6 +162,7 @@ function summarize(
   dbPath: string,
   loadables: LoadableArticle[],
   links: ArticleLink[],
+  skipped: SkippedArticle[],
 ): BuildPackResult {
   const sections: Section[] = loadables.flatMap((l) => l.article.sections);
   const chunks: Chunk[] = loadables.flatMap((l) => l.chunks);
@@ -167,6 +187,7 @@ function summarize(
     entities: [...entitiesByName.values()],
     relationships,
     links,
+    skipped,
   };
 }
 
@@ -234,4 +255,5 @@ export type {
   Relationship,
   ResolvedAddress,
   Section,
+  SkippedArticle,
 } from './types.js';

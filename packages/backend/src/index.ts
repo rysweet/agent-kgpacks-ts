@@ -59,10 +59,13 @@ async function main(): Promise<void> {
   const database = new Database(config.databasePath);
 
   // Start a Copilot agent only when BYOK credentials are present; otherwise the
-  // chat endpoints report 503 while every other endpoint serves normally.
+  // chat endpoints report 503 while every other endpoint serves normally. The
+  // synthesis timeout is operator-configurable (WIKIGR_STREAM_TIMEOUT_S) instead
+  // of relying on the SDK's built-in default, so a wedged upstream can't hang a
+  // /chat request indefinitely.
   let agent: CopilotAgent | undefined;
   if (hasByokCredentials()) {
-    agent = new CopilotAgent();
+    agent = new CopilotAgent({ timeoutMs: config.streamTimeoutMs });
     await agent.start();
   }
 

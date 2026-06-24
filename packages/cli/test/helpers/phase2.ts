@@ -14,6 +14,7 @@ export const BUILD_COUNTS = {
   entities: 3,
   relationships: 1,
   links: 2,
+  skipped: 0,
 } as const;
 
 /**
@@ -32,6 +33,7 @@ export function makeBuildResult(dbPath: string): Record<string, unknown> {
     entities: fill(BUILD_COUNTS.entities),
     relationships: fill(BUILD_COUNTS.relationships),
     links: fill(BUILD_COUNTS.links),
+    skipped: fill(BUILD_COUNTS.skipped),
   };
 }
 
