@@ -203,7 +203,14 @@ export function createRetriever(conn: Connection, opts: CreateRetrieverOptions =
       results = await getCrossEncoder().rerank(query, results);
     }
 
-    return results;
+    // Enforce the ranked, top-k contract regardless of which stages ran. The CORE
+    // stage already returns sorted top-k (so this is a no-op there), but Cypher-RAG
+    // can append extra, unranked candidates beyond k; a final stable sort + truncate
+    // keeps the result ranked by score and bounded to k.
+    return results
+      .slice()
+      .sort((a, b) => b.score - a.score)
+      .slice(0, k);
   }
 
   return {
