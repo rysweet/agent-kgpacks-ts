@@ -29,6 +29,9 @@ export const URLS_FILENAME = 'urls.txt';
 /** Default `max_results` for `query_knowledge_pack` (matches the upstream default). */
 export const DEFAULT_MAX_RESULTS = 5;
 
+/** Upper bound for `max_results` (mirrors the HTTP backend's 1..50 cap on `k`). */
+export const MAX_MAX_RESULTS = 50;
+
 // --- Tool names (BYTE-COMPATIBLE with the upstream server; configs depend on these) ---
 
 export const TOOL_LIST_PACKS = 'list_packs';

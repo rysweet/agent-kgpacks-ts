@@ -67,6 +67,8 @@ Args:
       "properties": {
         "max_results": {
           "default": 5,
+          "maximum": 50,
+          "minimum": 1,
           "type": "integer",
         },
         "pack_name": {

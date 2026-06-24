@@ -85,6 +85,9 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ServerContext): vo
         };
       } catch (error) {
         if (error instanceof ApiError) throw error;
+        // Log the real cause: the global handler logs only NON-ApiError 500s, so a
+        // mapped ApiError(AGENT_ERROR) would otherwise hide DB/index/embedder faults.
+        request.log.error({ err: error }, 'chat synthesis failed');
         throw new ApiError(500, 'AGENT_ERROR', 'Agent encountered an error');
       }
     },
@@ -120,6 +123,18 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ServerContext): vo
       const events = async function* (): AsyncGenerator<SseEvent> {
         const start = performance.now();
         const conn = await ctx.manager.getConnection();
+        // Close the connection when the WORK settles, never on timeout while a query
+        // may still be in flight on it (closing a connection mid-query can crash the
+        // native driver). conn.close() is idempotent.
+        const work = runChat(
+          conn,
+          { agent, embedder: ctx.embedder },
+          { question, maxResults: max_results },
+        );
+        void work.then(
+          () => conn.close(),
+          () => conn.close(),
+        );
         try {
           let timer: ReturnType<typeof setTimeout> | undefined;
           const timeout = new Promise<never>((_resolve, reject) => {
@@ -127,14 +142,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ServerContext): vo
           });
           let outcome;
           try {
-            outcome = await Promise.race([
-              runChat(
-                conn,
-                { agent, embedder: ctx.embedder },
-                { question, maxResults: max_results },
-              ),
-              timeout,
-            ]);
+            outcome = await Promise.race([work, timeout]);
           } finally {
             if (timer !== undefined) clearTimeout(timer);
           }
@@ -149,12 +157,15 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ServerContext): vo
             }),
           };
         } catch (error) {
+          // A timeout is an expected client-visible outcome; any other failure is an
+          // infra fault whose cause must be logged (the client payload stays generic).
+          if (!(error instanceof StreamTimeout)) {
+            request.log.error({ err: error }, 'chat stream synthesis failed');
+          }
           yield {
             event: 'error',
             data: error instanceof StreamTimeout ? 'TimeoutError' : 'AgentError',
           };
-        } finally {
-          conn.close();
         }
       };
 

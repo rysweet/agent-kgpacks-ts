@@ -5,7 +5,7 @@
 // article_count }` sorted by directory name, with a compact `{ error, path }`
 // payload when the packs directory is absent.
 
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -72,5 +72,20 @@ describe('list_packs', () => {
     } finally {
       rmSync(empty, { recursive: true, force: true });
     }
+  });
+
+  it('isolates a corrupt manifest.json — one bad pack does not fail listing the rest', () => {
+    // Regression: loadManifestLenient throws on malformed JSON; without per-pack
+    // isolation a single corrupt manifest failed the entire list_packs result.
+    const bad = join(packs.packsDir, 'delta-corrupt');
+    mkdirSync(bad, { recursive: true });
+    writeFileSync(join(bad, 'manifest.json'), '{ not: valid json', 'utf8');
+
+    const parsed = JSON.parse(listPacksText(packs.packsDir)) as Array<Record<string, unknown>>;
+    const names = parsed.map((p) => p.name);
+    expect(names).toContain('alpha-pack');
+    expect(names).toContain('delta-corrupt'); // bad pack falls back to its dir name
+    const corrupt = parsed.find((p) => p.name === 'delta-corrupt');
+    expect(corrupt).toMatchObject({ description: '', article_count: 0 });
   });
 });
