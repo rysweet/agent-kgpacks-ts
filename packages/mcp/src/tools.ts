@@ -17,6 +17,7 @@ import {
   DB_FILENAME,
   DEFAULT_MAX_RESULTS,
   LIST_PACKS_DESCRIPTION,
+  MAX_MAX_RESULTS,
   PACK_INFO_DESCRIPTION,
   QUERY_KNOWLEDGE_PACK_DESCRIPTION,
   TOOL_LIST_PACKS,
@@ -92,7 +93,14 @@ export function listPacksText(packsDir: string): string {
     .map((dirent) => dirent.name)
     .sort()
     .map((name) => {
-      const manifest = loadManifestLenient(join(packsDir, name));
+      // Isolate per-pack failures: one corrupt manifest.json must not fail listing
+      // every other pack (mirror the missing-file stand-in).
+      let manifest;
+      try {
+        manifest = loadManifestLenient(join(packsDir, name));
+      } catch {
+        return { name, description: '', article_count: 0 };
+      }
       const graphStats = manifest['graph_stats'];
       return {
         name: pick(manifest, 'name', name),
@@ -170,7 +178,7 @@ export function registerTools(server: McpServer, config: ToolConfig): void {
       inputSchema: {
         pack_name: z.string(),
         question: z.string(),
-        max_results: z.number().int().default(DEFAULT_MAX_RESULTS),
+        max_results: z.number().int().min(1).max(MAX_MAX_RESULTS).default(DEFAULT_MAX_RESULTS),
       },
     },
     async ({ pack_name, question, max_results }) =>
