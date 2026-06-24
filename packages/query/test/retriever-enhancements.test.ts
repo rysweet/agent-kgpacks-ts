@@ -147,6 +147,24 @@ describe('retrieve — enableCypherRag', () => {
     expect(conn.calls.some((c) => c.cypher === READ_CYPHER)).toBe(true);
   });
 
+  it('honours k and returns ranked results when Cypher rows overflow k', async () => {
+    // Regression: the cypher-rag-only path appended merged rows without re-sorting
+    // or truncating, so retrieve() could return more than k, unranked candidates.
+    const conn = new RecordingConnection(responder);
+    const agent = fakeAgent(() => synthesisResult(READ_CYPHER));
+    const retriever = createRetriever(conn.asConnection(), {
+      embedder: queryEmbedder(),
+      agent,
+    });
+
+    const out = await retriever.retrieve('q', { enableCypherRag: true, k: 2 });
+
+    expect(out.length).toBeLessThanOrEqual(2); // k bound enforced (was 3 before)
+    for (let i = 1; i < out.length; i++) {
+      expect(out[i - 1].score).toBeGreaterThanOrEqual(out[i].score); // ranked by score
+    }
+  });
+
   it('fails closed (QueryError) when enabled without an agent', async () => {
     const conn = new RecordingConnection(responder);
     const retriever = createRetriever(conn.asConnection(), { embedder: queryEmbedder() });

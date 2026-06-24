@@ -34,6 +34,11 @@ export async function hybridSearch(
   const start = performance.now();
   const { query, category, limit } = params;
   const maxHops = Math.trunc(params.maxHops);
+  // Self-protect regardless of caller: maxHops is interpolated into the Cypher
+  // variable-length-path bound, so it must be a small integer (mirrors graph.ts).
+  if (maxHops < 1 || maxHops > 3) {
+    throw ApiError.invalidParameter(`max_hops must be between 1 and 3, got ${maxHops}`);
+  }
 
   const exists = await conn.run<Row>('MATCH (a:Article {title: $title}) RETURN a.title AS title', {
     title: query,
