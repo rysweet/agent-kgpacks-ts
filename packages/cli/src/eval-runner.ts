@@ -57,10 +57,12 @@ export function defaultEvalPack(): EvalSeam {
     const agent = new CopilotAgent();
     const judge = createLlmJudge({ transport: createCopilotTransport(), model: input.judgeModel });
 
+    let report: Awaited<ReturnType<typeof runEval>> | undefined;
+    let mainError: unknown;
     try {
       await agent.start();
       const retriever = createRetriever(conn, { agent });
-      return await runEval({
+      report = await runEval({
         loader: createDirQuestionLoader(input.questionsDir),
         packIds: [input.packId],
         withPack: withPackArm(retriever),
@@ -68,11 +70,28 @@ export function defaultEvalPack(): EvalSeam {
         judge,
         sample: { mode: input.sample, perPack: input.perPack },
       });
-    } finally {
-      if (judge.close) await judge.close();
-      await agent.stop();
-      conn.close();
-      db.close();
+    } catch (err) {
+      mainError = err;
     }
+
+    // Release every resource even if an earlier close throws: each step is guarded
+    // and the native DB handles always close. A cleanup failure is surfaced only
+    // when the eval itself succeeded, so it can never mask the original error.
+    const cleanupErrors: unknown[] = [];
+    const guarded = async (label: string, close: () => unknown): Promise<void> => {
+      try {
+        await close();
+      } catch (err) {
+        cleanupErrors.push(new Error(`eval cleanup (${label}) failed: ${String(err)}`));
+      }
+    };
+    await guarded('judge', () => judge.close?.());
+    await guarded('agent', () => agent.stop());
+    await guarded('connection', () => conn.close());
+    await guarded('database', () => db.close());
+
+    if (mainError !== undefined) throw mainError;
+    if (cleanupErrors.length > 0) throw cleanupErrors[0];
+    return report as Awaited<ReturnType<typeof runEval>>;
   };
 }

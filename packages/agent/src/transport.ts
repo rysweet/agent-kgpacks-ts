@@ -124,21 +124,33 @@ export function createCopilotTransport(options: CopilotTransportOptions = {}): T
         CopilotClient: new (opts: { mode: 'empty'; baseDirectory: string }) => SdkClient;
         approveAll: unknown;
       };
-      baseDir = await mkdtemp(join(tmpdir(), 'kgpacks-agent-'));
-      const c = new sdk.CopilotClient({ mode: 'empty', baseDirectory: baseDir });
-      await c.start();
-      client = c;
-
-      const session = await c.createSession({
-        model: config.model,
-        provider: config.provider as SdkProviderConfig | undefined,
-        providers: config.providers as SdkNamedProviderConfig[] | undefined,
-        availableTools: [],
-        skipCustomInstructions: true,
-        onPermissionRequest: sdk.approveAll,
-        systemMessage: { mode: 'replace', content: systemMessage },
-      });
-      return new CopilotTransportSession(session);
+      const dir = await mkdtemp(join(tmpdir(), 'kgpacks-agent-'));
+      const c = new sdk.CopilotClient({ mode: 'empty', baseDirectory: dir });
+      let started = false;
+      try {
+        await c.start();
+        started = true;
+        const session = await c.createSession({
+          model: config.model,
+          provider: config.provider as SdkProviderConfig | undefined,
+          providers: config.providers as SdkNamedProviderConfig[] | undefined,
+          availableTools: [],
+          skipCustomInstructions: true,
+          onPermissionRequest: sdk.approveAll,
+          systemMessage: { mode: 'replace', content: systemMessage },
+        });
+        // Publish state only on full success, so a partial failure leaves nothing
+        // for shutdown() to (fail to) clean up.
+        client = c;
+        baseDir = dir;
+        return new CopilotTransportSession(session);
+      } catch (err) {
+        // start()/createSession() failed: stop a started client and remove the temp
+        // dir here, since shutdown() never runs (client was never published).
+        if (started) await c.stop().catch(() => undefined);
+        await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+        throw err;
+      }
     },
 
     async shutdown(): Promise<void> {

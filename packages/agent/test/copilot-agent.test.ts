@@ -258,6 +258,23 @@ describe('CopilotAgent — synthesizeAnswer', () => {
     expect(result.metadata.citedIds).toEqual([]);
   });
 
+  it('does not match an id as a prefix of a longer id (Topic#1 inside Topic#10)', async () => {
+    // Regression: substring indexOf reported the shorter id as cited.
+    const mock = makeMockTransport({
+      respond: () => ({ content: 'Only Topic#10 is relevant here.', usage: usage(1, 1) }),
+    });
+    const agent = await started(mock);
+
+    const result = await agent.synthesizeAnswer({
+      question: 'q',
+      context: [
+        { id: 'Topic#1', text: 'a' },
+        { id: 'Topic#10', text: 'b' },
+      ],
+    });
+    expect(result.metadata.citedIds).toEqual(['Topic#10']); // not ['Topic#10','Topic#1']
+  });
+
   it('throws AgentResponseFormatError when the model returns empty content', async () => {
     const mock = makeMockTransport({ respond: () => ({ content: '', usage: usage(1, 0) }) });
     const agent = await started(mock);
