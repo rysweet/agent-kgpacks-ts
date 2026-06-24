@@ -110,6 +110,13 @@ export interface FetchResponse {
   status: number;
   headers: { get(name: string): string | null };
   text(): Promise<string>;
+  /**
+   * Optional raw body stream (present on the platform `fetch` Response). When
+   * available, {@link createSafeFetcher} reads it with a hard byte cap so a huge
+   * or decompression-bomb response cannot exhaust memory; test doubles that omit
+   * it fall back to {@link FetchResponse.text}.
+   */
+  body?: ReadableStream<Uint8Array> | null;
 }
 
 /** Per-request options forwarded to the underlying fetch implementation. */

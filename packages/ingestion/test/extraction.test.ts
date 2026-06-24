@@ -131,4 +131,39 @@ describe('createLlmExtractor (fake transport)', () => {
     await extractor.close?.();
     expect(closed()).toBe(true);
   });
+
+  it('opens ONE session and reuses it across multiple extract() calls', async () => {
+    // Regression: the default (own-transport) path previously created a new
+    // transport+session on every extract() call, leaking a subprocess per article.
+    let openCount = 0;
+    let closeCount = 0;
+    const response = {
+      content: JSON.stringify({ entities: [], relationships: [], key_facts: [] }),
+      usage: { promptTokens: 0, completionTokens: 0, reasoningTokens: 0, totalTokens: 0 },
+    };
+    const transport = {
+      async open() {
+        openCount++;
+        return {
+          async send() {
+            return response;
+          },
+          async close() {
+            closeCount++;
+          },
+        };
+      },
+      async shutdown() {},
+    };
+    const extractor = createLlmExtractor({ transport });
+    const article = makeArticle('Topic', ['Body text.']);
+
+    await extractor.extract(article);
+    await extractor.extract(article);
+    await extractor.extract(article);
+    expect(openCount).toBe(1); // session opened once, reused
+
+    await extractor.close?.();
+    expect(closeCount).toBe(1);
+  });
 });

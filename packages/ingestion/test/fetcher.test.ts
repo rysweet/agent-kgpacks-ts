@@ -157,3 +157,70 @@ describe('createSafeFetcher — fetch + redirects', () => {
     expect(net.calls).toEqual([]);
   });
 });
+
+describe('createSafeFetcher — response body size cap', () => {
+  it('rejects early when Content-Length exceeds the cap', async () => {
+    const net = fakeNet({
+      responses: {
+        'https://example.com/big': makeResponse(200, 'x', { 'content-length': '999999' }),
+      },
+    });
+    const fetch = createSafeFetcher({ ...net, maxBytes: 1024 });
+    await expect(fetch('https://example.com/big')).rejects.toBeInstanceOf(FetchError);
+  });
+
+  it('rejects an over-cap body via the text() fallback (no body stream)', async () => {
+    const net = fakeNet({
+      responses: { 'https://example.com/huge': makeResponse(200, 'a'.repeat(5000)) },
+    });
+    const fetch = createSafeFetcher({ ...net, maxBytes: 1024 });
+    await expect(fetch('https://example.com/huge')).rejects.toBeInstanceOf(FetchError);
+  });
+
+  it('rejects mid-stream when a chunked body exceeds the cap', async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new Uint8Array(512)); // each pull adds 512 bytes, unbounded
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const net = fakeNet({
+      responses: {
+        'https://example.com/stream': {
+          status: 200,
+          headers: { get: () => null },
+          text: async () => '',
+          body,
+        },
+      },
+    });
+    const fetch = createSafeFetcher({ ...net, maxBytes: 1024 });
+    await expect(fetch('https://example.com/stream')).rejects.toBeInstanceOf(FetchError);
+    expect(cancelled).toBe(true); // the reader cancels the oversized stream
+  });
+
+  it('reads a within-cap streamed body', async () => {
+    const payload = new TextEncoder().encode('<html>ok</html>');
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(payload);
+        controller.close();
+      },
+    });
+    const net = fakeNet({
+      responses: {
+        'https://example.com/ok': {
+          status: 200,
+          headers: { get: () => null },
+          text: async () => 'unused',
+          body,
+        },
+      },
+    });
+    const fetch = createSafeFetcher({ ...net, maxBytes: 1024 });
+    await expect(fetch('https://example.com/ok')).resolves.toBe('<html>ok</html>');
+  });
+});
