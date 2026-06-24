@@ -176,6 +176,8 @@ describe('ApiClient — supporting endpoints', () => {
     const okClient = makeFetch(() => jsonResponse(healthy, { status: 200 }));
     const api1 = new ApiClient({ baseUrl: 'http://api.test', fetch: okClient.fetch });
     await expect(api1.health()).resolves.toEqual(healthy);
+    // /health is served UNPREFIXED by the backend (not under /api/v1).
+    expect(okClient.calls[0]!.url).toBe('http://api.test/health');
 
     const downClient = makeFetch(() => jsonResponse(unhealthy, { status: 503 }));
     const api2 = new ApiClient({ baseUrl: 'http://api.test', fetch: downClient.fetch });

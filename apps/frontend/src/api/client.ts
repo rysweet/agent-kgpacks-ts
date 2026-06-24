@@ -147,7 +147,8 @@ export class ApiClient {
 
   /** Resolves the body for BOTH 200 (healthy) and 503 (unhealthy) — never throws on status. */
   async health(): Promise<HealthResponse> {
-    const url = `${this.baseUrl}${API_PREFIX}/health`;
+    // `/health` is served UNPREFIXED by the backend (not under /api/v1).
+    const url = `${this.baseUrl}/health`;
     let response: Response;
     try {
       response = await this.fetchImpl(url, { credentials: 'omit' });
