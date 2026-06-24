@@ -20,20 +20,30 @@ export function ResultsView({ results, graph, onSelect }: ResultsViewProps) {
       {results && (
         <div className="search-results">
           <h3>Results for {results.query}</h3>
-          <ul>
-            {results.results.map((result) => (
-              <li key={result.article}>
-                <button type="button" onClick={() => onSelect(result.article)}>
-                  {result.article}
-                </button>
-                <span className="result-similarity"> {result.similarity.toFixed(2)} </span>
-                {result.category !== null && (
-                  <span className="result-category"> {result.category} </span>
-                )}
-                <span className="result-summary"> {result.summary}</span>
-              </li>
-            ))}
-          </ul>
+          {/* Announce that the search completed and how many results it found,
+              including the zero-result case (otherwise screen-reader users hear
+              nothing and sighted users see an ambiguous empty list). */}
+          <p className="results-status" role="status" aria-live="polite">
+            {results.results.length === 0
+              ? `No results found for "${results.query}".`
+              : `${results.results.length} result${results.results.length === 1 ? '' : 's'} for "${results.query}".`}
+          </p>
+          {results.results.length > 0 && (
+            <ul>
+              {results.results.map((result) => (
+                <li key={result.article}>
+                  <button type="button" onClick={() => onSelect(result.article)}>
+                    {result.article}
+                  </button>
+                  <span className="result-similarity"> {result.similarity.toFixed(2)} </span>
+                  {result.category !== null && (
+                    <span className="result-category"> {result.category} </span>
+                  )}
+                  <span className="result-summary"> {result.summary}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 

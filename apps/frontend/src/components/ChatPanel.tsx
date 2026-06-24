@@ -45,18 +45,24 @@ export function ChatPanel({ api }: ChatPanelProps) {
         </button>
       </form>
 
-      {sources.length > 0 && (
-        <div className="chat-sources">
-          <h3>Sources</h3>
-          <ul>
-            {sources.map((source) => (
-              <li key={source}>{source}</li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {/* Announce the streaming answer + sources to assistive tech as they arrive
+          (polite, so tokens are queued). aria-busy signals the in-progress stream. */}
+      <div className="chat-output" aria-live="polite" aria-atomic="false" aria-busy={streaming}>
+        {streaming && answer.length === 0 && <p className="chat-status">Generating answer…</p>}
 
-      {answer.length > 0 && <p className="chat-answer">{answer}</p>}
+        {sources.length > 0 && (
+          <div className="chat-sources">
+            <h3>Sources</h3>
+            <ul>
+              {sources.map((source) => (
+                <li key={source}>{source}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {answer.length > 0 && <p className="chat-answer">{answer}</p>}
+      </div>
 
       {error && (
         <p role="alert" className="chat-error">

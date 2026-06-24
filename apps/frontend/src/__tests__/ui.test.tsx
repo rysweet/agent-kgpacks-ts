@@ -199,6 +199,49 @@ describe('SearchBox', () => {
 
     await waitFor(() => expect(onResults).toHaveBeenCalledWith(SEARCH_RESPONSE));
   });
+
+  it('selects a suggestion (now a button) and runs a search for it', async () => {
+    const user = userEvent.setup();
+    const { fetch } = makeFetch((call) => {
+      if (call.url.includes('/api/v1/search')) return jsonResponse(SEARCH_RESPONSE);
+      if (call.url.includes('/api/v1/autocomplete')) {
+        return jsonResponse({
+          query: 'qu',
+          suggestions: [
+            { title: 'Quantum entanglement', category: 'Physics', match_type: 'prefix' },
+          ],
+          total: 1,
+        });
+      }
+      return jsonResponse({ query: '', suggestions: [], total: 0 });
+    });
+    const api = new ApiClient({ baseUrl: 'http://api.test', fetch });
+    const onResults = vi.fn();
+
+    render(<SearchBox api={api} onResults={onResults} />);
+    await user.type(screen.getByLabelText(/search articles/i), 'qu');
+
+    // The suggestion is a keyboard-operable button (was an inert <li> before).
+    const suggestion = await screen.findByRole('button', { name: 'Quantum entanglement' });
+    await user.click(suggestion);
+
+    await waitFor(() => expect(onResults).toHaveBeenCalledWith(SEARCH_RESPONSE));
+  });
+
+  it('surfaces a failed search with role="alert" instead of swallowing it', async () => {
+    const user = userEvent.setup();
+    const { fetch } = makeFetch((call) => {
+      if (call.url.includes('/api/v1/search')) throw new Error('network down');
+      return jsonResponse({ query: '', suggestions: [], total: 0 });
+    });
+    const api = new ApiClient({ baseUrl: 'http://api.test', fetch });
+
+    render(<SearchBox api={api} onResults={vi.fn()} />);
+    await user.type(screen.getByLabelText(/search articles/i), 'quantum');
+    await user.click(screen.getByRole('button', { name: /search/i }));
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+  });
 });
 
 describe('ResultsView', () => {
@@ -227,5 +270,13 @@ describe('ResultsView', () => {
     expect(container.textContent).toContain('Quantum entanglement');
     // …and the EDGE target ("Bell's theorem" is NOT a node here) proves edges render.
     expect(container.textContent).toContain("Bell's theorem");
+  });
+
+  it('announces an empty result set instead of rendering nothing', () => {
+    const empty: SearchResponse = { query: 'zzz', results: [], total: 0, execution_time_ms: 1 };
+    render(<ResultsView results={empty} graph={null} onSelect={() => {}} />);
+
+    const status = screen.getByRole('status');
+    expect(status.textContent).toMatch(/No results found for "zzz"/);
   });
 });
