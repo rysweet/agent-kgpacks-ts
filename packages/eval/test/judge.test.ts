@@ -14,6 +14,8 @@
 
 import { describe, expect, it } from 'vitest';
 
+import type { Transport } from '@kgpacks/agent';
+
 import { DEFAULT_JUDGE_MODEL, JUDGE_PROMPT, createLlmJudge } from '../src/index.js';
 import { MockTransport, constantTransport } from './helpers.js';
 
@@ -130,6 +132,21 @@ describe('createLlmJudge — fail closed', () => {
     const out = await judge.judge({ question: 'q', answer: 'a' });
     expect(out.correct).toBe(false);
     expect(out.score).toBe(0);
+  });
+
+  it('PROPAGATES a transport/session failure instead of failing closed', async () => {
+    // A judge that cannot run at all must fail the eval loudly, not silently grade 0
+    // (which would look like "the pack adds nothing"). Only malformed OUTPUT fails closed.
+    const broken: Transport = {
+      async open() {
+        throw new Error('judge session unavailable');
+      },
+      async shutdown() {},
+    };
+    const judge = createLlmJudge({ transport: broken });
+    await expect(judge.judge({ question: 'q', answer: 'a' })).rejects.toThrow(
+      'judge session unavailable',
+    );
   });
 });
 

@@ -9,9 +9,11 @@
 // sees only the grading instruction.
 //
 // It opens ONE session lazily (on first grade), reuses it for every grade, and
-// tears it down on close(). Grading fails CLOSED: any parse/shape failure scores
-// `{ correct: false, score: 0 }` rather than throwing, so a malformed grade can
-// only hurt an arm, never inflate it.
+// tears it down on close(). Grading fails CLOSED on PARSE/SHAPE failures: malformed
+// model output scores `{ correct: false, score: 0 }` rather than throwing, so a bad
+// grade can only hurt an arm, never inflate it. A transport/session failure (the
+// judge cannot run at all) is NOT swallowed — it propagates so a broken/unavailable
+// judge fails the eval loudly instead of silently reporting both arms as zero.
 
 import { safeParseJson, stripMarkdownFences } from '@kgpacks/agent';
 import type { TransportSession } from '@kgpacks/agent';
@@ -43,15 +45,11 @@ export function createLlmJudge(options: LlmJudgeOptions): Judge {
   return {
     async judge(input: JudgeInput): Promise<JudgeVerdict> {
       const rendered = renderPrompt(prompt, input);
-      let raw: string;
-      try {
-        const active = await getSession();
-        const response = await active.send(rendered, timeoutMs);
-        raw = response.content;
-      } catch {
-        return failClosed('judge transport error');
-      }
-      return parseVerdict(raw);
+      // Transport/session/send failures propagate (the judge could not run at all);
+      // only malformed model OUTPUT fails closed, inside parseVerdict.
+      const active = await getSession();
+      const response = await active.send(rendered, timeoutMs);
+      return parseVerdict(response.content);
     },
 
     async close(): Promise<void> {

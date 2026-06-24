@@ -245,11 +245,28 @@ function parseStringArray(content: string): string[] {
 /** Ids appearing in the answer, in first-appearance order, deduplicated. */
 function deriveCitedIds(answer: string, context: ContextChunk[]): string[] {
   const found = context
-    .map((chunk) => ({ id: chunk.id, index: answer.indexOf(chunk.id) }))
+    .map((chunk) => ({ id: chunk.id, index: indexOfId(answer, chunk.id) }))
     .filter((entry) => entry.index >= 0)
     .sort((a, b) => a.index - b.index)
     .map((entry) => entry.id);
   return [...new Set(found)];
+}
+
+/**
+ * First index of `id` in `answer` on an id boundary, so that `"Topic#1"` does NOT
+ * match inside `"Topic#10"`. Section ids are `"<title>#<n>"`; a real citation is
+ * bounded by a non `[A-Za-z0-9_#]` character (or string edge) on the right (a
+ * trailing digit/word char would mean a longer id).
+ */
+function indexOfId(answer: string, id: string): number {
+  let from = 0;
+  for (;;) {
+    const at = answer.indexOf(id, from);
+    if (at < 0) return -1;
+    const after = answer[at + id.length];
+    if (after === undefined || !/[A-Za-z0-9_#]/.test(after)) return at;
+    from = at + 1;
+  }
 }
 
 /** Clamps a caller-supplied list count into the supported range. */
