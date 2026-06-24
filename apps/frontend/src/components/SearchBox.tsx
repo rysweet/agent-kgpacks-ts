@@ -29,13 +29,24 @@ export function SearchBox({ api, onResults }: SearchBoxProps) {
       setSuggestions([]);
       return;
     }
+    // Guard against out-of-order responses: when the query changes, the cleanup
+    // marks this request stale so a slow earlier response can't overwrite a newer
+    // suggestion list.
+    let cancelled = false;
     const handle = setTimeout(() => {
       api.autocomplete({ q: trimmed }).then(
-        (res) => setSuggestions(res.suggestions),
-        () => setSuggestions([]),
+        (res) => {
+          if (!cancelled) setSuggestions(res.suggestions);
+        },
+        () => {
+          if (!cancelled) setSuggestions([]);
+        },
       );
     }, DEBOUNCE_MS);
-    return () => clearTimeout(handle);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
   }, [api, query]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
