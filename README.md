@@ -24,6 +24,38 @@ Requires **Node 22 LTS or newer**. No C/C++ toolchain needed —
 `@ladybugdb/core` ships prebuilt native binaries. Building or querying a pack
 uses the GitHub Copilot CLI (install and sign in with `copilot`).
 
+## Install from git (without publishing to npm)
+
+This package is **not published to the npm registry** (it stays `private`), but the
+`wikigr` CLI can be installed straight from this repository. On install, a `prepare`
+step bundles the CLI and its internal `@kgpacks/*` workspace packages into a single
+self-contained file (`dist/wikigr.mjs`); only the real runtime dependencies
+(`@ladybugdb/core`, `@huggingface/transformers`, `@github/copilot-sdk`, `commander`)
+are installed from npm — no workspace resolution is required on the consumer side.
+
+```bash
+# Install the CLI globally from the git repo
+npm install -g github:rysweet/agent-kgpacks-ts
+wikigr --help
+
+# …or add it to a project as a git dependency
+npm install github:rysweet/agent-kgpacks-ts
+#   package.json -> "dependencies": { "agent-kgpacks-ts": "github:rysweet/agent-kgpacks-ts" }
+
+# …or pin a branch / tag / commit
+npm install "github:rysweet/agent-kgpacks-ts#main"
+```
+
+Prefer a tarball (e.g. for air-gapped installs)? Build one from a checkout and
+install it anywhere:
+
+```bash
+pnpm install && npm pack          # -> agent-kgpacks-ts-<version>.tgz (contains dist/)
+npm install -g ./agent-kgpacks-ts-<version>.tgz
+```
+
+Both paths yield the same `wikigr` executable as the workspace build below.
+
 ## Build and query a pack
 
 ```bash
