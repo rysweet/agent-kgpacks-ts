@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { Database, type Connection } from '@kgpacks/db';
 import { EMBEDDING_DIM, buildPack as realBuildPack } from '@kgpacks/ingestion';
+import { loadManifestFromDir, listPacks } from '@kgpacks/packs';
 import type {
   BuildPackConfig,
   BuildPackResult,
@@ -139,6 +140,17 @@ describe('create — offline integration with the real buildPack', () => {
 
     // The destination pack directory was created on disk.
     expect(existsSync(join(packsDir, 'tiny'))).toBe(true);
+
+    // A valid manifest.json was written, so the built pack is discoverable by the
+    // pack-management subsystem (previously `create` wrote only pack.db, leaving the
+    // pack invisible to `pack list` and uninstallable).
+    expect(existsSync(join(packsDir, 'tiny', 'manifest.json'))).toBe(true);
+    const manifest = loadManifestFromDir(join(packsDir, 'tiny'));
+    expect(manifest.name).toBe('tiny');
+    expect(manifest.version).toBe('1.0.0');
+    expect(manifest.graph_stats).toMatchObject({ articles: 1, entities: 1, relationships: 0 });
+    // `pack list` now finds it.
+    expect(listPacks(packsDir).map((p) => p.name)).toContain('tiny');
 
     // The pack is genuinely queryable through the caller-owned connection.
     const rows = await connection.run<{ id: string }>(`MATCH (s:Section) RETURN s.id AS id`);

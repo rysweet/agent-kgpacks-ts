@@ -57,8 +57,14 @@ export function createLlmJudge(options: LlmJudgeOptions): Judge {
       closed = true;
       const active = session;
       session = undefined;
-      if (active) await active.close();
-      await transport.shutdown();
+      // shutdown() releases the judge's SDK subprocess + temp dir; it MUST run even
+      // if active.close() (the IPC disconnect) rejects, or those resources leak
+      // permanently (closed is already true, so a retry no-ops).
+      try {
+        if (active) await active.close();
+      } finally {
+        await transport.shutdown();
+      }
     },
   };
 }

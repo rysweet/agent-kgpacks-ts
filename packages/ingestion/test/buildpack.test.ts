@@ -1,5 +1,9 @@
 // End-to-end buildPack with every external seam mocked, then read the pack back.
 
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { Database, type Connection } from '@kgpacks/db';
@@ -146,5 +150,51 @@ describe('buildPack — per-article fault isolation', () => {
     const rows = await conn.run<{ id: string }>(`MATCH (s:Section) RETURN s.id AS id ORDER BY id`);
     expect(rows.every((r) => r.id.startsWith('A#'))).toBe(true);
     expect(rows.length).toBeGreaterThan(0);
+  });
+});
+
+describe('buildPack — releases the database even if extractor.close() throws', () => {
+  it('closes conn/database so the on-disk pack is not handle-leaked', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kgpacks-buildpack-leak-'));
+    const dbPath = join(dir, 'pack.db');
+    try {
+      const fetcher = makeFetcher({ [A_URL]: wikiHtml('A', 'A is a topic about light.', []) });
+      // Extraction succeeds, but the extractor's teardown throws — as a real LLM
+      // subprocess shutdown can. The build must still close the database.
+      const throwingExtractor: Extractor = {
+        async extract(): Promise<ExtractionResult> {
+          return { entities: [], relationships: [], keyFacts: [] };
+        },
+        async close(): Promise<void> {
+          throw new Error('extractor teardown boom');
+        },
+      };
+
+      await expect(
+        buildPack({
+          seeds: [A_URL],
+          maxDepth: 0,
+          maxArticles: 5,
+          fetcher,
+          embedder: makeEmbedder(),
+          extractor: throwingExtractor,
+          dbPath,
+        }),
+      ).rejects.toThrow('extractor teardown boom');
+
+      // If the conn/Database handle had leaked, re-opening the same on-disk pack
+      // would fail with a LadybugDB lock error. A clean re-open + query proves the
+      // database was closed despite the extractor.close() throw.
+      const db2 = new Database(dbPath);
+      const conn2 = db2.connect();
+      const rows = await conn2.run<{ n: number | bigint }>(
+        `MATCH (s:Section) RETURN count(s) AS n`,
+      );
+      expect(Number(rows[0].n)).toBeGreaterThan(0);
+      conn2.close();
+      db2.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
