@@ -9,11 +9,12 @@
 //   node scripts/build-catalog.mjs --pack go-expert      # build one (csv for many)
 //   node scripts/build-catalog.mjs --max-articles 10     # cap per-pack ingestion
 import { readdir, readFile, mkdir } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { buildPack } from '../packages/ingestion/dist/index.js';
+import { saveManifest, MANIFEST_FILENAME } from '../packages/packs/dist/index.js';
 
 import { tempDbPath, commitDb, cleanupDb } from './atomic-db.mjs';
 
@@ -74,6 +75,18 @@ for (const pack of packs) {
       maxArticles: Math.min(maxArticles, seeds.length),
     });
     await commitDb(tmpPath, dbPath);
+    // Write the manifest so each built catalog pack is discoverable/installable.
+    const sizeMb = Math.round((statSync(dbPath).size / (1024 * 1024)) * 100) / 100;
+    saveManifest(join(packDir, MANIFEST_FILENAME), {
+      name: pack,
+      version: '1.0.0',
+      graph_stats: {
+        articles: res.articles.length,
+        entities: res.entities.length,
+        relationships: res.relationships.length,
+        size_mb: sizeMb,
+      },
+    });
     ok++;
     const summary = {
       pack,

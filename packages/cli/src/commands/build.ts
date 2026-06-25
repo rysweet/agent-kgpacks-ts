@@ -13,10 +13,16 @@
 // all is a usage error (exit 2). On success the command prints BOUNDED JSON counts
 // (never the full arrays) and exits 0; an ingestion failure maps to exit 7.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-import type { BuildPackConfig, ChunkOptions } from '@kgpacks/ingestion';
+import type { BuildPackConfig, BuildPackResult, ChunkOptions } from '@kgpacks/ingestion';
+import {
+  MANIFEST_FILENAME,
+  loadManifestFromDir,
+  saveManifest,
+  type PackManifest,
+} from '@kgpacks/packs';
 import type { Command } from 'commander';
 
 import { DB_FILENAME, DEFAULT_MAX_ARTICLES, DEFAULT_MAX_DEPTH } from '../constants.js';
@@ -116,6 +122,7 @@ async function runBuild(
   const dbPath = join(packDir, DB_FILENAME);
 
   const result = await ctx.buildPack({ ...config, dbPath });
+  writePackManifest(packDir, opts.pack as string, dbPath, result);
 
   printJson(ctx.io, {
     pack: opts.pack as string,
@@ -128,6 +135,48 @@ async function runBuild(
     links: result.links.length,
     skipped: result.skipped.length,
   });
+}
+
+/**
+ * Writes the pack's `manifest.json` next to its `pack.db` so the built pack is
+ * discoverable by `pack list`/`info`/`validate` and installable. Without this a
+ * created pack is invisible to the whole pack-management subsystem. On `update`,
+ * an existing manifest's identity (name/version/description) is preserved and only
+ * `graph_stats` is refreshed; `create` writes a fresh manifest. `size_mb` is
+ * best-effort (0 when the database is in-memory / not on disk).
+ */
+function writePackManifest(
+  packDir: string,
+  packName: string,
+  dbPath: string,
+  result: BuildPackResult,
+): void {
+  let existing: Partial<PackManifest> = {};
+  try {
+    existing = loadManifestFromDir(packDir);
+  } catch {
+    // No (or invalid) prior manifest — fall through to fresh defaults.
+  }
+
+  let sizeMb = 0;
+  try {
+    sizeMb = Math.round((statSync(dbPath).size / (1024 * 1024)) * 100) / 100;
+  } catch {
+    // Database not on disk (e.g. an in-memory build) — report 0.
+  }
+
+  const manifest: PackManifest = {
+    name: typeof existing.name === 'string' ? existing.name : packName,
+    version: typeof existing.version === 'string' ? existing.version : '1.0.0',
+    ...(typeof existing.description === 'string' ? { description: existing.description } : {}),
+    graph_stats: {
+      articles: result.articles.length,
+      entities: result.entities.length,
+      relationships: result.relationships.length,
+      size_mb: sizeMb,
+    },
+  };
+  saveManifest(join(packDir, MANIFEST_FILENAME), manifest);
 }
 
 /**

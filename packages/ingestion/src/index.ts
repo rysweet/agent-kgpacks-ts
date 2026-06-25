@@ -127,12 +127,19 @@ export async function buildPack(config: BuildPackConfig): Promise<BuildPackResul
 
     return summarize(dbPath, loadables, links, skipped);
   } finally {
-    if (extractor.close) {
-      await extractor.close();
-    }
-    if (ownConnection) {
-      conn.close();
-      database?.close();
+    // Release each resource independently: a throwing extractor.close() (the LLM
+    // subprocess teardown can report errors) must NOT skip the LadybugDB close,
+    // or the connection + on-disk pack.db handle leak — even on an otherwise
+    // successful build.
+    try {
+      if (extractor.close) {
+        await extractor.close();
+      }
+    } finally {
+      if (ownConnection) {
+        conn.close();
+        database?.close();
+      }
     }
   }
 }

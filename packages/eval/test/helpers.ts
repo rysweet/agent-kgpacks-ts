@@ -147,6 +147,8 @@ export class MockTransport implements Transport {
   readonly prompts: string[] = [];
   sessionCloseCount = 0;
   shutdownCount = 0;
+  /** When set, the session's `close()` rejects with this error (after counting). */
+  sessionCloseError?: Error;
 
   constructor(private readonly respond: (prompt: string, index: number) => string) {}
 
@@ -160,6 +162,7 @@ export class MockTransport implements Transport {
       },
       close: async (): Promise<void> => {
         this.sessionCloseCount += 1;
+        if (this.sessionCloseError) throw this.sessionCloseError;
       },
     };
   }

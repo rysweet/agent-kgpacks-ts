@@ -137,6 +137,17 @@ describe('CopilotAgent — lifecycle', () => {
     expect(mock.shutdown).toHaveBeenCalledTimes(1);
   });
 
+  it('stop() still shuts the transport down when session.close() rejects (no subprocess leak)', async () => {
+    const mock = makeMockTransport();
+    const agent = await started(mock);
+    mock.close.mockRejectedValueOnce(new Error('disconnect boom'));
+
+    await expect(agent.stop()).rejects.toBeInstanceOf(AgentTransportError);
+    // shutdown() (kills the subprocess + removes the temp dir) MUST run even though
+    // session.close() threw — otherwise the Copilot subprocess leaks permanently.
+    expect(mock.shutdown).toHaveBeenCalledTimes(1);
+  });
+
   it('stop() is idempotent — a second call does not close/shutdown twice', async () => {
     const mock = makeMockTransport();
     const agent = await started(mock);

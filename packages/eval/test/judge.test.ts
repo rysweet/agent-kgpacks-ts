@@ -160,6 +160,18 @@ describe('createLlmJudge — lifecycle', () => {
     expect(transport.shutdownCount).toBe(1);
   });
 
+  it('close() still shuts the transport down when session.close() rejects (no subprocess leak)', async () => {
+    const transport = constantTransport(verdict(true, 1));
+    transport.sessionCloseError = new Error('disconnect boom');
+    const judge = createLlmJudge({ transport });
+    await judge.judge({ question: 'q', answer: 'a' });
+
+    await expect(judge.close?.()).rejects.toThrow('disconnect boom');
+    // shutdown() (releases the judge subprocess + temp dir) MUST run even though
+    // session.close() threw.
+    expect(transport.shutdownCount).toBe(1);
+  });
+
   it('close() is idempotent', async () => {
     const transport = constantTransport(verdict(true, 1));
     const judge = createLlmJudge({ transport });

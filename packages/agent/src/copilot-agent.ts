@@ -86,8 +86,15 @@ export class CopilotAgent {
     const session = this.session;
     this.session = undefined;
     try {
-      if (session) await session.close();
-      await this.transport.shutdown();
+      try {
+        if (session) await session.close();
+      } finally {
+        // shutdown() kills the SDK subprocess and removes its temp dir — it MUST
+        // run even if session.close() (the IPC disconnect) rejects, or the
+        // subprocess and mkdtemp dir leak permanently (started is already false,
+        // so a retry would no-op).
+        await this.transport.shutdown();
+      }
     } catch (err) {
       throw this.wrapTransportError(err, 'stop');
     }
