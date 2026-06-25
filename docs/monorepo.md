@@ -241,8 +241,11 @@ package's `test` script is `vitest run`, and the runner is configured with
 ## Continuous integration
 
 CI is defined in `.github/workflows/ci.yml` and runs on pushes and pull
-requests. Actions are pinned by commit SHA, and the workflow uses least-
-privilege `permissions: contents: read`.
+requests. Actions are pinned by commit SHA, the workflow uses least-privilege
+`permissions: contents: read`, and a `concurrency` group cancels superseded
+in-progress runs for the same ref. All dependencies are pinned to exact versions
+(no `^`/`~` ranges) and reproduced from the committed `pnpm-lock.yaml`, so a
+`--frozen-lockfile` install is byte-for-byte reproducible.
 
 ### Job: `build` (Node 22)
 
@@ -291,7 +294,34 @@ node scripts/check-no-python.mjs
 - **Exit code `1`** — at least one violation; prints the offending file and the
   matched pattern, then exits non-zero so CI fails closed.
 
-## Adding a new package
+### Job: `dependency-audit`
+
+Installs with `--frozen-lockfile` and runs `pnpm audit --audit-level moderate`,
+failing the build on any known advisory (moderate or higher) in the dependency
+tree. Because dependencies are exact-pinned, clearing an advisory means bumping
+the offending dependency (or its `pnpm.overrides` entry) and committing the
+updated lockfile.
+
+### Job: `docker-image`
+
+Builds the backend image and asserts the shipped artifact (a) loads the native
+`@ladybugdb/core` binding, (b) contains no Python interpreter, and (c) runs as a
+non-root user.
+
+## Local quality gates (git hooks)
+
+[husky](https://typicode.github.io/husky/) installs git hooks on `pnpm install`
+(via the `prepare` script). They mirror CI so failures surface before code is
+shared:
+
+| Hook         | Runs                                                                | Why                                                         |
+| ------------ | ------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `pre-commit` | `lint-staged` — Prettier + ESLint `--fix` on **staged** files       | Fast formatting/lint gate on every commit.                  |
+| `pre-push`   | `pnpm typecheck && pnpm -r build && pnpm -r test && pnpm test:root` | The full build + test gate before code leaves your machine. |
+
+`lint-staged` is configured under the root `package.json` `"lint-staged"` key.
+Bypass a hook with `git commit --no-verify` / `git push --no-verify` only when
+you understand why; CI enforces the same gates regardless.
 
 Packages are deliberately uniform, so adding one is mechanical:
 

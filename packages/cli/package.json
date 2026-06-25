@@ -23,6 +23,6 @@
     "@kgpacks/ingestion": "workspace:*",
     "@kgpacks/packs": "workspace:*",
     "@kgpacks/query": "workspace:*",
-    "commander": "^12.1.0"
+    "commander": "12.1.0"
   }
 }

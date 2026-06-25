@@ -1,0 +1,8 @@
+# Comprehensive gate before pushing: type-check, build, and run the full test
+# suite (packages + root structural suites). Mirrors CI so failures surface
+# locally. Skip with `git push --no-verify` only when you know why.
+set -e
+pnpm typecheck
+pnpm -r build
+pnpm -r test
+pnpm test:root

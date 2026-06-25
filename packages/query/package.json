@@ -17,6 +17,6 @@
     "@kgpacks/agent": "workspace:*",
     "@kgpacks/db": "workspace:*",
     "@kgpacks/embeddings": "workspace:*",
-    "@huggingface/transformers": "^3.8.1"
+    "@huggingface/transformers": "3.8.1"
   }
 }
