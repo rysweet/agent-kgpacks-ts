@@ -5,6 +5,7 @@
 // is never loaded: the command delegates to an injected `evalPack` seam, so the
 // suite runs fully offline. Defines the contract the implementation must satisfy.
 
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -107,6 +108,22 @@ describe('pack eval', () => {
 
     expect(result.code).toBe(EXIT_PACK_NOT_FOUND);
     expect(evalPack).not.toHaveBeenCalled();
+  });
+
+  it('exits 3 when the pack directory exists but has no pack.db, without calling the seam', async () => {
+    // beta-pack is a manifest-only pack (no database). eval must NOT open-or-create
+    // an empty pack.db nor invoke the heavy seam — mirroring the `query` guard.
+    const evalPack = fakeEvalPack();
+
+    const result = await runCli(['pack', 'eval', '--pack', 'beta-pack'], {
+      packsDir: packs.packsDir,
+      evalPack,
+    });
+
+    expect(result.code).toBe(EXIT_PACK_NOT_FOUND);
+    expect(result.stderr).toContain('Database not found');
+    expect(evalPack).not.toHaveBeenCalled();
+    expect(existsSync(join(packs.packsDir, 'beta-pack', 'pack.db'))).toBe(false);
   });
 
   it('maps an EvalError to exit 8 (by name)', async () => {

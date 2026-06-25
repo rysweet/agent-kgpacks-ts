@@ -6,15 +6,21 @@
 // eval/retrieval/agent stack is loaded lazily by the injected `evalPack` seam. On
 // success the full `EvalReport` is printed as JSON; an `EvalError` maps to exit 8.
 
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { Command, Option } from 'commander';
 
 import {
+  DB_FILENAME,
   DEFAULT_JUDGE_MODEL,
   DEFAULT_PER_PACK,
   DEFAULT_SAMPLE,
   SAMPLE_MODES,
 } from '../constants.js';
 import type { CliContext } from '../context.js';
+import { CliError } from '../errors.js';
+import { EXIT_PACK_NOT_FOUND } from '../exit-codes.js';
 import { printJson } from '../io.js';
 import { resolveExistingPackDir } from '../pack-dir.js';
 import { parsePositiveInt } from '../parse.js';
@@ -50,6 +56,14 @@ export function registerEval(parent: Command, ctx: CliContext): Command {
       const packsDir = ctx.packsDirFor(opts.packsDir as string | undefined);
       const pack = opts.pack as string;
       const packDir = resolveExistingPackDir(packsDir, pack);
+      // Confirm the pack database exists BEFORE invoking the seam: the Database
+      // constructor opens-or-creates, so without this guard eval would silently
+      // write an empty pack.db and spin up the agent before failing. Mirrors the
+      // `query` command's guard.
+      const dbPath = join(packDir, DB_FILENAME);
+      if (!existsSync(dbPath)) {
+        throw new CliError(`Database not found at ${dbPath}`, EXIT_PACK_NOT_FOUND);
+      }
 
       const report = await ctx.evalPack({
         packDir,
