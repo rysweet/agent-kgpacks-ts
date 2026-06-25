@@ -1,0 +1,3 @@
+# Fast quality gate on every commit: format + lint the STAGED files only.
+# (The full type-check / build / test gate runs in pre-push and CI.)
+pnpm exec lint-staged

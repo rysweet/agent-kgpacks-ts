@@ -29,30 +29,41 @@
     "catalog:eval": "node scripts/eval-catalog.mjs",
     "cve:build": "node scripts/build-cve-pack.mjs",
     "bundle:cli": "node scripts/bundle-cli.mjs",
-    "prepare": "node scripts/bundle-cli.mjs"
+    "prepare": "node scripts/bundle-cli.mjs && husky"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,mts,cts,mjs,cjs,js}": [
+      "eslint --fix --no-warn-ignored",
+      "prettier --write"
+    ],
+    "*.{json,md,css,yml,yaml}": [
+      "prettier --write"
+    ]
   },
   "dependencies": {
     "@github/copilot-sdk": "1.0.3",
-    "@huggingface/transformers": "^3.8.1",
+    "@huggingface/transformers": "3.8.1",
     "@ladybugdb/core": "0.17.1",
-    "commander": "^12.1.0"
+    "commander": "12.1.0"
   },
   "devDependencies": {
-    "@eslint/js": "^9.17.0",
-    "@types/node": "^22.10.2",
-    "@vitest/coverage-v8": "^3.2.6",
-    "esbuild": "^0.28.1",
-    "eslint": "^9.17.0",
-    "eslint-config-prettier": "^9.1.0",
-    "globals": "^15.14.0",
-    "prettier": "^3.4.2",
-    "typescript": "^5.7.2",
-    "typescript-eslint": "^8.18.1",
-    "vitest": "^3.2.6"
+    "@eslint/js": "9.39.4",
+    "@types/node": "22.20.0",
+    "@vitest/coverage-v8": "3.2.6",
+    "esbuild": "0.28.1",
+    "eslint": "9.39.4",
+    "eslint-config-prettier": "9.1.2",
+    "globals": "15.15.0",
+    "husky": "9.1.7",
+    "lint-staged": "17.0.8",
+    "prettier": "3.8.4",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.62.0",
+    "vitest": "3.2.6"
   },
   "pnpm": {
     "overrides": {
-      "vite": "^6.4.3"
+      "vite": "6.4.3"
     }
   }
 }
