@@ -7,14 +7,17 @@
 // Ported from the reference `sse_starlette` `EventSourceResponse` framing. The
 // payload is written verbatim — JSON for `sources`/`done`, raw text for `token`,
 // and the error class name for `error`. Multi-line payloads are split into
-// multiple `data:` lines per the SSE spec.
+// multiple `data:` lines per the SSE spec, which terminates lines on CRLF, a lone
+// CR, *or* LF — so all three must be treated as line breaks (matching
+// `sse_starlette`), otherwise a bare `\r` in a token answer would corrupt the
+// client's parse of the rest of that line.
 
 import { Readable } from 'node:stream';
 
 /** Formats a single SSE event frame. */
 export function formatSseEvent(event: string, data: string): string {
   const dataLines = data
-    .split('\n')
+    .split(/\r\n|\r|\n/)
     .map((line) => `data: ${line}`)
     .join('\n');
   return `event: ${event}\n${dataLines}\n\n`;

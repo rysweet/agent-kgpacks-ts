@@ -122,20 +122,20 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ServerContext): vo
 
       const events = async function* (): AsyncGenerator<SseEvent> {
         const start = performance.now();
-        const conn = await ctx.manager.getConnection();
-        // Close the connection when the WORK settles, never on timeout while a query
-        // may still be in flight on it (closing a connection mid-query can crash the
-        // native driver). conn.close() is idempotent.
-        const work = runChat(
-          conn,
-          { agent, embedder: ctx.embedder },
-          { question, maxResults: max_results },
-        );
-        void work.then(
-          () => conn.close(),
-          () => conn.close(),
-        );
         try {
+          const conn = await ctx.manager.getConnection();
+          // Close the connection when the WORK settles, never on timeout while a query
+          // may still be in flight on it (closing a connection mid-query can crash the
+          // native driver). conn.close() is idempotent.
+          const work = runChat(
+            conn,
+            { agent, embedder: ctx.embedder },
+            { question, maxResults: max_results },
+          );
+          void work.then(
+            () => conn.close(),
+            () => conn.close(),
+          );
           let timer: ReturnType<typeof setTimeout> | undefined;
           const timeout = new Promise<never>((_resolve, reject) => {
             timer = setTimeout(() => reject(new StreamTimeout()), timeoutMs);
@@ -157,8 +157,10 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ServerContext): vo
             }),
           };
         } catch (error) {
-          // A timeout is an expected client-visible outcome; any other failure is an
-          // infra fault whose cause must be logged (the client payload stays generic).
+          // A timeout is an expected client-visible outcome; any other failure (incl.
+          // a connection-acquisition fault before synthesis starts) is an infra fault
+          // whose cause must be logged (the client payload stays generic). Emitting an
+          // `error` event keeps every failure path consistent for the client.
           if (!(error instanceof StreamTimeout)) {
             request.log.error({ err: error }, 'chat stream synthesis failed');
           }
