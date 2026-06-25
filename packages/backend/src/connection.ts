@@ -11,18 +11,28 @@
 //     reference `get_long_lived_connection()`.
 //
 // A single `Database` handle is held for the process lifetime; connections are
-// cheap and per-request. The required `vector` extension is loaded onto each
-// connection (installed once, then `LOAD`ed per connection).
+// cheap and per-request. The required `vector` extension is INSTALL+LOADed exactly
+// ONCE, on a dedicated connection, before any request connection is handed out —
+// NOT per request. Both INSTALL and LOAD are write transactions, and LadybugDB
+// permits only one write transaction at a time. Loading per request connection
+// therefore made concurrent cold-start requests race: each lost connection's
+// INSTALL/LOAD threw "Cannot start a new write transaction" (one winner loads the
+// extension DB-wide), which the old code swallowed and used to mark the extension
+// permanently "failed". In practice the winner's load made vector work anyway, but
+// the design was fragile: a request could be handed a connection in the brief
+// window before the winner committed and have its vector query fail, and the
+// failed-state bookkeeping was simply wrong. Loading once, up front, removes the
+// race — a loaded extension is visible to every subsequent connection.
 
 import type { Connection, Database } from '@kgpacks/db';
 
 /** Options for {@link ConnectionManager}. */
 export interface ConnectionManagerOptions {
   /**
-   * Extensions to load onto every connection. Defaults to `['vector']` (required
+   * Extensions to load once onto the database. Defaults to `['vector']` (required
    * by the semantic-search / hybrid / chat vector queries). Extension loading is
-   * best-effort: a load failure is recorded once and skipped thereafter so routes
-   * that don't need the extension keep working.
+   * best-effort: a load failure is skipped so routes that don't need the extension
+   * keep working.
    */
   extensions?: string[];
 }
@@ -30,8 +40,8 @@ export interface ConnectionManagerOptions {
 export class ConnectionManager {
   readonly #database: Database;
   readonly #extensions: string[];
-  readonly #installed = new Set<string>();
-  readonly #failed = new Set<string>();
+  /** Memoized one-time extension load (shared by all concurrent callers). */
+  #ready: Promise<void> | undefined;
 
   constructor(database: Database, options: ConnectionManagerOptions = {}) {
     this.#database = database;
@@ -39,28 +49,41 @@ export class ConnectionManager {
   }
 
   /**
-   * Opens a fresh connection with the configured extensions loaded. The caller
-   * owns the returned connection and must `close()` it (use {@link withConnection}
-   * unless the connection must outlive the request, as the SSE stream requires).
+   * INSTALL+LOADs every configured extension exactly once, on a single dedicated
+   * connection, serialized so the write transactions never collide. Concurrent
+   * callers all await the same promise. Best-effort per extension: a missing /
+   * optional extension is skipped rather than blocking every request.
+   */
+  #ensureExtensions(): Promise<void> {
+    if (this.#ready === undefined) {
+      this.#ready = (async () => {
+        const conn = this.#database.connect();
+        try {
+          for (const ext of this.#extensions) {
+            try {
+              await conn.run(`INSTALL ${ext}`);
+              await conn.run(`LOAD EXTENSION ${ext}`);
+            } catch {
+              // Best-effort: a missing/optional extension must not block requests.
+            }
+          }
+        } finally {
+          conn.close();
+        }
+      })();
+    }
+    return this.#ready;
+  }
+
+  /**
+   * Opens a fresh connection (after the one-time extension load has completed). The
+   * caller owns the returned connection and must `close()` it (use
+   * {@link withConnection} unless the connection must outlive the request, as the
+   * SSE stream requires).
    */
   async getConnection(): Promise<Connection> {
-    const conn = this.#database.connect();
-    for (const ext of this.#extensions) {
-      if (this.#failed.has(ext)) continue;
-      try {
-        if (this.#installed.has(ext)) {
-          await conn.run(`LOAD EXTENSION ${ext}`);
-        } else {
-          await conn.loadExtension(ext);
-          this.#installed.add(ext);
-        }
-      } catch {
-        // Best-effort: give up on this extension for the rest of the process so a
-        // missing/optional extension never blocks every subsequent connection.
-        this.#failed.add(ext);
-      }
-    }
-    return conn;
+    await this.#ensureExtensions();
+    return this.#database.connect();
   }
 
   /**
