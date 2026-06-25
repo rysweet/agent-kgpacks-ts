@@ -7,8 +7,37 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { formatSseEvent } from '../src/sse.js';
 import { makeTestServer, type TestServer } from './helpers.js';
 import { FakeAgent } from './stubs.js';
+
+/** Extracts the decoded `data:` payload lines from one SSE frame. */
+function dataLines(frame: string): string[] {
+  return frame
+    .split('\n')
+    .filter((line) => line.startsWith('data: '))
+    .map((line) => line.slice('data: '.length));
+}
+
+describe('formatSseEvent — line splitting (CR / CRLF / LF)', () => {
+  it('splits a LONE carriage return into separate data: lines', () => {
+    // A bare \r is an SSE line terminator; if it stayed inside a `data:` line the
+    // client (EventSource) would drop everything after it, truncating the answer.
+    expect(dataLines(formatSseEvent('token', 'before\rafter'))).toEqual(['before', 'after']);
+  });
+
+  it('treats CRLF as a single line break (no empty data line between)', () => {
+    expect(dataLines(formatSseEvent('token', 'a\r\nb'))).toEqual(['a', 'b']);
+  });
+
+  it('splits LF as before', () => {
+    expect(dataLines(formatSseEvent('token', 'x\ny'))).toEqual(['x', 'y']);
+  });
+
+  it('keeps a single-line payload on one data: line', () => {
+    expect(dataLines(formatSseEvent('token', 'plain'))).toEqual(['plain']);
+  });
+});
 
 describe('GET /api/v1/chat/stream — framing', () => {
   let server: TestServer;
