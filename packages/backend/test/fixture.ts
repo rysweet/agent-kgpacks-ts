@@ -2,9 +2,10 @@
 //
 // A small, deterministic in-memory LadybugDB fixture for the offline route suites.
 // It reuses the proven Spike-A pattern (packages/db): open `Database(':memory:')`,
-// load the `vector` extension, create the `Article` / `Section` / `HAS_SECTION` /
-// `LINKS_TO` schema, seed a handful of articles with hand-chosen 8-dim lead-section
-// embeddings, and build the `Section.embedding_idx` cosine index.
+// load the `vector` extension, create the production `Article` / `Section` /
+// `HAS_SECTION` / `LINKS_TO` schema (LINKS_TO is Section→Section, exactly as
+// ingestion writes it), seed a handful of articles with hand-chosen 8-dim
+// lead-section embeddings, and build the `Section.embedding_idx` cosine index.
 //
 // Embeddings are arranged so vector-search ordering from the "Quantum entanglement"
 // seed is predictable: Bell's theorem (nearest) > EPR paradox > Quantum mechanics,
@@ -122,7 +123,7 @@ export async function buildFixtureDatabase(): Promise<Database> {
       'CREATE NODE TABLE Section(id STRING, title STRING, content STRING, word_count INT64, level INT64, embedding FLOAT[8], PRIMARY KEY(id))',
     );
     await conn.run('CREATE REL TABLE HAS_SECTION(FROM Article TO Section, section_index INT64)');
-    await conn.run('CREATE REL TABLE LINKS_TO(FROM Article TO Article)');
+    await conn.run('CREATE REL TABLE LINKS_TO(FROM Section TO Section, link_type STRING)');
 
     for (const article of SEED_ARTICLES) {
       await conn.run(
@@ -174,10 +175,13 @@ export async function buildFixtureDatabase(): Promise<Database> {
       }
     }
 
+    // Article links are materialized as lead-section→lead-section `LINKS_TO`
+    // edges, exactly as ingestion/loader.ts writes them in a real pack.
     for (const [source, target] of SEED_LINKS) {
       await conn.run(
-        'MATCH (a:Article {title: $s}), (b:Article {title: $t}) CREATE (a)-[:LINKS_TO]->(b)',
-        { s: source, t: target },
+        'MATCH (a:Section {id: $s}), (b:Section {id: $t}) ' +
+          "CREATE (a)-[:LINKS_TO {link_type: 'wiki'}]->(b)",
+        { s: `${source}#0`, t: `${target}#0` },
       );
     }
 

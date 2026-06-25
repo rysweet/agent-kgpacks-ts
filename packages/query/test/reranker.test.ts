@@ -12,7 +12,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { graphRerank } from '../src/index.js';
+import { graphRerank, RerankOptionError } from '../src/index.js';
 import type { RetrieverResult } from '../src/index.js';
 import { RecordingConnection, type Responder } from './helpers.js';
 
@@ -157,5 +157,42 @@ describe('graphRerank — deterministic tie-break', () => {
     expect(out.map((r) => r.id)).toEqual(['X', 'Y']);
     expect(out[0].score).toBeCloseTo(0.5, 10);
     expect(out[1].score).toBeCloseTo(0.5, 10);
+  });
+});
+
+describe('graphRerank — maxHops contract (no silent over-promise)', () => {
+  it('rejects maxHops > 1 (multi-hop unimplemented) instead of silently doing one hop', async () => {
+    const conn = new RecordingConnection(linksResponder({ A: ['B'] }));
+    const candidates = [c('A', 0.9), c('B', 0.5)];
+
+    await expect(graphRerank(conn.asConnection(), candidates, { maxHops: 2 })).rejects.toThrow(
+      RerankOptionError,
+    );
+  });
+
+  it('rejects a non-integer maxHops', async () => {
+    const conn = new RecordingConnection(linksResponder({}));
+    await expect(graphRerank(conn.asConnection(), [c('A', 0.9)], { maxHops: 1.5 })).rejects.toThrow(
+      RerankOptionError,
+    );
+  });
+
+  it('honors the single supported hop (maxHops: 1) exactly like the default', async () => {
+    const conn = new RecordingConnection(linksResponder({ A: ['B'] }));
+    const candidates = [c('A', 0.8), c('B', 0.2)];
+
+    const out = await graphRerank(conn.asConnection(), candidates, { maxHops: 1 });
+
+    // boost(B) = 0.5*0.8/2 = 0.2 -> 0.4
+    expect(out.find((r) => r.id === 'B')?.score).toBeCloseTo(0.4, 10);
+  });
+
+  it('treats maxHops < 1 as "no graph boost" (list returned unchanged)', async () => {
+    const conn = new RecordingConnection(linksResponder({ A: ['B'] }));
+    const candidates = [c('A', 0.8), c('B', 0.2)];
+
+    const out = await graphRerank(conn.asConnection(), candidates, { maxHops: 0 });
+
+    expect(out).toEqual(candidates);
   });
 });

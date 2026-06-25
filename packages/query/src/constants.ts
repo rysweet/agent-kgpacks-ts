@@ -63,8 +63,20 @@ export const DEFAULT_RERANK_ALPHA = 0.5;
 /** Default number of top candidates used as graph-traversal seeds. */
 export const DEFAULT_RERANK_SEED_K = 5;
 
-/** Default (and current maximum) graph hops expanded from each seed. */
+/**
+ * Number of graph hops the reranker expands from each seed. The reranker
+ * implements single-hop `LINKS_TO` expansion only, so this is both the default
+ * AND the maximum supported value — see {@link RERANK_MAX_SUPPORTED_HOPS}. A
+ * request for more hops is rejected (not silently truncated) by `graphRerank`.
+ */
 export const DEFAULT_RERANK_MAX_HOPS = 1;
+
+/**
+ * The largest `maxHops` `graphRerank` can honor. Multi-hop expansion is not
+ * implemented; `maxHops` above this is rejected with a `RerankOptionError` rather
+ * than silently behaving as a single hop.
+ */
+export const RERANK_MAX_SUPPORTED_HOPS = 1;
 
 /** Default number of few-shot exemplars selected (top-n by BGE cosine). */
 export const DEFAULT_FEW_SHOT_N = 3;

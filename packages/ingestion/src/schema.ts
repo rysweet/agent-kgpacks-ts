@@ -34,6 +34,7 @@ export const NODE_TABLE_DDL: readonly string[] = [
      title STRING,
      category STRING,
      word_count INT64,
+     expansion_depth INT64,
      PRIMARY KEY(title)
    )`,
   `CREATE NODE TABLE Section(

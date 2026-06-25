@@ -1,10 +1,12 @@
 // @kgpacks/backend — graph-neighborhood service.
 //
-// Direct-Cypher port of the reference `services/graph_service.GraphService`. Returns
-// the nodes reachable within `depth` `LINKS_TO` hops of the seed (seed = depth 0),
-// de-duplicated in traversal order, plus the edges among them. `depth` is
-// interpolated into the variable-length pattern (LadybugDB cannot parameterize
-// path bounds) after strict 1–3 validation, so injection is impossible.
+// Port of the reference `services/graph_service.GraphService`. Returns the
+// Articles reachable within `depth` hops of the seed (seed = depth 0), de-duplicated
+// in traversal order, plus the edges among them. Because ingestion materializes
+// article links as lead-section→lead-section `LINKS_TO` edges, the traversal runs
+// over the `Section` graph and maps endpoints back to Articles via `HAS_SECTION`.
+// `depth` is interpolated into the variable-length pattern (LadybugDB cannot
+// parameterize path bounds) after strict 1–3 validation, so injection is impossible.
 
 import type { Connection, Row } from '@kgpacks/db';
 
@@ -49,9 +51,16 @@ export async function getGraphNeighbors(
   }
 
   const categoryClause = category ? 'WHERE neighbor.category = $category' : '';
-  const cypher = `MATCH path = (seed:Article {title: $seed})-[:LINKS_TO*0..${depth}]->(neighbor:Article)
+  // Article links are materialized as lead-section→lead-section `LINKS_TO` edges
+  // (see ingestion/loader.ts), so an article-level neighborhood traverses the
+  // Section graph and maps section endpoints back to their owning Article via
+  // HAS_SECTION. `path` binds ONLY the variable-length LINKS_TO segment so
+  // `length(path)` is the hop count (the HAS_SECTION joins are separate MATCHes).
+  const cypher = `MATCH (seed:Article {title: $seed})-[:HAS_SECTION]->(seedSec:Section)
+     MATCH path = (seedSec)-[:LINKS_TO*0..${depth}]->(neighborSec:Section)
+     MATCH (neighbor:Article)-[:HAS_SECTION]->(neighborSec)
      ${categoryClause}
-     WITH neighbor, length(path) AS depth
+     WITH neighbor, min(length(path)) AS depth
      ORDER BY depth ASC, neighbor.title ASC
      LIMIT $limit
      RETURN neighbor.title AS title, neighbor.category AS category,
@@ -106,9 +115,9 @@ async function fetchLinkCounts(conn: Connection, titles: string[]): Promise<Map<
   const counts = new Map<string, number>();
   if (titles.length === 0) return counts;
   const rows = await conn.run<Row>(
-    `MATCH (a:Article)-[:LINKS_TO]->(t:Article)
+    `MATCH (a:Article)-[:HAS_SECTION]->(:Section)-[:LINKS_TO]->(:Section)<-[:HAS_SECTION]-(t:Article)
      WHERE a.title IN $titles
-     RETURN a.title AS title, COUNT(t) AS links`,
+     RETURN a.title AS title, COUNT(DISTINCT t.title) AS links`,
     { titles },
   );
   for (const row of rows) {
@@ -120,9 +129,9 @@ async function fetchLinkCounts(conn: Connection, titles: string[]): Promise<Map<
 async function fetchEdges(conn: Connection, titles: string[]): Promise<GraphEdge[]> {
   if (titles.length <= 1) return [];
   const rows = await conn.run<Row>(
-    `MATCH (source:Article)-[:LINKS_TO]->(target:Article)
+    `MATCH (source:Article)-[:HAS_SECTION]->(:Section)-[:LINKS_TO]->(:Section)<-[:HAS_SECTION]-(target:Article)
      WHERE source.title IN $titles AND target.title IN $titles
-     RETURN source.title AS source, target.title AS target
+     RETURN DISTINCT source.title AS source, target.title AS target
      LIMIT ${EDGE_QUERY_LIMIT}`,
     { titles },
   );

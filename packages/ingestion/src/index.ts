@@ -79,7 +79,6 @@ export async function buildPack(config: BuildPackConfig): Promise<BuildPackResul
       maxDepth,
       maxArticles,
     });
-    const articles = expanded.map((e) => e.article);
 
     // 3–5. Extract, chunk, and embed each article into a loadable record.
     // Fail-soft per article: one article's extract/embed failure (a transient LLM
@@ -88,7 +87,7 @@ export async function buildPack(config: BuildPackConfig): Promise<BuildPackResul
     // are reported in the result rather than silently dropped.
     const loadables: LoadableArticle[] = [];
     const skipped: SkippedArticle[] = [];
-    for (const article of articles) {
+    for (const { article, depth } of expanded) {
       try {
         const chunks = chunkArticle(article, config.chunk);
         const [sectionEmbeddings, chunkEmbeddings, extraction] = await Promise.all([
@@ -102,7 +101,14 @@ export async function buildPack(config: BuildPackConfig): Promise<BuildPackResul
           ),
           extractor.extract(article),
         ]);
-        loadables.push({ article, sectionEmbeddings, chunkEmbeddings, chunks, extraction });
+        loadables.push({
+          article,
+          sectionEmbeddings,
+          chunkEmbeddings,
+          chunks,
+          extraction,
+          expansionDepth: depth,
+        });
       } catch (error) {
         skipped.push({ title: article.title, reason: errorMessage(error) });
       }

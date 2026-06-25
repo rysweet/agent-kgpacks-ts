@@ -24,6 +24,12 @@ export interface LoadableArticle {
   /** One embedding per `chunks[i]`, same order. */
   chunkEmbeddings: ReadonlyArray<Float32Array | number[]>;
   extraction: ExtractionResult;
+  /**
+   * BFS distance from the nearest seed (seed = 0). Persisted on the `Article`
+   * node so `/stats` can report the by-depth distribution. Defaults to `0` when
+   * the caller does not track expansion (e.g. a flat import).
+   */
+  expansionDepth?: number;
 }
 
 /** The full payload for one {@link loadPack} call. */
@@ -83,13 +89,22 @@ export async function createSchema(conn: Connection): Promise<boolean> {
   return ftsLoaded;
 }
 
-async function loadArticleNode(conn: Connection, article: Article): Promise<void> {
+async function loadArticleNode(
+  conn: Connection,
+  article: Article,
+  expansionDepth: number,
+): Promise<void> {
   const totalWords = article.sections.reduce((sum, s) => sum + wordCount(s.content), 0);
-  await conn.run('CREATE (:Article {title: $title, category: $category, word_count: $wc})', {
-    title: article.title,
-    category: article.category ?? '',
-    wc: totalWords,
-  });
+  await conn.run(
+    'CREATE (:Article {title: $title, category: $category, word_count: $wc, ' +
+      'expansion_depth: $depth})',
+    {
+      title: article.title,
+      category: article.category ?? '',
+      wc: totalWords,
+      depth: expansionDepth,
+    },
+  );
 }
 
 async function loadSections(
@@ -274,7 +289,7 @@ export async function loadPack(conn: Connection, input: LoadPackInput): Promise<
   };
 
   for (const item of input.articles) {
-    await loadArticleNode(conn, item.article);
+    await loadArticleNode(conn, item.article, item.expansionDepth ?? 0);
     await loadSections(conn, item.article, item.sectionEmbeddings);
     await loadChunks(conn, item.chunks, item.chunkEmbeddings);
     stats.entities += await loadEntities(conn, item.article, item.extraction, createdEntities);
