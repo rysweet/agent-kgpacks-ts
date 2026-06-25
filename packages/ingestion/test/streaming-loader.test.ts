@@ -122,4 +122,17 @@ describe('createPackWriter — streaming round-trip', () => {
     expect(rels).toHaveLength(1);
     expect(rels[0].rel).toBe('unrelated_to');
   });
+
+  it('persists Article.expansion_depth (default 0) like loadPack, so /stats by_depth works', async () => {
+    // Streaming articles carry no expansion depth, so they must default to 0 (a
+    // queryable value), not NULL — otherwise a streaming-built pack's by_depth is
+    // silently empty.
+    const rows = await conn.run<{ title: string; depth: number | null }>(
+      `MATCH (a:Article) RETURN a.title AS title, a.expansion_depth AS depth ORDER BY title`,
+    );
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.depth).toBe(0);
+    }
+  });
 });

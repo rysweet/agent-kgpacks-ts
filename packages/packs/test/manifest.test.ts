@@ -8,7 +8,7 @@
 // TDD: these FAIL today because packages/packs/src does not yet export the
 // manifest surface. They PASS once manifest.ts lands.
 
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -28,7 +28,7 @@ const validManifest = (): PackManifest => ({
   name: 'world-history',
   version: '1.2.0',
   description: 'World history knowledge pack',
-  graph_stats: { node_count: 12000, edge_count: 48000 },
+  graph_stats: { articles: 12000, entities: 4800, relationships: 9100, size_mb: 18.4 },
   eval_scores: { recall_at_5: 0.81, faithfulness: 0.92 },
 });
 
@@ -82,11 +82,20 @@ describe('@kgpacks/packs — validateManifest', () => {
     expect(() => validateManifest(bad)).toThrow(ManifestValidationError);
   });
 
+  it('accepts the real catalog graph_stats shape (float size_mb, no node_count)', () => {
+    const m = {
+      name: 'rust-expert',
+      version: '1.0.0',
+      graph_stats: { articles: 294, entities: 1388, relationships: 1190, size_mb: 2.08 },
+    };
+    expect(validateManifest(m)).toEqual(m);
+  });
+
   it.each([
-    ['negative node_count', { node_count: -1, edge_count: 5 }],
-    ['non-integer node_count', { node_count: 1.5, edge_count: 5 }],
-    ['missing edge_count', { node_count: 5 }],
-    ['non-number edge_count', { node_count: 5, edge_count: 'lots' }],
+    ['negative count', { articles: -1 }],
+    ['non-number stat', { articles: 5, entities: 'lots' }],
+    ['NaN stat', { articles: Number.NaN }],
+    ['Infinity stat', { size_mb: Number.POSITIVE_INFINITY }],
   ])('rejects malformed graph_stats (%s)', (_label, graph_stats) => {
     expect(() => validateManifest({ name: 'ok', version: '1.0.0', graph_stats })).toThrow(
       ManifestValidationError,
@@ -110,6 +119,27 @@ describe('@kgpacks/packs — validateManifest', () => {
     const m = validateManifest(raw);
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
     expect((m as Record<string, unknown>).polluted).toBeUndefined();
+  });
+});
+
+// Anti-drift: validate the REAL committed pack manifests so the validator can
+// never again diverge from the shape this platform actually ships (the cause of
+// the layer-16 `graph_stats` finding, where every real manifest was rejected).
+describe('@kgpacks/packs — validateManifest accepts every real catalog manifest', () => {
+  const catalogDir = join(process.cwd(), '..', '..', 'catalog');
+  const packs = existsSync(catalogDir)
+    ? readdirSync(catalogDir).filter((p) => existsSync(join(catalogDir, p, MANIFEST_FILENAME)))
+    : [];
+
+  it('finds committed catalog manifests to check', () => {
+    expect(packs.length).toBeGreaterThan(0);
+  });
+
+  it.each(packs)('validates the real manifest for %s', (pack) => {
+    const raw: unknown = JSON.parse(
+      readFileSync(join(catalogDir, pack, MANIFEST_FILENAME), 'utf8'),
+    );
+    expect(() => validateManifest(raw)).not.toThrow();
   });
 });
 

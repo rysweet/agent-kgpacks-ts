@@ -92,7 +92,7 @@ export async function createPackWriter(
   async function addBatch(items: LoadableArticle[]): Promise<void> {
     if (items.length === 0) return;
 
-    const articleRows: { title: string; category: string; wc: number }[] = [];
+    const articleRows: { title: string; category: string; wc: number; depth: number }[] = [];
     const sectionRows: {
       id: string;
       title: string;
@@ -117,7 +117,15 @@ export async function createPackWriter(
     for (const item of items) {
       const { article } = item;
       const totalWords = article.sections.reduce((s, sec) => s + wordCount(sec.content), 0);
-      articleRows.push({ title: article.title, category: article.category ?? '', wc: totalWords });
+      articleRows.push({
+        title: article.title,
+        category: article.category ?? '',
+        wc: totalWords,
+        // Streaming/flat imports (e.g. CVE) are not BFS-expanded; every article is a
+        // depth-0 seed. Persisting 0 (not NULL) keeps the schema identical to
+        // loadPack so /stats by_depth works on streaming-built packs too.
+        depth: item.expansionDepth ?? 0,
+      });
 
       for (let i = 0; i < article.sections.length; i++) {
         const section = article.sections[i];
@@ -183,7 +191,8 @@ export async function createPackWriter(
 
     await inChunks(articleRows, chunkSize, (rows) =>
       conn.run(
-        'UNWIND $rows AS r CREATE (:Article {title: r.title, category: r.category, word_count: r.wc})',
+        'UNWIND $rows AS r CREATE (:Article {title: r.title, category: r.category, ' +
+          'word_count: r.wc, expansion_depth: r.depth})',
         { rows },
       ),
     );

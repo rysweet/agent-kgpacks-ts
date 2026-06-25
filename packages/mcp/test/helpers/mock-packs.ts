@@ -31,7 +31,7 @@ export const ALPHA_MANIFEST: Record<string, unknown> = {
   name: 'alpha-pack',
   version: '1.2.0',
   description: 'Alpha knowledge pack',
-  graph_stats: { node_count: 100, edge_count: 250, articles: 42 },
+  graph_stats: { articles: 42, entities: 250, relationships: 100, size_mb: 1.5 },
   eval_scores: { recall_at_5: 0.8 },
 };
 

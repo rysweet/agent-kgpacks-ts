@@ -20,9 +20,16 @@ export const PACK_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
 const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 export interface GraphStats {
-  node_count: number;
-  edge_count: number;
-  [extra: string]: number;
+  /** Article (node) count — present in real catalog/built-pack manifests. */
+  articles?: number;
+  /** Distinct entity count. */
+  entities?: number;
+  /** Entity→entity relationship count. */
+  relationships?: number;
+  /** On-disk pack size in megabytes. */
+  size_mb?: number;
+  /** Any additional numeric stat is tolerated (must be a non-negative number). */
+  [stat: string]: number | undefined;
 }
 
 export interface EvalScores {
@@ -45,15 +52,13 @@ function validateGraphStats(value: unknown): void {
   if (!isPlainObject(value)) {
     throw new ManifestValidationError('graph_stats must be an object');
   }
-  for (const key of ['node_count', 'edge_count'] as const) {
-    const n = value[key];
-    if (typeof n !== 'number' || !Number.isInteger(n) || n < 0) {
-      throw new ManifestValidationError(`graph_stats.${key} must be a non-negative integer`);
-    }
-  }
+  // Real packs carry { articles, entities, relationships, size_mb }; no specific
+  // key is required (the historical node_count/edge_count shape was never produced
+  // by this platform). Every present stat must simply be a non-negative finite
+  // number — counts are integers, size_mb is a float, so integrality is not required.
   for (const [key, n] of Object.entries(value)) {
-    if (typeof n !== 'number' || !Number.isFinite(n)) {
-      throw new ManifestValidationError(`graph_stats.${key} must be a finite number`);
+    if (typeof n !== 'number' || !Number.isFinite(n) || n < 0) {
+      throw new ManifestValidationError(`graph_stats.${key} must be a non-negative finite number`);
     }
   }
 }
@@ -88,8 +93,10 @@ export function validateManifest(value: unknown): PackManifest {
   if ('description' in value && typeof value.description !== 'string') {
     throw new ManifestValidationError('description must be a string');
   }
-  if (value.graph_stats !== undefined) validateGraphStats(value.graph_stats);
-  if (value.eval_scores !== undefined) validateEvalScores(value.eval_scores);
+  // Optional sections may be present-but-null in externally generated manifests;
+  // treat null the same as absent (real catalog manifests carry `eval_scores: null`).
+  if (value.graph_stats != null) validateGraphStats(value.graph_stats);
+  if (value.eval_scores != null) validateEvalScores(value.eval_scores);
 
   // Rebuild without dangerous keys to guard against prototype pollution from
   // untrusted manifest JSON, while preserving every other (unknown) key.
