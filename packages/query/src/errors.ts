@@ -24,3 +24,16 @@ export class CypherValidationError extends QueryError {
     this.name = 'CypherValidationError';
   }
 }
+
+/**
+ * Thrown by {@link graphRerank} when `maxHops` requests a hop count the reranker
+ * does not implement. The reranker performs single-hop `LINKS_TO` expansion only;
+ * rather than silently treat `maxHops > 1` as `1` (returning wrong-by-omission
+ * results), it fails loud so callers know the option was not honored.
+ */
+export class RerankOptionError extends QueryError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RerankOptionError';
+  }
+}

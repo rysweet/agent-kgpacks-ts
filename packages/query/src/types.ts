@@ -107,7 +107,12 @@ export interface RerankerOptions {
   alpha?: number;
   /** Number of top candidates treated as traversal seeds. Default `5`. */
   seedK?: number;
-  /** Graph hops to expand from each seed. Default (and current max) `1`. */
+  /**
+   * Graph hops to expand from each seed. Only single-hop expansion is
+   * implemented: the supported values are `1` (default) or `<1` to disable the
+   * graph boost; `>1` is rejected with a `RerankOptionError` rather than silently
+   * truncated.
+   */
   maxHops?: number;
   /** Node table for the `LINKS_TO` traversal. Defaults to the retriever's `nodeTable`. */
   nodeTable?: string;

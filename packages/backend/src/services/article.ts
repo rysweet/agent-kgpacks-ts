@@ -58,8 +58,8 @@ export async function getArticleDetails(conn: Connection, title: string): Promis
   }));
 
   const linkRows = await conn.run<Row>(
-    `MATCH (a:Article {title: $title})-[:LINKS_TO]->(target:Article)
-     RETURN target.title AS title
+    `MATCH (a:Article {title: $title})-[:HAS_SECTION]->(:Section)-[:LINKS_TO]->(:Section)<-[:HAS_SECTION]-(target:Article)
+     RETURN DISTINCT target.title AS title
      ORDER BY title ASC
      LIMIT ${LINK_LIMIT}`,
     { title },
@@ -67,8 +67,8 @@ export async function getArticleDetails(conn: Connection, title: string): Promis
   const links = linkRows.map((row) => toText(row.title));
 
   const backlinkRows = await conn.run<Row>(
-    `MATCH (source:Article)-[:LINKS_TO]->(a:Article {title: $title})
-     RETURN source.title AS title
+    `MATCH (source:Article)-[:HAS_SECTION]->(:Section)-[:LINKS_TO]->(:Section)<-[:HAS_SECTION]-(a:Article {title: $title})
+     RETURN DISTINCT source.title AS title
      ORDER BY title ASC
      LIMIT ${LINK_LIMIT}`,
     { title },

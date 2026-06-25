@@ -13,7 +13,7 @@ export { validateCypher } from './cypher-safety.js';
 export { vectorRetrieve } from './vector.js';
 export { hybridRetrieve } from './hybrid.js';
 
-export { QueryError, CypherValidationError } from './errors.js';
+export { QueryError, CypherValidationError, RerankOptionError } from './errors.js';
 
 export {
   DEFAULT_K,

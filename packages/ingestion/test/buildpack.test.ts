@@ -77,6 +77,16 @@ describe('buildPack — offline end-to-end', () => {
     );
     expect(rows.map((r) => r.id)).toEqual(['B#0']);
   });
+
+  it('persists each Article expansion_depth (seed = 0, expanded neighbour = 1)', async () => {
+    const rows = await conn.run<{ title: string; depth: number }>(
+      `MATCH (a:Article) RETURN a.title AS title, a.expansion_depth AS depth ORDER BY title`,
+    );
+    expect(rows).toEqual([
+      { title: 'A', depth: 0 },
+      { title: 'B', depth: 1 },
+    ]);
+  });
 });
 
 describe('buildPack — per-article fault isolation', () => {

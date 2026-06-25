@@ -12,7 +12,9 @@ import {
   DEFAULT_RERANK_ALPHA,
   DEFAULT_RERANK_MAX_HOPS,
   DEFAULT_RERANK_SEED_K,
+  RERANK_MAX_SUPPORTED_HOPS,
 } from './constants.js';
+import { RerankOptionError } from './errors.js';
 import { toIdString } from './row.js';
 import type { RerankerOptions, RetrieverResult } from './types.js';
 
@@ -21,7 +23,9 @@ import type { RerankerOptions, RetrieverResult } from './types.js';
  *
  *  1. The top-`seedK` candidates (by incoming score) are traversal seeds.
  *  2. Each seed's 1-hop `LINKS_TO` neighbours (both directions) are queried via
- *     `conn.run`, bounded by `maxHops` (current max 1).
+ *     `conn.run`. Only single-hop expansion is implemented: `maxHops > 1` is
+ *     rejected with a {@link RerankOptionError} (never silently treated as `1`),
+ *     and `maxHops < 1` disables the graph boost (the list is returned as-is).
  *  3. Every neighbour that is ALREADY a candidate gains a decayed boost
  *     `alpha * seedScore / (1 + hopDistance)`; unknown neighbours are ignored.
  *  4. The list is re-sorted by `originalScore + Σ boosts`, descending, with a
@@ -39,6 +43,15 @@ export async function graphRerank(
   const seedK = options.seedK ?? DEFAULT_RERANK_SEED_K;
   const maxHops = options.maxHops ?? DEFAULT_RERANK_MAX_HOPS;
   const nodeTable = options.nodeTable ?? DEFAULT_NODE_TABLE;
+
+  // Single-hop expansion is all this reranker implements. Reject a request for
+  // more hops loudly instead of silently honoring only one (which would return
+  // wrong-by-omission results). `maxHops < 1` legitimately means "no graph boost".
+  if (!Number.isInteger(maxHops) || maxHops > RERANK_MAX_SUPPORTED_HOPS) {
+    throw new RerankOptionError(
+      `maxHops must be an integer <= ${RERANK_MAX_SUPPORTED_HOPS} (single-hop expansion only), got ${maxHops}`,
+    );
+  }
 
   if (candidates.length === 0 || maxHops < 1) {
     return candidates;

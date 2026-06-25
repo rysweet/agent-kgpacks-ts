@@ -126,8 +126,14 @@ async function graphScoresByArticle(
   maxHops: number,
 ): Promise<Map<string, number>> {
   const scores = new Map<string, number>();
+  // Article links are lead-section→lead-section `LINKS_TO` edges, so the
+  // graph-proximity signal traverses the Section graph and maps endpoints back to
+  // Articles via HAS_SECTION. `path` binds only the variable-length LINKS_TO
+  // segment, so `length(path)` is the hop count.
   const rows = await conn.run<Row>(
-    `MATCH path = (seed:Article {title: $seed})-[:LINKS_TO*0..${maxHops}]->(n:Article)
+    `MATCH (seed:Article {title: $seed})-[:HAS_SECTION]->(seedSec:Section)
+     MATCH path = (seedSec)-[:LINKS_TO*0..${maxHops}]->(neighborSec:Section)
+     MATCH (n:Article)-[:HAS_SECTION]->(neighborSec)
      WITH n.title AS title, min(length(path)) AS hops
      WHERE hops >= 1
      RETURN title, hops`,

@@ -19,6 +19,7 @@ describe('@kgpacks/query public surface', () => {
     expect(typeof query.hybridRetrieve).toBe('function');
     expect(typeof query.QueryError).toBe('function');
     expect(typeof query.CypherValidationError).toBe('function');
+    expect(typeof query.RerankOptionError).toBe('function');
   });
 
   it('exports the overridable defaults with their reference values', () => {
