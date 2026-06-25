@@ -28,7 +28,7 @@ const beta: PackManifest = {
   name: 'beta',
   version: '2.1.0',
   description: 'Beta pack',
-  graph_stats: { node_count: 7, edge_count: 11 },
+  graph_stats: { articles: 7, entities: 11, relationships: 9, size_mb: 0.5 },
   eval_scores: { recall_at_5: 0.5 },
 };
 

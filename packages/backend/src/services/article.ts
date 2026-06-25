@@ -136,6 +136,17 @@ function round2(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+/**
+ * True when the `Article` node table declares the given property column. Packs
+ * built before a column was added to the schema simply lack it, so callers must
+ * gate optional-column queries on this rather than letting LadybugDB throw a
+ * binder exception (which would 500 the whole endpoint).
+ */
+async function articleHasColumn(conn: Connection, column: string): Promise<boolean> {
+  const rows = await conn.run<Row>("CALL TABLE_INFO('Article') RETURN *");
+  return rows.some((row) => toText(row.name) === column);
+}
+
 /** Corpus statistics, served from {@link StatsCache} when fresh. */
 export async function getStats(
   conn: Connection,
@@ -158,14 +169,19 @@ export async function getStats(
   const byCategory: Record<string, number> = {};
   for (const row of categoryRows) byCategory[toText(row.category)] = toNumber(row.count);
 
-  const depthRows = await conn.run<Row>(
-    `MATCH (a:Article)
-     WHERE a.expansion_depth IS NOT NULL
-     RETURN a.expansion_depth AS depth, count(*) AS count
-     ORDER BY depth ASC`,
-  );
   const byDepth: Record<string, number> = {};
-  for (const row of depthRows) byDepth[String(toNumber(row.depth))] = toNumber(row.count);
+  // Older packs (built before `expansion_depth` was added to the Article schema)
+  // lack the column entirely; querying it would throw a binder exception and 500
+  // the whole endpoint. Introspect the schema and only aggregate when present.
+  if (await articleHasColumn(conn, 'expansion_depth')) {
+    const depthRows = await conn.run<Row>(
+      `MATCH (a:Article)
+       WHERE a.expansion_depth IS NOT NULL
+       RETURN a.expansion_depth AS depth, count(*) AS count
+       ORDER BY depth ASC`,
+    );
+    for (const row of depthRows) byDepth[String(toNumber(row.depth))] = toNumber(row.count);
+  }
 
   const sectionRows = await conn.run<Row>('MATCH (s:Section) RETURN count(*) AS total');
   const totalSections = toNumber(sectionRows[0]?.total);

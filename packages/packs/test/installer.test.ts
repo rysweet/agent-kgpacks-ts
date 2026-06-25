@@ -29,7 +29,7 @@ const packManifest = (name = PACK_NAME): Record<string, unknown> => ({
   name,
   version: '1.2.0',
   description: 'World history knowledge pack',
-  graph_stats: { node_count: 10, edge_count: 20 },
+  graph_stats: { articles: 10, entities: 20, relationships: 15, size_mb: 1.2 },
   eval_scores: { recall_at_5: 0.8 },
 });
 

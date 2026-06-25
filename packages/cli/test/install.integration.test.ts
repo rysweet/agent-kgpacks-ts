@@ -21,7 +21,7 @@ const GAMMA_MANIFEST = {
   name: 'gamma-pack',
   version: '2.0.0',
   description: 'Gamma knowledge pack',
-  graph_stats: { node_count: 3, edge_count: 4, articles: 2 },
+  graph_stats: { articles: 2, entities: 3, relationships: 1, size_mb: 0.1 },
 };
 
 let base: string;

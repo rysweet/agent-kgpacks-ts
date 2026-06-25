@@ -30,7 +30,7 @@ export const ALPHA_MANIFEST = {
   name: 'alpha-pack',
   version: '1.2.0',
   description: 'Alpha knowledge pack',
-  graph_stats: { node_count: 100, edge_count: 250, articles: 7 },
+  graph_stats: { articles: 7, entities: 18, relationships: 12, size_mb: 0.9 },
 } as const;
 
 /** `beta-pack` — a minimal valid manifest, no database. */
