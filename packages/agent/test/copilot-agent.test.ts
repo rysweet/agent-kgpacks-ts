@@ -269,6 +269,39 @@ describe('CopilotAgent — synthesizeAnswer', () => {
     expect(result.metadata.citedIds).toEqual([]);
   });
 
+  it('empty context (default) instructs the model to REFUSE for lack of grounding', async () => {
+    const mock = makeMockTransport({
+      respond: () => ({ content: 'No grounding available.', usage: usage(1, 1) }),
+    });
+    const agent = await started(mock);
+
+    await agent.synthesizeAnswer({ question: 'What is CVE-2025-0074?', context: [] });
+
+    const prompt = mock.send.mock.calls[0]?.[0] as string;
+    expect(prompt).toContain('lacks grounding');
+    expect(prompt).not.toContain('from your own knowledge');
+  });
+
+  it('empty context with closedBook=true asks the model to answer from its OWN knowledge (no refusal)', async () => {
+    // The eval no-pack baseline measures parametric knowledge: it must NOT route
+    // through the refuse-on-empty instruction, or the baseline is just a refusal.
+    const mock = makeMockTransport({
+      respond: () => ({ content: 'It is a use-after-free in Android.', usage: usage(1, 1) }),
+    });
+    const agent = await started(mock);
+
+    const result = await agent.synthesizeAnswer({
+      question: 'What is CVE-2025-0074?',
+      context: [],
+      closedBook: true,
+    });
+
+    const prompt = mock.send.mock.calls[0]?.[0] as string;
+    expect(prompt).toContain('Answer the question from your own knowledge');
+    expect(prompt).not.toContain('lacks grounding');
+    expect(result.answer).toBe('It is a use-after-free in Android.');
+  });
+
   it('does not match an id as a prefix of a longer id (Topic#1 inside Topic#10)', async () => {
     // Regression: substring indexOf reported the shorter id as cited.
     const mock = makeMockTransport({

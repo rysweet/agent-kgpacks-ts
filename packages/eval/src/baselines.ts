@@ -5,8 +5,10 @@
 // ONLY in the context supplied to synthesis, which is what isolates the pack's
 // contribution (decision D5):
 //   * with-pack    — full retrieve + synthesize over the pack;
-//   * training-only — synthesize with an EMPTY context (no pack retrieval), so the
-//                     model answers from its own training knowledge alone.
+//   * training-only — synthesize with an EMPTY context in CLOSED-BOOK mode, so the
+//                     model answers from its own training knowledge alone (rather
+//                     than refusing for lack of grounding). This is the no-corpus
+//                     baseline the pack must beat.
 // Each arm reads the prompt from `question.question`, awaits its synthesis call,
 // and maps the result onto `ArmAnswer` (answer text + token usage).
 
@@ -35,16 +37,22 @@ export function withPackArm(retriever: Retriever, opts?: RetrieveOptions): Arm {
 
 /**
  * The **training-only** arm: synthesis with an EMPTY context list — no pack
- * retrieval. With no grounding passages supplied, the model has only its own
- * training knowledge; this is the no-corpus baseline the pack must beat.
- * (`SynthesisAgent` is the `@kgpacks/query` interface — `synthesizeAnswer` only —
- * that `CopilotAgent` satisfies.)
+ * retrieval — in CLOSED-BOOK mode, so the model answers the question from its OWN
+ * training knowledge rather than refusing for lack of grounding. This is the
+ * no-corpus baseline the pack must beat: it measures what the model already knows,
+ * isolating the pack's incremental contribution. (`SynthesisAgent` is the
+ * `@kgpacks/query` interface — `synthesizeAnswer` only — that `CopilotAgent`
+ * satisfies.)
  */
 export function trainingOnlyArm(agent: SynthesisAgent): Arm {
   return {
     name: 'training-only',
     async answer(question) {
-      const result = await agent.synthesizeAnswer({ question: question.question, context: [] });
+      const result = await agent.synthesizeAnswer({
+        question: question.question,
+        context: [],
+        closedBook: true,
+      });
       return { answer: result.answer, usage: result.usage };
     },
   };

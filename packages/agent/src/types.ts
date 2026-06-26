@@ -21,6 +21,13 @@ export interface SynthesisRequest {
   context: ContextChunk[];
   /** Optional per-call timeout override (ms). */
   timeoutMs?: number;
+  /**
+   * Closed-book mode (default `false`). When `true` AND `context` is empty, the
+   * model is asked to answer from its OWN training knowledge instead of refusing —
+   * used by the eval's no-pack baseline to measure parametric knowledge. Production
+   * RAG leaves this `false` so an empty retrieval refuses rather than hallucinates.
+   */
+  closedBook?: boolean;
 }
 
 export interface SynthesisMetadata {

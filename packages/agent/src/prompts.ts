@@ -29,11 +29,27 @@ function renderContext(context: ContextChunk[]): string {
 }
 
 /** Synthesis: a grounded, citation-bearing answer from retrieved context. */
-export function buildSynthesisPrompt(question: string, context: ContextChunk[]): string {
-  const grounding =
-    context.length === 0
-      ? 'You have NO retrieved context. Say plainly that the corpus lacks grounding for this question; do not invent facts.'
-      : 'Answer using ONLY the retrieved context. Cite the supporting chunks inline by their id (e.g. doc:1). Do not invent facts beyond the context.';
+export function buildSynthesisPrompt(
+  question: string,
+  context: ContextChunk[],
+  closedBook = false,
+): string {
+  let grounding: string;
+  if (context.length > 0) {
+    grounding =
+      'Answer using ONLY the retrieved context. Cite the supporting chunks inline by their id (e.g. doc:1). Do not invent facts beyond the context.';
+  } else if (closedBook) {
+    // Closed-book baseline (used by the eval's no-pack arm to measure the model's
+    // OWN training knowledge): answer from parametric knowledge, best-effort, and
+    // do NOT refuse for lack of context. Production RAG (closedBook=false) refuses
+    // on empty retrieval instead, so it never hallucinates ungrounded facts.
+    grounding =
+      'You have NO retrieved context. Answer the question from your own knowledge. ' +
+      'Give your best answer even if you are uncertain (state any uncertainty); do not refuse for lack of context.';
+  } else {
+    grounding =
+      'You have NO retrieved context. Say plainly that the corpus lacks grounding for this question; do not invent facts.';
+  }
 
   return [
     'You are a retrieval-augmented answering assistant.',

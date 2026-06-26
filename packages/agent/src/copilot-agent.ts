@@ -104,7 +104,7 @@ export class CopilotAgent {
   async synthesizeAnswer(request: SynthesisRequest): Promise<SynthesisResult> {
     const session = this.requireSession();
     const context = this.boundContext(request.context);
-    const prompt = buildSynthesisPrompt(request.question, context);
+    const prompt = buildSynthesisPrompt(request.question, context, request.closedBook ?? false);
 
     const response = await this.exchange(session, prompt, request.timeoutMs);
     const answer = response.content;
