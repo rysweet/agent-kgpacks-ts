@@ -34,11 +34,19 @@ describe('withPackArm', () => {
 });
 
 describe('trainingOnlyArm', () => {
-  it('is named "training-only" and synthesizes with an EMPTY context (no retrieval)', async () => {
-    const calls: Array<{ question: string; context: unknown[] }> = [];
+  it('is named "training-only" and synthesizes EMPTY context in CLOSED-BOOK mode (no retrieval)', async () => {
+    const calls: Array<{ question: string; context: unknown[]; closedBook?: boolean }> = [];
     const agent = {
-      synthesizeAnswer: async (input: { question: string; context: unknown[] }) => {
-        calls.push({ question: input.question, context: input.context });
+      synthesizeAnswer: async (input: {
+        question: string;
+        context: unknown[];
+        closedBook?: boolean;
+      }) => {
+        calls.push({
+          question: input.question,
+          context: input.context,
+          closedBook: input.closedBook,
+        });
         return { answer: 'from training only', usage: zeroUsage(), citations: [] };
       },
     } as unknown as Parameters<typeof trainingOnlyArm>[0];
@@ -50,5 +58,7 @@ describe('trainingOnlyArm', () => {
     expect(out.answer).toBe('from training only');
     expect(calls).toHaveLength(1);
     expect(calls[0].context).toEqual([]); // no pack context — the no-corpus baseline
+    // Closed-book so the model answers from its OWN knowledge rather than refusing.
+    expect(calls[0].closedBook).toBe(true);
   });
 });
