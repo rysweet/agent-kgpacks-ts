@@ -81,7 +81,7 @@ It prints per-arm accuracy / mean score and a head-to-head comparison
 
 ## Models
 
-- **Synthesis / extraction:** `claude-sonnet-4.5` (`@kgpacks/agent`
+- **Synthesis / extraction:** `claude-opus-4.8` (`@kgpacks/agent`
   `DEFAULT_SYNTHESIS_MODEL`).
 - **Judge:** `claude-opus-4.5` (`@kgpacks/eval` `DEFAULT_JUDGE_MODEL`) — held
   constant across both eval arms; changing it is a re-baseline event. Override per
