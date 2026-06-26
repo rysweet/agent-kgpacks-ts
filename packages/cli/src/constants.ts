@@ -50,3 +50,18 @@ export const DEFAULT_PER_PACK = 3;
  * by the authenticated Copilot CLI); overriding it re-baselines the eval.
  */
 export const DEFAULT_JUDGE_MODEL = 'claude-opus-4.5';
+
+// ── PACK RELEASE / PULL ──────────────────────────────────────────────────────
+
+/** Default source repository for `pack pull` (GitHub Releases host the artifacts). */
+export const DEFAULT_PACK_REPO = 'rysweet/agent-kgpacks-ts';
+
+/**
+ * Default release tag hosting published knowledge-pack artifacts. Large packs
+ * exceed GitHub's 2 GiB per-asset limit, so each pack is published as a set of
+ * multi-part assets plus a `<name>.pack-release.json` index under this tag.
+ */
+export const DEFAULT_PACK_TAG = 'packs';
+
+/** Filename suffix of the per-pack multi-part release index. */
+export const PACK_RELEASE_INDEX_SUFFIX = '.pack-release.json';

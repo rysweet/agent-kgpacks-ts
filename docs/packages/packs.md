@@ -385,6 +385,34 @@ manifest is reported as a **manifest fault** (its own error type), not wrapped i
 `PackInstallError`. In every failure mode the staging directory is removed and no
 pack is installed.
 
+### `installPackFromStream(source: Readable, installRoot: string, options?): Promise<InstalledPack>`
+
+A **streaming** installer with the same security model and result as
+`installPack`, for packs too large to buffer whole. It reads a gzipped-tar byte
+stream (e.g. a file read stream, or the concatenation of downloaded multi-part
+release assets) and never holds more than one decoded chunk plus a partial
+512-byte block in memory, so multi-GB packs (the full CVE pack is ~6–7 GiB)
+install with bounded memory.
+
+```ts
+import { createReadStream } from 'node:fs';
+import { installPackFromStream } from '@kgpacks/packs';
+
+const result = await installPackFromStream(createReadStream('./cve.tar.gz'), './packs');
+```
+
+Each tar entry's header is validated **before** any of its bytes are written
+(same traversal / absolute-path / symlink / device rejections as the buffer
+path), and a containment check guarantees nothing is written outside the staging
+directory; the pack is committed with a single atomic rename once its manifest is
+read. `options.maxTotalBytes` caps the total uncompressed size (default 32 GiB).
+The size field decoder accepts both classic octal and GNU base-256 encodings, so
+individual files larger than 8 GiB round-trip correctly. Gzip/tar stream faults
+surface as [`PackInstallError`](#class-packinstallerror); a missing or invalid
+embedded manifest surfaces as
+[`ManifestValidationError`](#class-manifestvalidationerror). This is the path
+`wikigr pack pull` uses to install multi-part release artifacts.
+
 ## Registry API
 
 Operations over an install root containing zero or more installed packs.

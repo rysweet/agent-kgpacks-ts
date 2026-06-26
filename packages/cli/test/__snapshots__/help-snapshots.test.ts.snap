@@ -6,18 +6,22 @@ exports[`help/usage golden snapshots > matches the \`pack\` no-subcommand usage 
 Manage installed knowledge packs.
 
 Options:
-  -h, --help         display help for command
+  -h, --help             display help for command
 
 Commands:
-  install <archive>  Install a pack from a local .tar.gz archive.
-  list               List installed packs.
-  info <pack>        Print a pack's full manifest.
-  validate <pack>    Validate a pack's manifest.
-  remove <pack>      Remove an installed pack.
-  create [options]   Build a new pack database from seed URLs or a config file.
-  eval [options]     Evaluate a pack: with-pack vs training-only, scored by a
-                     pinned judge.
-  update [options]   Resume / extend an existing pack's graph from new seeds.
+  install <archive>      Install a pack from a local .tar.gz archive.
+  pull [options] <name>  Download and install a pack from a GitHub release
+                         (multi-part, integrity-checked).
+  list                   List installed packs.
+  info <pack>            Print a pack's full manifest.
+  validate <pack>        Validate a pack's manifest.
+  remove <pack>          Remove an installed pack.
+  create [options]       Build a new pack database from seed URLs or a config
+                         file.
+  eval [options]         Evaluate a pack: with-pack vs training-only, scored by
+                         a pinned judge.
+  update [options]       Resume / extend an existing pack's graph from new
+                         seeds.
 "
 `;
 
@@ -27,18 +31,22 @@ exports[`help/usage golden snapshots > matches the pack help snapshot > pack 1`]
 Manage installed knowledge packs.
 
 Options:
-  -h, --help         display help for command
+  -h, --help             display help for command
 
 Commands:
-  install <archive>  Install a pack from a local .tar.gz archive.
-  list               List installed packs.
-  info <pack>        Print a pack's full manifest.
-  validate <pack>    Validate a pack's manifest.
-  remove <pack>      Remove an installed pack.
-  create [options]   Build a new pack database from seed URLs or a config file.
-  eval [options]     Evaluate a pack: with-pack vs training-only, scored by a
-                     pinned judge.
-  update [options]   Resume / extend an existing pack's graph from new seeds.
+  install <archive>      Install a pack from a local .tar.gz archive.
+  pull [options] <name>  Download and install a pack from a GitHub release
+                         (multi-part, integrity-checked).
+  list                   List installed packs.
+  info <pack>            Print a pack's full manifest.
+  validate <pack>        Validate a pack's manifest.
+  remove <pack>          Remove an installed pack.
+  create [options]       Build a new pack database from seed URLs or a config
+                         file.
+  eval [options]         Evaluate a pack: with-pack vs training-only, scored by
+                         a pinned judge.
+  update [options]       Resume / extend an existing pack's graph from new
+                         seeds.
 "
 `;
 

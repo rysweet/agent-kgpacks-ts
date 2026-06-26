@@ -52,6 +52,22 @@ unzip -q cves.zip                  # -> cves/<year>/<bucket>/CVE-*.json
 For a smaller, faster corpus use the much smaller `*_delta_CVEs_*.zip` asset
 instead (recent changes only, ~1k records).
 
+## Download the prebuilt pack (no build required)
+
+The full CVE pack is published as a multi-part **GitHub Release** artifact, so you
+can install it without rebuilding from the corpus:
+
+```bash
+wikigr pack pull cve            # download + integrity-check + install
+wikigr query cve "remote code execution in a Joomla extension" -k 5
+```
+
+The pack is split into `<2 GiB` parts (GitHub's per-asset limit) described by a
+`cve.pack-release.json` index; `pack pull` verifies each part's SHA-256 and the
+overall archive checksum, then streams the reassembled `tar.gz` through the
+streaming installer (bounded memory, full tar-entry validation, atomic install).
+Build it yourself only if you need a custom slice or a fresher corpus.
+
 ## Build
 
 ```bash
@@ -97,3 +113,38 @@ wikigr query cve "SQL injection in a Joomla extension" -k 5 --mode hybrid
 Validated live (delta corpus): vector retrieval surfaces the right CVEs
 (cosine ≈ 0.83) and the Copilot-SDK synthesis returns a grounded, `doc:`-cited
 answer (correct CWE, CVSS and affected product).
+
+## Publish a pack as a release artifact
+
+Packs are large binary databases and are **never committed to git**. Publish a
+built pack as a multi-part, integrity-checked GitHub Release artifact that
+`wikigr pack pull` consumes:
+
+```bash
+# Package data/packs/cve (manifest.json + pack.db) and upload to the `packs` release
+node scripts/release-pack.mjs --pack cve
+
+# Inspect the artifacts locally without uploading (writes parts + index to --out-dir)
+node scripts/release-pack.mjs --pack cve --dry-run --out-dir /tmp/cve-rel
+```
+
+`release-pack.mjs` tars `manifest.json` + `pack.db` with `tar --format=ustar`
+(plain ustar headers, exactly what the in-process installer parses), gzip-streams
+it, and splits the stream into `--part-size` chunks (default 1900 MiB, safely
+under GitHub's 2 GiB asset limit), writing each `cve.tar.gz.NNN` part and a
+`cve.pack-release.json` index with per-part and overall SHA-256 sums. With `gh`
+authenticated it creates/uploads to the release tag (`--tag`, default `packs`).
+
+| Flag          | Default          | Meaning                                          |
+| ------------- | ---------------- | ------------------------------------------------ |
+| `--pack`      | (required)       | Pack directory name under `--packs-dir`.         |
+| `--packs-dir` | `data/packs`     | Packs root.                                      |
+| `--tag`       | `packs`          | Release tag to create/upload to.                 |
+| `--repo`      | gh-resolved repo | `owner/repo` to publish to.                      |
+| `--part-size` | `1900MiB`        | Max bytes per part (`B`/`KB`/`MB`/`GB`/`MiB`/…). |
+| `--out-dir`   | temp dir         | Where parts + index are written.                 |
+| `--dry-run`   | off              | Build artifacts; skip all `gh` calls.            |
+
+The round-trip (`release-pack.mjs` → `wikigr pack pull`) is covered end-to-end by
+`packages/cli/test/pack-pull.test.ts`, which packages a fixture pack with the real
+script, serves it over localhost, and verifies a byte-identical multi-part install.
