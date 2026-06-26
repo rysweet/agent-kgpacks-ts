@@ -6,7 +6,8 @@
 // bytes. Checksums are not verified; malformed archives surface as rejected or
 // invalid entries downstream.
 
-const BLOCK = 512;
+export const TAR_BLOCK = 512;
+const BLOCK = TAR_BLOCK;
 
 export type TarEntryType =
   | 'file'
@@ -44,7 +45,26 @@ function parseOctal(buf: Buffer, off: number, len: number): number {
   return digits.length > 0 ? parseInt(digits, 8) : 0;
 }
 
-function isZeroBlock(buf: Buffer, off: number): boolean {
+/**
+ * Reads a tar numeric size field (12 bytes at `off`). Supports both the classic
+ * octal-ASCII encoding and GNU/star base-256 encoding (used when a value does
+ * not fit in 11 octal digits, i.e. files larger than 8 GiB), so multi-GB packs
+ * round-trip correctly.
+ */
+export function parseSizeField(buf: Buffer, off: number): number {
+  // base-256: high bit of the first byte is set; remaining bytes are a
+  // big-endian magnitude. The sign bit (0x40) is never set for sizes.
+  if ((buf[off] & 0x80) !== 0) {
+    let value = 0;
+    for (let i = off + 1; i < off + 12; i++) {
+      value = value * 256 + buf[i];
+    }
+    return value;
+  }
+  return parseOctal(buf, off, 12);
+}
+
+export function isZeroBlock(buf: Buffer, off: number): boolean {
   for (let i = off; i < off + BLOCK; i++) {
     if (buf[i] !== 0) return false;
   }
@@ -74,16 +94,32 @@ function mapType(typeByte: number, name: string): TarEntryType {
   }
 }
 
+export interface TarHeader {
+  name: string;
+  type: TarEntryType;
+  size: number;
+}
+
+/**
+ * Decodes a single 512-byte tar header block into the fields the installer
+ * needs. The caller is responsible for first checking {@link isZeroBlock}
+ * (an end-of-archive marker decodes to an empty-named entry here).
+ */
+export function parseTarHeader(block: Buffer, off = 0): TarHeader {
+  const name = readString(block, off, 100);
+  const prefix = readString(block, off + 345, 155);
+  const fullName = prefix ? `${prefix}/${name}` : name;
+  const size = parseSizeField(block, off + 124);
+  const type = mapType(block[off + 156], fullName);
+  return { name: fullName, type, size };
+}
+
 export function parseTar(buf: Buffer): TarEntry[] {
   const entries: TarEntry[] = [];
   let pos = 0;
   while (pos + BLOCK <= buf.length) {
     if (isZeroBlock(buf, pos)) break; // a zero block marks end-of-archive
-    const name = readString(buf, pos, 100);
-    const prefix = readString(buf, pos + 345, 155);
-    const fullName = prefix ? `${prefix}/${name}` : name;
-    const size = parseOctal(buf, pos + 124, 12);
-    const type = mapType(buf[pos + 156], fullName);
+    const { name: fullName, type, size } = parseTarHeader(buf, pos);
     pos += BLOCK;
     let content: Buffer = Buffer.alloc(0);
     if (size > 0) {

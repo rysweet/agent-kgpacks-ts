@@ -56,6 +56,33 @@ npm install -g ./agent-kgpacks-ts-<version>.tgz
 
 Both paths yield the same `wikigr` executable as the workspace build below.
 
+## Download a prebuilt pack
+
+Knowledge packs (e.g. the full CVE pack) are large binary databases, so they are
+**not committed to git**. They are published as **GitHub Release** assets and
+installed with `wikigr pack pull`. Because packs can exceed GitHub's 2 GiB
+per-asset limit, each pack is split into multiple parts plus a
+`<name>.pack-release.json` index carrying per-part and overall SHA-256 sums; the
+pull command downloads the parts, verifies every checksum, and streams the
+reassembled archive straight into the pack registry (nothing is buffered whole,
+so multi-GB packs install with bounded memory).
+
+```bash
+# Download + install the CVE pack from the repo's release assets
+wikigr pack pull cve
+
+# Then query it like any local pack
+wikigr query cve "remote code execution in a Joomla extension" -k 5
+
+# Override the source (e.g. a fork, a specific tag, or a local mirror)
+wikigr pack pull cve --repo rysweet/agent-kgpacks-ts --tag packs
+wikigr pack pull cve --base-url http://127.0.0.1:8799
+```
+
+Already have a `<name>.tar.gz` archive locally? `wikigr pack install <archive>`
+installs it directly. To **publish** a pack you built, see
+[docs/cve.md](docs/cve.md#publish-a-pack-as-a-release-artifact).
+
 ## Build and query a pack
 
 ```bash

@@ -23,7 +23,7 @@ export {
 } from './versioning.js';
 export type { ParsedVersion } from './versioning.js';
 
-export { installPack } from './installer.js';
+export { installPack, installPackFromStream } from './installer.js';
 export type { InstalledPack } from './installer.js';
 
 export { listPacks, packInfo, removePack } from './registry.js';

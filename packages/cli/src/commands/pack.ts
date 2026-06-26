@@ -18,10 +18,12 @@ import {
 } from '@kgpacks/packs';
 import { Command } from 'commander';
 
+import { DEFAULT_PACK_REPO, DEFAULT_PACK_TAG } from '../constants.js';
 import type { CliContext } from '../context.js';
 import { CliError } from '../errors.js';
 import { EXIT_PACK_NOT_FOUND } from '../exit-codes.js';
 import { printJson } from '../io.js';
+import { pullPack } from '../pack-pull.js';
 import { resolveExistingPackDir } from '../pack-dir.js';
 import { registerCreate, registerUpdate } from './build.js';
 import { registerEval } from './eval.js';
@@ -44,6 +46,27 @@ export function registerPack(parent: Command, ctx: CliContext): void {
         version: installed.version,
         path: installed.path,
       });
+    });
+
+  pack
+    .command('pull')
+    .description(
+      'Download and install a pack from a GitHub release (multi-part, integrity-checked).',
+    )
+    .argument('<name>', 'pack name (matches <name>.pack-release.json in the release)')
+    .option('--repo <owner/repo>', 'source repository', DEFAULT_PACK_REPO)
+    .option('--tag <tag>', 'release tag hosting the pack assets', DEFAULT_PACK_TAG)
+    .option('--base-url <url>', 'base URL of the index + parts (overrides --repo/--tag)')
+    .action(async (name: string, _opts: unknown, command: Command) => {
+      const opts = command.optsWithGlobals();
+      const installed = await pullPack({
+        name,
+        packsDir: packsDirOf(command),
+        repo: opts.repo as string | undefined,
+        tag: opts.tag as string | undefined,
+        baseUrl: opts.baseUrl as string | undefined,
+      });
+      printJson(ctx.io, installed);
     });
 
   pack
