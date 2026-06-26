@@ -10,7 +10,7 @@
  * model is not vendored in this repo; this is the documented, constructor-
  * overridable default (see docs/packages/agent.md "Versioning strategy").
  */
-export const DEFAULT_SYNTHESIS_MODEL = 'claude-sonnet-4.5';
+export const DEFAULT_SYNTHESIS_MODEL = 'claude-opus-4.8';
 
 /** Max retrieved chunks forwarded to synthesis (deterministic head truncation). */
 export const MAX_CONTEXT_CHUNKS = 50;
