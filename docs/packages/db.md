@@ -98,13 +98,24 @@ const db = new Database('./packs/example.lbug');
 
 A thin handle over a LadybugDB instance.
 
-#### `new Database(path?: string)`
+#### `new Database(path?: string, options?: DatabaseOptions)`
 
 Opens (or creates) a database.
 
-| Parameter | Type     | Default      | Description                                                                           |
-| --------- | -------- | ------------ | ------------------------------------------------------------------------------------- |
-| `path`    | `string` | `':memory:'` | Filesystem path to the database, or `':memory:'` for an ephemeral in-memory instance. |
+| Parameter | Type              | Default      | Description                                                                           |
+| --------- | ----------------- | ------------ | ------------------------------------------------------------------------------------- |
+| `path`    | `string`          | `':memory:'` | Filesystem path to the database, or `':memory:'` for an ephemeral in-memory instance. |
+| `options` | `DatabaseOptions` | `{}`         | Engine tuning; omitted fields use the engine defaults.                                |
+
+`DatabaseOptions` forwards a subset of the underlying engine's `SystemConfig`:
+`bufferPoolSize`, `enableCompression`, `readOnly`, `maxDBSize`, `autoCheckpoint`,
+`checkpointThreshold`. The notable one for bulk loads is **`autoCheckpoint:
+false`**: with automatic checkpoints on, every committed write batch can trigger
+checkpoint work whose cost grows with the database size, turning a large
+streaming load into ~O(N²); off, writes only append to the WAL during the load
+and a single checkpoint is taken at `close()` (kept linear). The CVE pack builder
+(`scripts/build-cve-pack.mjs`) uses this. `close()` still checkpoints, so the
+file remains self-contained (no `.wal` sidecar) for distribution.
 
 #### `database.connect(): Connection`
 
