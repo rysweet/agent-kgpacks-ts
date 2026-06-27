@@ -16,7 +16,7 @@
 // TDD: these FAIL today because packages/db/src/index.ts does not yet exist.
 // They PASS once the wrapper is implemented over @ladybugdb/core.
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -160,6 +160,31 @@ describe('@kgpacks/db — on-disk database', () => {
     const rows = await reader.run<{ id: number | bigint }>('MATCH (d:Doc) RETURN d.id AS id');
     expect(rows).toHaveLength(1);
     expect(Number(rows[0].id)).toBe(42);
+    reader.close();
+    dbRead.close();
+  });
+
+  it('persists with autoCheckpoint:false and leaves no .wal after close', async () => {
+    // The CVE bulk builder opens with { autoCheckpoint: false } to keep a large
+    // streaming load linear (WAL-only appends, one checkpoint at close). This
+    // verifies the durability property that path depends on: close() still
+    // checkpoints, so the data reads back AND no .wal sidecar remains (the pack
+    // file is self-contained for distribution).
+    const path = join(dir, 'nocheckpoint.lbug');
+
+    const dbWrite = new Database(path, { autoCheckpoint: false });
+    const writer = dbWrite.connect();
+    await writer.run('CREATE NODE TABLE Doc(id INT64, PRIMARY KEY(id))');
+    await writer.run('UNWIND range(1, 50) AS i CREATE (:Doc {id: i})');
+    writer.close();
+    dbWrite.close();
+
+    expect(existsSync(`${path}.wal`)).toBe(false);
+
+    const dbRead = new Database(path);
+    const reader = dbRead.connect();
+    const rows = await reader.run<{ n: number | bigint }>('MATCH (d:Doc) RETURN count(d) AS n');
+    expect(Number(rows[0].n)).toBe(50);
     reader.close();
     dbRead.close();
   });

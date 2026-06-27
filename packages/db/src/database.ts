@@ -14,6 +14,31 @@ import {
 /** Named Cypher parameters bound by the driver (never string-interpolated). */
 export type QueryParams = Record<string, unknown>;
 
+/**
+ * Tuning options forwarded to the underlying LadybugDB instance. All optional;
+ * omitted fields fall back to the engine defaults.
+ *
+ * `autoCheckpoint: false` is the key knob for large bulk loads: with automatic
+ * checkpoints on, every committed write batch can trigger checkpoint work whose
+ * cost grows with the database size, turning a streaming load into ~O(N²). With
+ * it off, writes only append to the WAL during the load and a single checkpoint
+ * is taken at {@link Database.close}, keeping per-batch cost flat (linear load).
+ */
+export interface DatabaseOptions {
+  /** Buffer-pool size in bytes. */
+  bufferPoolSize?: number;
+  /** Enable on-disk compression. */
+  enableCompression?: boolean;
+  /** Open read-only. */
+  readOnly?: boolean;
+  /** Maximum database size in bytes. */
+  maxDBSize?: number;
+  /** Enable automatic checkpoints during operation (engine default: true). */
+  autoCheckpoint?: boolean;
+  /** WAL-size threshold (bytes) that triggers an automatic checkpoint. */
+  checkpointThreshold?: number;
+}
+
 /** A single result row keyed by the statement's `RETURN` aliases. */
 export type Row = Record<string, unknown>;
 
@@ -104,8 +129,19 @@ export class Connection {
 export class Database {
   #db: CoreDatabase | null;
 
-  constructor(path: string = ':memory:') {
-    this.#db = new CoreDatabase(path);
+  constructor(path: string = ':memory:', options: DatabaseOptions = {}) {
+    // Forwarded positionally to @ladybugdb/core's Database ctor:
+    // (path, bufferManagerSize, enableCompression, readOnly, maxDBSize,
+    //  autoCheckpoint, checkpointThreshold). `undefined` keeps each engine default.
+    this.#db = new CoreDatabase(
+      path,
+      options.bufferPoolSize,
+      options.enableCompression,
+      options.readOnly,
+      options.maxDBSize,
+      options.autoCheckpoint,
+      options.checkpointThreshold,
+    );
   }
 
   /** Returns a fresh {@link Connection} bound to this database. */

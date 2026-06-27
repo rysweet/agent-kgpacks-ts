@@ -4,4 +4,4 @@
 // execution, extension loading). See docs/packages/db.md.
 
 export { Connection, Database } from './database.js';
-export type { QueryParams, Row } from './database.js';
+export type { QueryParams, Row, DatabaseOptions } from './database.js';
