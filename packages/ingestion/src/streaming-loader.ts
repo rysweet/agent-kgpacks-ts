@@ -93,15 +93,20 @@ export async function createPackWriter(
     if (items.length === 0) return;
 
     const articleRows: { title: string; category: string; wc: number; depth: number }[] = [];
+    // Section/Chunk rows carry their parent Article title (`at`) so the edge is
+    // co-created with the node via a single PK-indexed MATCH of the Article (see
+    // the CREATE statements below) — avoiding a two-pattern MATCH that hash-joins
+    // two growing node tables and makes the load O(N²).
     const sectionRows: {
+      at: string;
       id: string;
       title: string;
       content: string;
       emb: number[];
       level: number;
       wc: number;
+      idx: number;
     }[] = [];
-    const hasSectionRows: { at: string; sid: string; idx: number }[] = [];
     const chunkRows: {
       id: string;
       content: string;
@@ -110,7 +115,6 @@ export async function createPackWriter(
       si: number;
       ci: number;
     }[] = [];
-    const hasChunkRows: { at: string; cid: string; si: number; ci: number }[] = [];
     const entityRows: { id: string; name: string; type: string; descr: string }[] = [];
     const hasEntityRows: { at: string; eid: string }[] = [];
 
@@ -132,14 +136,15 @@ export async function createPackWriter(
         const embedding = item.sectionEmbeddings[i];
         if (embedding === undefined) throw new Error(`Missing embedding for section ${section.id}`);
         sectionRows.push({
+          at: article.title,
           id: section.id,
           title: section.title,
           content: section.content,
           emb: toArray(embedding),
           level: section.level,
           wc: wordCount(section.content),
+          idx: i,
         });
-        hasSectionRows.push({ at: article.title, sid: section.id, idx: i });
       }
 
       for (let i = 0; i < item.chunks.length; i++) {
@@ -151,12 +156,6 @@ export async function createPackWriter(
           content: chunk.content,
           emb: toArray(embedding),
           at: chunk.articleTitle,
-          si: chunk.sectionIndex,
-          ci: chunk.chunkIndex,
-        });
-        hasChunkRows.push({
-          at: chunk.articleTitle,
-          cid: chunk.id,
           si: chunk.sectionIndex,
           ci: chunk.chunkIndex,
         });
@@ -196,31 +195,23 @@ export async function createPackWriter(
         { rows },
       ),
     );
+    // Co-create each Section and its HAS_SECTION edge from a single PK-indexed
+    // MATCH of the (already-created) parent Article. A two-pattern MATCH of both
+    // Article AND Section hash-joins two growing tables → O(N²); this point-looks
+    // up only the Article and creates the new Section inline → flat per batch.
     await inChunks(sectionRows, chunkSize, (rows) =>
       conn.run(
-        'UNWIND $rows AS r CREATE (:Section {id: r.id, title: r.title, content: r.content, ' +
-          'embedding: r.emb, level: r.level, word_count: r.wc})',
-        { rows },
-      ),
-    );
-    await inChunks(hasSectionRows, chunkSize, (rows) =>
-      conn.run(
-        'UNWIND $rows AS r MATCH (a:Article {title: r.at}), (s:Section {id: r.sid}) ' +
-          'CREATE (a)-[:HAS_SECTION {section_index: r.idx}]->(s)',
+        'UNWIND $rows AS r MATCH (a:Article {title: r.at}) ' +
+          'CREATE (a)-[:HAS_SECTION {section_index: r.idx}]->(:Section {id: r.id, ' +
+          'title: r.title, content: r.content, embedding: r.emb, level: r.level, word_count: r.wc})',
         { rows },
       ),
     );
     await inChunks(chunkRows, chunkSize, (rows) =>
       conn.run(
-        'UNWIND $rows AS r CREATE (:Chunk {id: r.id, content: r.content, embedding: r.emb, ' +
-          'article_title: r.at, section_index: r.si, chunk_index: r.ci})',
-        { rows },
-      ),
-    );
-    await inChunks(hasChunkRows, chunkSize, (rows) =>
-      conn.run(
-        'UNWIND $rows AS r MATCH (a:Article {title: r.at}), (c:Chunk {id: r.cid}) ' +
-          'CREATE (a)-[:HAS_CHUNK {section_index: r.si, chunk_index: r.ci}]->(c)',
+        'UNWIND $rows AS r MATCH (a:Article {title: r.at}) ' +
+          'CREATE (a)-[:HAS_CHUNK {section_index: r.si, chunk_index: r.ci}]->(:Chunk {id: r.id, ' +
+          'content: r.content, embedding: r.emb, article_title: r.at, section_index: r.si, chunk_index: r.ci})',
         { rows },
       ),
     );
@@ -230,9 +221,12 @@ export async function createPackWriter(
         { rows },
       ),
     );
+    // Entities are shared (deduped globally), so the edge connects two pre-existing
+    // nodes. Use SEPARATE MATCH clauses (two PK point-lookups) rather than a
+    // comma two-pattern MATCH (which hash-joins the growing Article+Entity tables).
     await inChunks(hasEntityRows, chunkSize, (rows) =>
       conn.run(
-        'UNWIND $rows AS r MATCH (a:Article {title: r.at}), (e:Entity {entity_id: r.eid}) ' +
+        'UNWIND $rows AS r MATCH (a:Article {title: r.at}) MATCH (e:Entity {entity_id: r.eid}) ' +
           'CREATE (a)-[:HAS_ENTITY]->(e)',
         { rows },
       ),
@@ -250,7 +244,7 @@ export async function createPackWriter(
       .filter((r) => createdEntities.has(r.s) && createdEntities.has(r.t));
     await inChunks(relRows, chunkSize, async (rows) => {
       await conn.run(
-        'UNWIND $rows AS r MATCH (a:Entity {entity_id: r.s}), (b:Entity {entity_id: r.t}) ' +
+        'UNWIND $rows AS r MATCH (a:Entity {entity_id: r.s}) MATCH (b:Entity {entity_id: r.t}) ' +
           'CREATE (a)-[:ENTITY_RELATION {relation: r.rel, context: r.ctx}]->(b)',
         { rows },
       );
@@ -271,7 +265,7 @@ export async function createPackWriter(
     }
     await inChunks(linkRows, chunkSize, async (rows) => {
       await conn.run(
-        'UNWIND $rows AS r MATCH (a:Section {id: r.from}), (b:Section {id: r.to}) ' +
+        'UNWIND $rows AS r MATCH (a:Section {id: r.from}) MATCH (b:Section {id: r.to}) ' +
           'CREATE (a)-[:LINKS_TO {link_type: r.lt}]->(b)',
         { rows },
       );
