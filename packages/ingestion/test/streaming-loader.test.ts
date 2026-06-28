@@ -136,3 +136,67 @@ describe('createPackWriter — streaming round-trip', () => {
     }
   });
 });
+
+describe('createPackWriter — skipEntityRelations', () => {
+  const db = new Database();
+  let conn: Connection;
+  let stats: PackWriterStats;
+
+  beforeAll(async () => {
+    conn = db.connect();
+    const writer = await createPackWriter(conn, { insertChunkSize: 2, skipEntityRelations: true });
+    await writer.addBatch([
+      loadable('Alpha', 'Alpha lead about photosynthesis and light.', oneHot(0), {
+        entities: [
+          { name: 'Photosynthesis', type: 'concept' },
+          { name: 'Plant', type: 'concept' },
+        ],
+        relationships: [{ source: 'Plant', target: 'Photosynthesis', relation: 'uses' }],
+        keyFacts: [],
+      }),
+    ]);
+    await writer.addBatch([
+      loadable('Beta', 'Beta lead about basketball and sport.', oneHot(100), {
+        entities: [{ name: 'Basketball', type: 'concept' }],
+        relationships: [
+          { source: 'Basketball', target: 'Photosynthesis', relation: 'unrelated_to' },
+        ],
+        keyFacts: [],
+      }),
+    ]);
+    stats = await writer.finalize([{ from: 'Alpha', to: 'Beta', linkType: 'wiki' }]);
+  });
+
+  afterAll(() => {
+    conn.close();
+    db.close();
+  });
+
+  it('builds the same nodes/entities/links but ZERO ENTITY_RELATION edges', async () => {
+    // ENTITY_RELATION is never read by any retrieval/graph path; skipping it cuts
+    // the dominant finalize cost on large structured corpora with no functional loss.
+    expect(stats.relationships).toBe(0);
+    expect(stats.entities).toBe(3); // entities still created + deduped
+    expect(stats.links).toBe(1); // LINKS_TO still resolved
+
+    const rels = await conn.run<{ n: number | bigint }>(
+      `MATCH ()-[r:ENTITY_RELATION]->() RETURN count(r) AS n`,
+    );
+    expect(Number(rels[0].n)).toBe(0);
+  });
+
+  it('still serves vector retrieval and LINKS_TO (read contract intact)', async () => {
+    const hits = await conn.run<{ id: string }>(
+      `CALL QUERY_VECTOR_INDEX('Section', 'embedding_idx', $emb, $k)
+       RETURN node.id AS id, distance AS distance ORDER BY distance`,
+      { emb: oneHot(0), k: 1 },
+    );
+    expect(hits[0].id).toBe('Alpha#0');
+
+    const links = await conn.run<{ id: string }>(
+      `MATCH (s:Section {id: 'Alpha#0'})-[:LINKS_TO]->(n:Section) RETURN n.id AS id`,
+    );
+    expect(links).toHaveLength(1);
+    expect(links[0].id).toBe('Beta#0');
+  });
+});
