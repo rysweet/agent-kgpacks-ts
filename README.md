@@ -58,6 +58,8 @@ Both paths yield the same `wikigr` executable as the workspace build below.
 
 ## Download a prebuilt pack
 
+> 📘 **New here? See the step-by-step [Install & use the CVE knowledge pack](docs/using-the-cve-pack.md) guide.**
+
 Knowledge packs (e.g. the full CVE pack) are large binary databases, so they are
 **not committed to git**. They are published as **GitHub Release** assets and
 installed with `wikigr pack pull`. Because packs can exceed GitHub's 2 GiB
@@ -100,6 +102,9 @@ pnpm --filter @kgpacks/frontend dev
 
 ## Documentation
 
+- **[docs/using-the-cve-pack.md](docs/using-the-cve-pack.md) — install & use the
+  prebuilt CVE knowledge pack (start here to use the database).**
+- [docs/cve.md](docs/cve.md) — how the CVE pack is built and published.
 - [docs/monorepo.md](docs/monorepo.md) — workspace layout, build/test/lint
   commands, configuration reference, CI, and how to add a package.
 - [docs/packages/db.md](docs/packages/db.md) — the `@kgpacks/db` LadybugDB

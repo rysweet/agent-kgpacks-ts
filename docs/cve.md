@@ -66,7 +66,8 @@ The pack is split into `<2 GiB` parts (GitHub's per-asset limit) described by a
 `cve.pack-release.json` index; `pack pull` verifies each part's SHA-256 and the
 overall archive checksum, then streams the reassembled `tar.gz` through the
 streaming installer (bounded memory, full tar-entry validation, atomic install).
-Build it yourself only if you need a custom slice or a fresher corpus.
+Build it yourself only if you need a custom slice or a fresher corpus. To **use**
+the published pack, see [using-the-cve-pack.md](using-the-cve-pack.md).
 
 ## Build
 
@@ -82,25 +83,31 @@ pnpm cve:build --src .scratch/cve/cves --out data/packs/cve/pack.db
 
 Flags (`scripts/build-cve-pack.mjs`):
 
-| Flag      | Default                  | Meaning                               |
-| --------- | ------------------------ | ------------------------------------- |
-| `--src`   | (required)               | Directory tree of `CVE-*.json` files. |
-| `--year`  | all                      | Restrict to one CVE year.             |
-| `--limit` | all                      | Cap the number of records.            |
-| `--out`   | `data/packs/cve/pack.db` | Output pack path (gitignored).        |
-| `--batch` | `96`                     | Embedding batch size.                 |
+| Flag                      | Default                  | Meaning                                                         |
+| ------------------------- | ------------------------ | --------------------------------------------------------------- |
+| `--src`                   | (required)               | Directory tree of `CVE-*.json` files.                           |
+| `--year`                  | all                      | Restrict to one CVE year.                                       |
+| `--limit`                 | all                      | Cap the number of records.                                      |
+| `--out`                   | `data/packs/cve/pack.db` | Output pack path (gitignored).                                  |
+| `--batch`                 | `96`                     | Embedding batch size.                                           |
+| `--with-entity-relations` | off (skipped)            | Build `ENTITY_RELATION` edges (see the performance note below). |
 
 It prints a JSON summary (`mapped`, `articles`, `sections`, `chunks`, `entities`,
 `relationships`, `seconds`).
 
-> **Comprehensive scale.** The builder **streams**: each batch is embedded,
-> bulk-loaded via `createPackWriter` (one `UNWIND` per node/edge table), and
-> discarded, so peak memory is a single batch (~9 GB on a 5k-record run) regardless
-> of corpus size, and the pack is written incrementally. The remaining cost is CPU
-> embedding (~10–15 short texts/sec on CPU), so the full ~360k corpus is an
-> overnight batch — run it detached on a server. A single recent year (~30–45k
-> records) is a substantial, coherent pack on its own. This is runnable batch
-> tooling with bounded memory, not deferred work.
+> **Comprehensive scale & performance.** The builder **streams**: each batch is
+> embedded, bulk-loaded via `createPackWriter`, and discarded, so peak memory is a
+> single batch regardless of corpus size. Edges are created with **PK-indexed
+> Cypher** (single-`MATCH` inline create for `HAS_SECTION`/`HAS_CHUNK`, separate
+> `MATCH` clauses elsewhere) so the load is **~linear**, not O(N²). The dominant
+> remaining cost is CPU embedding (~10–15 texts/sec). The full ~360k corpus is an
+> overnight batch — run it detached on a server.
+>
+> `ENTITY_RELATION` (Entity→Entity) edges are **skipped by default**: no
+> retrieval/graph read path traverses them and building them is super-linear at
+> scale (it dominated finalize on the full corpus — hours). Pass
+> `--with-entity-relations` to include them. The HNSW vector-index build in
+> finalize is ~linear (a few minutes at full scale).
 
 ## Query
 

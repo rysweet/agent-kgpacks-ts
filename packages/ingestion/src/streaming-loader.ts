@@ -52,6 +52,18 @@ export interface PackWriter {
 export interface PackWriterOptions {
   /** Max rows per `UNWIND` statement (bounds prepared-statement param size). Default 500. */
   insertChunkSize?: number;
+  /**
+   * Skip building `ENTITY_RELATION` (Entity→Entity) edges in {@link PackWriter.finalize}.
+   *
+   * No read path (`@kgpacks/query` retrieval/reranker, the backend graph route,
+   * the MCP server) traverses `ENTITY_RELATION` — retrieval uses vector search +
+   * single-hop `LINKS_TO`. Building these edges is pure write-side overhead and is
+   * super-linear at scale (high-degree shared entities), dominating finalize on
+   * large structured corpora (e.g. CVE: ~3h of a ~4h finalize). Set this to skip
+   * them: `stats.relationships` stays 0 and nothing else changes. Default `false`
+   * (build them) for backward compatibility.
+   */
+  skipEntityRelations?: boolean;
 }
 
 /** Splits `rows` into `size`-bounded slices and runs `fn` on each in order. */
@@ -74,6 +86,7 @@ export async function createPackWriter(
   options: PackWriterOptions = {},
 ): Promise<PackWriter> {
   const chunkSize = options.insertChunkSize ?? 500;
+  const skipEntityRelations = options.skipEntityRelations ?? false;
   const ftsLoaded = await createSchema(conn);
 
   const createdEntities = new Set<string>();
@@ -180,7 +193,9 @@ export async function createPackWriter(
           hasEntityRows.push({ at: article.title, eid: entityId });
         }
       }
-      for (const rel of item.extraction.relationships) pendingRelationships.push(rel);
+      if (!skipEntityRelations) {
+        for (const rel of item.extraction.relationships) pendingRelationships.push(rel);
+      }
 
       loadedArticles.add(article.title);
       stats.articles++;
@@ -234,22 +249,24 @@ export async function createPackWriter(
   }
 
   async function finalize(links: ArticleLink[] = []): Promise<PackWriterStats> {
-    const relRows = pendingRelationships
-      .map((rel) => ({
-        s: rel.source.trim(),
-        t: rel.target.trim(),
-        rel: rel.relation,
-        ctx: rel.context ?? '',
-      }))
-      .filter((r) => createdEntities.has(r.s) && createdEntities.has(r.t));
-    await inChunks(relRows, chunkSize, async (rows) => {
-      await conn.run(
-        'UNWIND $rows AS r MATCH (a:Entity {entity_id: r.s}) MATCH (b:Entity {entity_id: r.t}) ' +
-          'CREATE (a)-[:ENTITY_RELATION {relation: r.rel, context: r.ctx}]->(b)',
-        { rows },
-      );
-      stats.relationships += rows.length;
-    });
+    if (!skipEntityRelations) {
+      const relRows = pendingRelationships
+        .map((rel) => ({
+          s: rel.source.trim(),
+          t: rel.target.trim(),
+          rel: rel.relation,
+          ctx: rel.context ?? '',
+        }))
+        .filter((r) => createdEntities.has(r.s) && createdEntities.has(r.t));
+      await inChunks(relRows, chunkSize, async (rows) => {
+        await conn.run(
+          'UNWIND $rows AS r MATCH (a:Entity {entity_id: r.s}) MATCH (b:Entity {entity_id: r.t}) ' +
+            'CREATE (a)-[:ENTITY_RELATION {relation: r.rel, context: r.ctx}]->(b)',
+          { rows },
+        );
+        stats.relationships += rows.length;
+      });
+    }
 
     const seen = new Set<string>();
     const linkRows: { from: string; to: string; lt: string }[] = [];
