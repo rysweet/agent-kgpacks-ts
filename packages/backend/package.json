@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@fastify/cors": "10.1.0",
-    "@fastify/rate-limit": "10.3.0",
+    "@fastify/rate-limit": "11.1.0",
     "@kgpacks/agent": "workspace:*",
     "@kgpacks/db": "workspace:*",
     "@kgpacks/embeddings": "workspace:*",
