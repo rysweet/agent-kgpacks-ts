@@ -1,0 +1,47 @@
+# Dependabot keeps this repo's supply-chain pins fresh. The CI workflow
+# SHA-pins every GitHub Action and package.json exact-pins every dependency;
+# pinning gives immutability, but without an update path those pins rot into
+# known-vulnerable stale versions. Dependabot supplies the controlled update
+# path that completes the hardening pattern.
+#
+# Docs: https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+version: 2
+updates:
+  # npm / pnpm dependencies. One entry at the workspace root is sufficient:
+  # the root pnpm-lock.yaml is the single lockfile for the whole pnpm
+  # workspace (packages/*, apps/*, parity/*), so Dependabot resolves every
+  # workspace member from here and keeps the exact-pinned versions in sync.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+    # Collapse non-major bumps into one PR to cut review noise; majors stay as
+    # individual PRs so breaking changes get a dedicated review.
+    groups:
+      npm-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # GitHub Actions referenced in .github/workflows/*. Dependabot bumps the
+  # 40-char SHA pin and its trailing `# vX.Y.Z` comment together, so actions
+  # stay both immutable and current.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      actions-minor-and-patch:
+        update-types:
+          - minor
+          - patch
