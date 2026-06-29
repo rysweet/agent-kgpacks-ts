@@ -20,7 +20,7 @@
     "@kgpacks/db": "workspace:*",
     "@kgpacks/embeddings": "workspace:*",
     "@kgpacks/query": "workspace:*",
-    "fastify": "5.8.5",
+    "fastify": "5.9.0",
     "ipaddr.js": "2.4.0"
   }
 }
