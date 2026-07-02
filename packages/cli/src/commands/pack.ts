@@ -21,7 +21,7 @@ import { Command } from 'commander';
 import { DEFAULT_PACK_REPO, DEFAULT_PACK_TAG } from '../constants.js';
 import type { CliContext } from '../context.js';
 import { CliError } from '../errors.js';
-import { EXIT_PACK_NOT_FOUND } from '../exit-codes.js';
+import { EXIT_PACK_NOT_FOUND, EXIT_USAGE } from '../exit-codes.js';
 import { printJson } from '../io.js';
 import { pullPack } from '../pack-pull.js';
 import { resolveExistingPackDir } from '../pack-dir.js';
@@ -57,14 +57,27 @@ export function registerPack(parent: Command, ctx: CliContext): void {
     .option('--repo <owner/repo>', 'source repository', DEFAULT_PACK_REPO)
     .option('--tag <tag>', 'release tag hosting the pack assets', DEFAULT_PACK_TAG)
     .option('--base-url <url>', 'base URL of the index + parts (overrides --repo/--tag)')
+    .option('--require-signature', 'hard-fail unless a valid release signature is present')
+    .option('--no-verify', 'skip release signature verification (checksums still enforced)')
     .action(async (name: string, _opts: unknown, command: Command) => {
       const opts = command.optsWithGlobals();
+      const requireSignature = opts.requireSignature === true;
+      // commander sets `verify: false` for the negatable `--no-verify` flag.
+      const noVerify = opts.verify === false;
+      if (requireSignature && noVerify) {
+        throw new CliError(
+          '--require-signature and --no-verify are mutually exclusive',
+          EXIT_USAGE,
+        );
+      }
       const installed = await pullPack({
         name,
         packsDir: packsDirOf(command),
         repo: opts.repo as string | undefined,
         tag: opts.tag as string | undefined,
         baseUrl: opts.baseUrl as string | undefined,
+        requireSignature,
+        noVerify,
       });
       printJson(ctx.io, installed);
     });

@@ -20,7 +20,14 @@ import { pipeline } from 'node:stream/promises';
 
 import { PackInstallError, installPackFromStream } from '@kgpacks/packs';
 
-import { DEFAULT_PACK_REPO, DEFAULT_PACK_TAG, PACK_RELEASE_INDEX_SUFFIX } from './constants.js';
+import {
+  DEFAULT_PACK_REPO,
+  DEFAULT_PACK_TAG,
+  PACK_RELEASE_INDEX_SUFFIX,
+  PACK_RELEASE_SIGNATURE_SUFFIX,
+} from './constants.js';
+import { signaturePlan, verifyAgainstTrustedKeys } from './pack-signing.js';
+import type { TrustedSigningKey } from './signing-key.js';
 
 /** One part of a multi-part pack release. */
 export interface PackReleasePart {
@@ -58,6 +65,14 @@ export interface PullPackOptions {
   baseUrl?: string;
   /** Root for the scratch download directory (defaults to the OS temp dir). */
   tmpRoot?: string;
+  /** Hard-fail unless a valid signature is present (`--require-signature`). */
+  requireSignature?: boolean;
+  /** Skip signature verification entirely (`--no-verify`); integrity still enforced. */
+  noVerify?: boolean;
+  /** Trusted signing keys (defaults to the committed set; injectable for tests). */
+  trustedKeys?: readonly TrustedSigningKey[];
+  /** Sink for human-readable signature status (defaults to stderr). */
+  log?: (message: string) => void;
 }
 
 export interface PulledPack {
@@ -66,6 +81,8 @@ export interface PulledPack {
   path: string;
   parts: number;
   bytes: number;
+  /** Trusted key id that signed the release, or `null` if unsigned/unverified. */
+  signedBy: string | null;
 }
 
 const PART_FILE_RE = /^[A-Za-z0-9._-]+$/;
@@ -80,7 +97,7 @@ export function resolvePackBaseUrl(
   return `https://github.com/${repo}/releases/download/${tag}`;
 }
 
-async function fetchJson(url: string): Promise<unknown> {
+async function fetchIndexBytes(url: string): Promise<Buffer> {
   let res: Response;
   try {
     res = await fetch(url);
@@ -91,7 +108,42 @@ async function fetchJson(url: string): Promise<unknown> {
     throw new PackInstallError(`pack index not found at ${url} (HTTP ${res.status})`);
   }
   try {
-    return (await res.json()) as unknown;
+    return Buffer.from(await res.arrayBuffer());
+  } catch (err) {
+    throw new PackInstallError(`cannot read pack index at ${url}: ${(err as Error).message}`);
+  }
+}
+
+/** Fetches an optional sibling asset (e.g. the `.sig`); returns null if absent. */
+async function fetchOptionalText(url: string): Promise<string | null> {
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch {
+    return null;
+  }
+  if (!res.ok) return null;
+  try {
+    return await res.text();
+  } catch {
+    return null;
+  }
+}
+
+/** Decodes a base64 detached-signature file to raw bytes, or null if malformed. */
+function decodeSignature(text: string): Buffer | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  try {
+    return Buffer.from(trimmed, 'base64');
+  } catch {
+    return null;
+  }
+}
+
+function parseIndexJson(bytes: Buffer, url: string): unknown {
+  try {
+    return JSON.parse(bytes.toString('utf8')) as unknown;
   } catch (err) {
     throw new PackInstallError(`pack index at ${url} is not valid JSON: ${(err as Error).message}`);
   }
@@ -166,7 +218,40 @@ async function* concatParts(paths: string[]): AsyncGenerator<Buffer> {
 export async function pullPack(opts: PullPackOptions): Promise<PulledPack> {
   const base = resolvePackBaseUrl(opts);
   const indexUrl = `${base}/${opts.name}${PACK_RELEASE_INDEX_SUFFIX}`;
-  const index = assertIndex(await fetchJson(indexUrl), opts.name, indexUrl);
+  const log = opts.log ?? ((message: string) => process.stderr.write(`${message}\n`));
+
+  // Fetch the RAW index bytes and verify authenticity BEFORE parsing the JSON, so
+  // a tampered index cannot influence the client before its signature is checked.
+  const indexBytes = await fetchIndexBytes(indexUrl);
+  const sigText = await fetchOptionalText(`${indexUrl}${PACK_RELEASE_SIGNATURE_SUFFIX}`);
+  const present = sigText !== null && sigText.trim() !== '';
+  const signature = present ? decodeSignature(sigText as string) : null;
+  const signedBy = signature
+    ? verifyAgainstTrustedKeys(indexBytes, signature, opts.trustedKeys)
+    : null;
+  const action = signaturePlan({
+    present,
+    valid: signedBy !== null,
+    requireSignature: opts.requireSignature ?? false,
+    noVerify: opts.noVerify ?? false,
+  });
+  if (action === 'fail') {
+    throw new PackInstallError(
+      present
+        ? `signature verification failed for ${opts.name} (untrusted key or tampered index)`
+        : `${opts.name} release is unsigned and --require-signature was set`,
+    );
+  }
+  if (action === 'verify') {
+    log(`✓ signature verified (Ed25519, key ${signedBy})`);
+  } else if (action === 'warn') {
+    log(
+      `warning: ${opts.name} release is unsigned — installing on SHA-256 integrity only ` +
+        `(pass --require-signature to enforce authenticity)`,
+    );
+  }
+
+  const index = assertIndex(parseIndexJson(indexBytes, indexUrl), opts.name, indexUrl);
 
   const work = mkdtempSync(join(opts.tmpRoot ?? tmpdir(), 'kgpacks-pull-'));
   try {
@@ -204,6 +289,7 @@ export async function pullPack(opts: PullPackOptions): Promise<PulledPack> {
       path: installed.path,
       parts: index.parts.length,
       bytes: index.totalBytes,
+      signedBy,
     };
   } finally {
     rmSync(work, { recursive: true, force: true });

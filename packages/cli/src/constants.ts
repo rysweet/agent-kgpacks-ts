@@ -65,3 +65,6 @@ export const DEFAULT_PACK_TAG = 'packs';
 
 /** Filename suffix of the per-pack multi-part release index. */
 export const PACK_RELEASE_INDEX_SUFFIX = '.pack-release.json';
+
+/** Filename suffix of the detached Ed25519 signature over the release index. */
+export const PACK_RELEASE_SIGNATURE_SUFFIX = '.sig';
