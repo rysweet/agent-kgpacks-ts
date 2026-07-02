@@ -23,7 +23,7 @@
 // (used by the end-to-end test, which serves the dir over localhost and pulls).
 import { spawn, spawnSync } from 'node:child_process';
 import { createGzip } from 'node:zlib';
-import { createHash } from 'node:crypto';
+import { createHash, createPrivateKey, createPublicKey, sign as edSign } from 'node:crypto';
 import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -52,7 +52,7 @@ if (!pack) {
   console.error(
     'usage: release-pack.mjs --pack <name> [--packs-dir dir] [--tag t] [--repo owner/repo]\n' +
       '       [--part-size 1900MiB] [--out-dir dir] [--notes text] [--model id]\n' +
-      '       [--corpus-commit sha] [--corpus-date YYYY-MM-DD] [--dry-run]',
+      '       [--corpus-commit sha] [--corpus-date YYYY-MM-DD] [--sign|--no-sign] [--dry-run]',
   );
   process.exit(2);
 }
@@ -238,6 +238,38 @@ function gh(ghArgs) {
   }
 }
 
+// Optional Ed25519 signing of the release index. The private key comes from the
+// KGPACKS_SIGNING_KEY env (a base64 PKCS8 DER key, populated from an Actions
+// secret in CI); it is never passed on argv or logged. When absent, the release
+// is published UNSIGNED (integrity-only) unless --sign forces an error.
+const signFlag = has('--sign');
+const noSignFlag = has('--no-sign');
+function resolveSigning() {
+  if (signFlag && noSignFlag) {
+    console.error('--sign and --no-sign are mutually exclusive');
+    process.exit(2);
+  }
+  if (noSignFlag) return null;
+  const secret = process.env.KGPACKS_SIGNING_KEY;
+  if (!secret) {
+    if (signFlag) {
+      console.error('--sign requires a signing key in KGPACKS_SIGNING_KEY');
+      process.exit(2);
+    }
+    return null;
+  }
+  let key;
+  try {
+    key = createPrivateKey({ key: Buffer.from(secret, 'base64'), format: 'der', type: 'pkcs8' });
+  } catch (err) {
+    console.error(`invalid KGPACKS_SIGNING_KEY: ${err?.message ?? err}`);
+    process.exit(2);
+  }
+  const jwk = createPublicKey(key).export({ format: 'jwk' });
+  const publicKeyB64 = Buffer.from(jwk.x, 'base64url').toString('base64');
+  return { key, publicKeyB64 };
+}
+
 function releaseExists(t) {
   const a = ['release', 'view', t];
   if (repo) a.push('--repo', repo);
@@ -276,10 +308,26 @@ async function main() {
     `[release] ${index.parts.length} part(s), ${sizeMiB} MiB gzipped, sha256=${index.sha256.slice(0, 12)}…`,
   );
 
-  const assets = [
-    join(outDir, `${pack}.pack-release.json`),
-    ...index.parts.map((p) => join(outDir, p.file)),
-  ];
+  const indexPath = join(outDir, `${pack}.pack-release.json`);
+  const assets = [indexPath, ...index.parts.map((p) => join(outDir, p.file))];
+
+  // Sign the RAW index bytes (Ed25519) and publish the detached signature + public
+  // key alongside it, so `wikigr pack pull` can verify authenticity before parsing.
+  const signing = resolveSigning();
+  if (signing) {
+    const indexBytes = readFileSync(indexPath);
+    const sig = edSign(null, indexBytes, signing.key);
+    const sigPath = `${indexPath}.sig`;
+    writeFileSync(sigPath, sig.toString('base64') + '\n');
+    const pubPath = join(outDir, `${pack}.pubkey`);
+    writeFileSync(pubPath, signing.publicKeyB64 + '\n');
+    assets.push(sigPath, pubPath);
+    console.error('[release] signed index (Ed25519); wrote .sig + .pubkey');
+  } else {
+    console.error(
+      '[release] no signing key (KGPACKS_SIGNING_KEY unset) — publishing UNSIGNED (integrity-only)',
+    );
+  }
   currentAssets = assets;
 
   if (dryRun) {

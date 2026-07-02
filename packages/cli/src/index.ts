@@ -16,6 +16,18 @@ export type { RunOptions } from './run.js';
 export { resolvePacksDir } from './config.js';
 export type { ResolvePacksDirOptions } from './config.js';
 
+export { pullPack, resolvePackBaseUrl } from './pack-pull.js';
+export type { PullPackOptions, PulledPack, PackReleaseIndex } from './pack-pull.js';
+
+export {
+  verifyPackIndexSignature,
+  verifyAgainstTrustedKeys,
+  signaturePlan,
+} from './pack-signing.js';
+export type { SignaturePlanInput, SignatureAction } from './pack-signing.js';
+export { TRUSTED_SIGNING_KEYS } from './signing-key.js';
+export type { TrustedSigningKey } from './signing-key.js';
+
 export { CliError } from './errors.js';
 
 export {
