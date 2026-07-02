@@ -44,12 +44,15 @@ const tag = opt('--tag', 'packs');
 const repo = opt('--repo'); // default: the gh-resolved repo for the cwd
 const notes = opt('--notes');
 const modelArg = opt('--model');
+const corpusCommitArg = opt('--corpus-commit');
+const corpusDateArg = opt('--corpus-date');
 const dryRun = has('--dry-run');
 
 if (!pack) {
   console.error(
     'usage: release-pack.mjs --pack <name> [--packs-dir dir] [--tag t] [--repo owner/repo]\n' +
-      '       [--part-size 1900MiB] [--out-dir dir] [--notes text] [--model id] [--dry-run]',
+      '       [--part-size 1900MiB] [--out-dir dir] [--notes text] [--model id]\n' +
+      '       [--corpus-commit sha] [--corpus-date YYYY-MM-DD] [--dry-run]',
   );
   process.exit(2);
 }
@@ -98,8 +101,43 @@ for (const [label, p] of [
 }
 
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-const version = String(manifest.version ?? '0.0.0');
 const model = modelArg ?? manifest.model ?? manifest.synthesis_model;
+
+// A dated release tag (`<name>-YYYY.MM[.N]`) pins an immutable version whose
+// SemVer form is derived UNPADDED (SemVer forbids leading zeros); the `packs`
+// pointer and other non-dated tags fall back to the manifest version. Mirrors
+// @kgpacks/packs' packVersionFromReleaseTag (inlined so this script has no build
+// dependency on the compiled package).
+function deriveVersionFromTag(t) {
+  const m = /-(\d{4})\.(\d{2})(?:\.(\d+))?$/.exec(typeof t === 'string' ? t : '');
+  if (!m) return null;
+  const month = Number(m[2]);
+  if (month < 1 || month > 12) return null;
+  return `${Number(m[1])}.${month}.${m[3] !== undefined ? Number(m[3]) : 0}`;
+}
+const version = deriveVersionFromTag(tag) ?? String(manifest.version ?? '0.0.0');
+
+// Provenance is mirrored from the pack manifest into the release index so the two
+// can be cross-checked; overrides + the release-time build.date fill any gaps.
+function buildProvenance() {
+  const base =
+    manifest && typeof manifest.provenance === 'object' && manifest.provenance
+      ? manifest.provenance
+      : {};
+  const corpus = { ...(base.corpus ?? {}) };
+  if (corpusCommitArg) corpus.commit = corpusCommitArg;
+  if (corpusDateArg) corpus.date = corpusDateArg;
+  const embedding = { ...(base.embedding ?? {}) };
+  if (model && !embedding.model) embedding.model = model;
+  const build = { ...(base.build ?? {}) };
+  if (!build.date) build.date = new Date().toISOString();
+  const provenance = {};
+  if (Object.keys(corpus).length) provenance.corpus = corpus;
+  if (Object.keys(embedding).length) provenance.embedding = embedding;
+  if (Object.keys(build).length) provenance.build = build;
+  return Object.keys(provenance).length ? provenance : undefined;
+}
+const provenance = buildProvenance();
 
 /**
  * Stream `tar --format=ustar manifest.json pack.db` → gzip → fixed-size parts on
@@ -181,6 +219,7 @@ async function buildParts(outDir) {
     version,
     format: 'tar.gz-multipart-v1',
     model: model ?? undefined,
+    provenance,
     createdAt: new Date().toISOString(),
     sha256: overall.digest('hex'),
     totalBytes,
@@ -199,11 +238,33 @@ function gh(ghArgs) {
   }
 }
 
-function releaseExists() {
-  const a = ['release', 'view', tag];
+function releaseExists(t) {
+  const a = ['release', 'view', t];
   if (repo) a.push('--repo', repo);
   return spawnSync('gh', a, { stdio: 'ignore' }).status === 0;
 }
+
+/** Create the release tag `t` if it does not exist, then upload `assets` to it. */
+function publishTo(t) {
+  if (!releaseExists(t)) {
+    const createArgs = [
+      'release',
+      'create',
+      t,
+      '--title',
+      t === 'packs' ? 'Knowledge packs' : `Knowledge pack ${pack} ${version}`,
+      '--notes',
+      notes ?? `Knowledge-pack release assets. Install with: wikigr pack pull <name>`,
+    ];
+    if (repo) createArgs.push('--repo', repo);
+    gh(createArgs);
+  }
+  const uploadArgs = ['release', 'upload', t, ...currentAssets, '--clobber'];
+  if (repo) uploadArgs.push('--repo', repo);
+  gh(uploadArgs);
+}
+// Assets to publish — set in main() once built.
+let currentAssets = [];
 
 async function main() {
   const outDir = opt('--out-dir', await mkdtemp(join(tmpdir(), 'kgpacks-release-')));
@@ -219,6 +280,7 @@ async function main() {
     join(outDir, `${pack}.pack-release.json`),
     ...index.parts.map((p) => join(outDir, p.file)),
   ];
+  currentAssets = assets;
 
   if (dryRun) {
     console.error(`[release] --dry-run: artifacts in ${outDir}`);
@@ -226,23 +288,14 @@ async function main() {
     return;
   }
 
-  if (!releaseExists()) {
-    const createArgs = [
-      'release',
-      'create',
-      tag,
-      '--title',
-      `Knowledge packs`,
-      '--notes',
-      notes ?? `Knowledge-pack release assets. Install with: wikigr pack pull <name>`,
-    ];
-    if (repo) createArgs.push('--repo', repo);
-    gh(createArgs);
-  }
-  const uploadArgs = ['release', 'upload', tag, ...assets, '--clobber'];
-  if (repo) uploadArgs.push('--repo', repo);
-  gh(uploadArgs);
-  console.error(`[release] uploaded ${assets.length} asset(s) to ${tag}`);
+  // Publish to the requested tag (immutable when dated), then move the stable
+  // `packs` latest-pointer to the same assets so `wikigr pack pull <name>` (which
+  // defaults to `packs`) keeps working and always resolves the newest version.
+  publishTo(tag);
+  if (tag !== 'packs') publishTo('packs');
+  console.error(
+    `[release] uploaded ${assets.length} asset(s) to ${tag}${tag !== 'packs' ? ' (+ packs pointer)' : ''}`,
+  );
   console.log(JSON.stringify({ tag, repo: repo ?? '(default)', ...index }, null, 2));
 }
 

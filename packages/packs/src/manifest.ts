@@ -36,17 +36,85 @@ export interface EvalScores {
   [metric: string]: number;
 }
 
+/**
+ * Build provenance: where a published pack came from. Written into `manifest.json`
+ * and mirrored in `<name>.pack-release.json` so a pack can be audited/reproduced.
+ * Every declared string field is optional; an undeterminable value is recorded as
+ * the string `"unknown"` (or `null`) rather than omitted, so the shape is stable.
+ */
+export interface PackProvenance {
+  /** Source corpus the records were built from (e.g. cvelistV5 @ a commit). */
+  corpus?: { name?: string; commit?: string | null; date?: string | null; [k: string]: unknown };
+  /** Embedding model used to embed every record (deterministic). */
+  embedding?: { model?: string; dimensions?: number; [k: string]: unknown };
+  /** Builder identity + when the pack was produced (UTC ISO-8601). */
+  build?: { date?: string; tool_version?: string; [k: string]: unknown };
+  [section: string]: unknown;
+}
+
 export interface PackManifest {
   name: string;
   version: string;
   description?: string;
   graph_stats?: GraphStats;
   eval_scores?: EvalScores;
+  provenance?: PackProvenance;
   [extra: string]: unknown;
 }
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** Deep-copies a value, dropping prototype-pollution keys at every level. */
+function deepSanitize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(deepSanitize);
+  if (isPlainObject(value)) {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value)) {
+      if (DANGEROUS_KEYS.has(key)) continue;
+      out[key] = deepSanitize(value[key]);
+    }
+    return out;
+  }
+  return value;
+}
+
+// Declared string fields per provenance section. Present values must be strings
+// (or null/absent for undeterminable ones); anything else is a hard error.
+const PROVENANCE_STRING_FIELDS: Record<string, readonly string[]> = {
+  corpus: ['name', 'commit', 'date'],
+  embedding: ['model'],
+  build: ['date', 'tool_version'],
+};
+
+function validateProvenance(value: unknown): void {
+  if (!isPlainObject(value)) {
+    throw new ManifestValidationError('provenance must be an object');
+  }
+  for (const [section, fields] of Object.entries(PROVENANCE_STRING_FIELDS)) {
+    const sec = value[section];
+    if (sec == null) continue;
+    if (!isPlainObject(sec)) {
+      throw new ManifestValidationError(`provenance.${section} must be an object`);
+    }
+    for (const field of fields) {
+      const fieldValue = sec[field];
+      if (fieldValue == null) continue; // undeterminable → null/absent is allowed
+      if (typeof fieldValue !== 'string') {
+        throw new ManifestValidationError(`provenance.${section}.${field} must be a string`);
+      }
+    }
+  }
+  const embedding = value.embedding;
+  if (isPlainObject(embedding) && embedding.dimensions != null) {
+    const dimensions = embedding.dimensions;
+    if (typeof dimensions !== 'number' || !Number.isFinite(dimensions) || dimensions < 0) {
+      throw new ManifestValidationError(
+        'provenance.embedding.dimensions must be a non-negative finite number',
+      );
+    }
+  }
+}
 
 function validateGraphStats(value: unknown): void {
   if (!isPlainObject(value)) {
@@ -97,13 +165,15 @@ export function validateManifest(value: unknown): PackManifest {
   // treat null the same as absent (real catalog manifests carry `eval_scores: null`).
   if (value.graph_stats != null) validateGraphStats(value.graph_stats);
   if (value.eval_scores != null) validateEvalScores(value.eval_scores);
+  if (value.provenance != null) validateProvenance(value.provenance);
 
   // Rebuild without dangerous keys to guard against prototype pollution from
-  // untrusted manifest JSON, while preserving every other (unknown) key.
+  // untrusted manifest JSON, while preserving every other (unknown) key. The
+  // provenance block is nested, so it is sanitized recursively.
   const result: Record<string, unknown> = {};
   for (const key of Object.keys(value)) {
     if (DANGEROUS_KEYS.has(key)) continue;
-    result[key] = value[key];
+    result[key] = key === 'provenance' ? deepSanitize(value[key]) : value[key];
   }
   return result as PackManifest;
 }

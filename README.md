@@ -105,6 +105,8 @@ pnpm --filter @kgpacks/frontend dev
 - **[docs/using-the-cve-pack.md](docs/using-the-cve-pack.md) — install & use the
   prebuilt CVE knowledge pack (start here to use the database).**
 - [docs/cve.md](docs/cve.md) — how the CVE pack is built and published.
+- [docs/pack-versioning.md](docs/pack-versioning.md) — versioned release tags
+  (`cve-YYYY.MM`) and the pack provenance fields.
 - [docs/packs-directory.md](docs/packs-directory.md) — where the CLI/MCP server
   read & write packs (the XDG default and how to override it).
 - [docs/monorepo.md](docs/monorepo.md) — workspace layout, build/test/lint
