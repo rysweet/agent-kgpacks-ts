@@ -36,7 +36,7 @@ bin.ts          #!/usr/bin/env node — boots the stdio server, logs to stderr
                  ├─ constants.ts     server name/instructions, tool names + descriptions
                  ├─ json.ts          dumpIndented / dumpCompact (upstream JSON parity)
                  ├─ manifest-io.ts   loadManifestLenient (port of _load_manifest)
-                 ├─ config.ts        resolveDefaultPacksDir ($KGPACKS_PACKS_DIR | cwd/data/packs)
+                 ├─ config.ts        resolveDefaultPacksDir ($KGPACKS_PACKS_DIR | XDG data dir)
                  └─ query-runner.ts  QueryRunner seam + lazy defaultQueryRunner
 ```
 
@@ -65,8 +65,10 @@ pnpm --filter @kgpacks/mcp build
 node packages/mcp/dist/bin.js        # or the `kgpacks-mcp` bin once linked
 ```
 
-The server scans `$KGPACKS_PACKS_DIR` when set, otherwise `<cwd>/data/packs` —
-the upstream layout (the launch configs below set `cwd` to the repo root).
+The server scans `$KGPACKS_PACKS_DIR` when set, otherwise the shared XDG data
+dir (`$XDG_DATA_HOME/kgpacks`, falling back to `~/.local/share/kgpacks`) — the
+same default the `wikigr` CLI resolves, so CLI-installed packs are found without
+extra configuration (see [docs/packs-directory.md](../packs-directory.md)).
 stdout is reserved for the JSON-RPC stream; startup failures are logged to
 stderr before a non-zero exit.
 
@@ -262,8 +264,9 @@ interface DefaultQueryResult {
   `manifest.json` filename is reused from `@kgpacks/packs` (`MANIFEST_FILENAME`)
   so the on-disk convention has a single source of truth.
 - **`resolveDefaultPacksDir(env?, cwd?): string`** — returns the
-  `KGPACKS_PACKS_DIR` override when set to a non-empty value, otherwise
-  `<cwd>/data/packs`.
+  `KGPACKS_PACKS_DIR` override when set to a non-empty value, otherwise the shared
+  XDG default (`$XDG_DATA_HOME/kgpacks`, else `~/.local/share/kgpacks`). `cwd` is
+  retained for back-compat and no longer affects the default.
 - **`dumpIndented(value): string`** / **`dumpCompact(value): string`**
   _(internal — not exported from `index.ts`)_ — the two JSON serializers that
   reproduce upstream's `json.dumps` formats (see
@@ -280,9 +283,9 @@ byte-for-byte upstream "not found" text).
 
 ## Configuration
 
-| Variable            | Default            | Meaning                                     |
-| ------------------- | ------------------ | ------------------------------------------- |
-| `KGPACKS_PACKS_DIR` | `<cwd>/data/packs` | Root directory scanned for installed packs. |
+| Variable            | Default      | Meaning                                     |
+| ------------------- | ------------ | ------------------------------------------- |
+| `KGPACKS_PACKS_DIR` | XDG data dir | Root directory scanned for installed packs. |
 
 A pack is any immediate subdirectory of the packs root. Per pack, the server
 probes `manifest.json` (lenient), `pack.db` (the LadybugDB database), and

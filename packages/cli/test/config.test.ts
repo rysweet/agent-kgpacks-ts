@@ -1,6 +1,13 @@
 // packages/cli/test/config.test.ts
 //
-// The packs-directory precedence contract: flag > injection > env > default.
+// The packs-directory precedence contract: flag > injection > env > XDG default.
+//
+// TDD (WS4): the default is being moved OFF the cwd-relative `./data/packs` to an
+// XDG data dir (`$XDG_DATA_HOME/kgpacks`, falling back to `~/.local/share/kgpacks`)
+// so the installed CLI finds packs from anywhere (docs/packs-directory.md). The
+// XDG cases below FAIL today (the default is still `<cwd>/data/packs`) and pass
+// once `resolvePacksDir` resolves the XDG default; the top-three precedence rules
+// are unchanged.
 
 import { join } from 'node:path';
 
@@ -30,17 +37,33 @@ describe('resolvePacksDir', () => {
   });
 
   it('falls back to KGPACKS_PACKS_DIR when neither flag nor injection is set', () => {
-    const dir = resolvePacksDir({ env: { [PACKS_DIR_ENV]: '/from/env' }, cwd: '/cwd' });
+    const dir = resolvePacksDir({
+      env: { [PACKS_DIR_ENV]: '/from/env', HOME: '/home/alice' },
+      cwd: '/cwd',
+    });
     expect(dir).toBe('/from/env');
   });
 
-  it('falls back to <cwd>/data/packs by default', () => {
-    const dir = resolvePacksDir({ env: {}, cwd: '/cwd' });
-    expect(dir).toBe(join('/cwd', 'data', 'packs'));
+  it('falls back to $XDG_DATA_HOME/kgpacks by default', () => {
+    const dir = resolvePacksDir({
+      env: { XDG_DATA_HOME: '/xdg/data', HOME: '/home/alice' },
+      cwd: '/cwd',
+    });
+    expect(dir).toBe(join('/xdg/data', 'kgpacks'));
   });
 
-  it('treats empty / whitespace overrides as unset', () => {
-    const dir = resolvePacksDir({ flag: '   ', injected: '', env: {}, cwd: '/cwd' });
-    expect(dir).toBe(join('/cwd', 'data', 'packs'));
+  it('falls back to ~/.local/share/kgpacks when XDG_DATA_HOME is unset', () => {
+    const dir = resolvePacksDir({ env: { HOME: '/home/alice' }, cwd: '/cwd' });
+    expect(dir).toBe(join('/home/alice', '.local', 'share', 'kgpacks'));
+  });
+
+  it('treats empty / whitespace overrides as unset and uses the XDG default', () => {
+    const dir = resolvePacksDir({
+      flag: '   ',
+      injected: '',
+      env: { [PACKS_DIR_ENV]: '  ', XDG_DATA_HOME: '  ', HOME: '/home/alice' },
+      cwd: '/cwd',
+    });
+    expect(dir).toBe(join('/home/alice', '.local', 'share', 'kgpacks'));
   });
 });

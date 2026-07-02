@@ -22,6 +22,19 @@ export default tseslint.config(
         ...globals.node,
       },
     },
+    rules: {
+      // Allow deliberately-unused bindings when prefixed with `_` (e.g. retained
+      // parameters kept for API/back-compat, or intentionally-ignored catch vars).
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          args: 'after-used',
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
+      ],
+    },
   },
   {
     // Browser + JSX language options for the deployable apps (apps/frontend).
