@@ -96,3 +96,43 @@ export function latestVersion(versions: string[]): string | undefined {
   const sorted = sortVersions(versions);
   return sorted[sorted.length - 1];
 }
+
+// A dated release tag: `<name>-YYYY.MM[.N]`. The month is zero-padded in the tag
+// for readable, lexically-sortable tags; the derived version must NOT pad it
+// (SemVer 2.0 forbids leading zeros in the numeric core).
+const RELEASE_TAG_RE = /-(\d{4})\.(\d{2})(?:\.(\d+))?$/;
+
+/**
+ * Derives an (unpadded) SemVer 2.0 pack version from an immutable dated release
+ * tag: `cve-2025.06` → `2025.6.0`, `cve-2025.06.1` → `2025.6.1`. Throws
+ * {@link ManifestValidationError} for a tag that carries no dated version (e.g.
+ * the `packs` latest-pointer, `cve`, `cve-latest`, or an empty string).
+ */
+export function packVersionFromReleaseTag(tag: string): string {
+  if (typeof tag !== 'string') {
+    throw new ManifestValidationError(`invalid release tag: expected a string, got ${typeof tag}`);
+  }
+  const match = RELEASE_TAG_RE.exec(tag);
+  if (!match) {
+    throw new ManifestValidationError(
+      `release tag ${JSON.stringify(tag)} carries no dated version (expected <name>-YYYY.MM[.N])`,
+    );
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const patch = match[3] !== undefined ? Number(match[3]) : 0;
+  if (month < 1 || month > 12) {
+    throw new ManifestValidationError(
+      `release tag ${JSON.stringify(tag)} has an invalid month (expected 01-12)`,
+    );
+  }
+  const version = `${year}.${month}.${patch}`;
+  // The numeric core is leading-zero-free after Number(), so this always holds;
+  // assert it so a future change can never emit an invalid version silently.
+  if (!isValidSemver(version)) {
+    throw new ManifestValidationError(
+      `derived version ${JSON.stringify(version)} is not valid SemVer`,
+    );
+  }
+  return version;
+}

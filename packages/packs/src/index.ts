@@ -12,7 +12,7 @@ export {
   loadManifestFromDir,
   saveManifest,
 } from './manifest.js';
-export type { PackManifest, GraphStats, EvalScores } from './manifest.js';
+export type { PackManifest, GraphStats, EvalScores, PackProvenance } from './manifest.js';
 
 export {
   parseVersion,
@@ -20,6 +20,7 @@ export {
   compareVersions,
   sortVersions,
   latestVersion,
+  packVersionFromReleaseTag,
 } from './versioning.js';
 export type { ParsedVersion } from './versioning.js';
 

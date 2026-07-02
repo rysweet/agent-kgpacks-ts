@@ -39,6 +39,10 @@ export interface PackReleaseIndex {
   parts: PackReleasePart[];
   model?: string;
   createdAt?: string;
+  /** Fixed part size (bytes) the archive was split at. */
+  partSize?: number;
+  /** Build provenance mirrored from the pack manifest (informational). */
+  provenance?: Record<string, unknown>;
 }
 
 export interface PullPackOptions {

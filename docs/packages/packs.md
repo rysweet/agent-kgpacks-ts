@@ -144,18 +144,20 @@ interface PackManifest {
   description?: string;
   graph_stats?: GraphStats;
   eval_scores?: EvalScores;
+  provenance?: PackProvenance;
   [extra: string]: unknown; // unknown keys are preserved on load → save
 }
 ```
 
-| Field          | Required | Validated when present                                                   |
-| -------------- | -------- | ------------------------------------------------------------------------ |
-| `name`         | yes      | matches [`PACK_NAME_RE`](#pack_name_re)                                  |
-| `version`      | yes      | valid SemVer 2.0 (see [`isValidSemver`](#isvalidsemverv-string-boolean)) |
-| `description`  | no       | string                                                                   |
-| `graph_stats`  | no       | `node_count` / `edge_count` are non-negative integers; extras numeric    |
-| `eval_scores`  | no       | every value is a finite number                                           |
-| _(other keys)_ | no       | passed through untouched (lossless round-trip)                           |
+| Field          | Required | Validated when present                                                                                                                                                                  |
+| -------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`         | yes      | matches [`PACK_NAME_RE`](#pack_name_re)                                                                                                                                                 |
+| `version`      | yes      | valid SemVer 2.0 (see [`isValidSemver`](#isvalidsemverv-string-boolean))                                                                                                                |
+| `description`  | no       | string                                                                                                                                                                                  |
+| `graph_stats`  | no       | `node_count` / `edge_count` are non-negative integers; extras numeric                                                                                                                   |
+| `eval_scores`  | no       | every value is a finite number                                                                                                                                                          |
+| `provenance`   | no       | section string fields (`corpus`/`embedding`/`build`) are strings; `embedding.dimensions` numeric; nested dangerous keys stripped (see [docs/pack-versioning.md](../pack-versioning.md)) |
+| _(other keys)_ | no       | passed through untouched (lossless round-trip)                                                                                                                                          |
 
 ### `PACK_NAME_RE`
 
@@ -321,6 +323,21 @@ if any element is invalid.
 ```ts
 latestVersion(['1.0.0', '1.2.0', '1.1.0']); // '1.2.0'
 latestVersion([]); // undefined
+```
+
+### `packVersionFromReleaseTag(tag: string): string`
+
+Derives an **unpadded** SemVer 2.0 pack version from an immutable dated release
+tag `<name>-YYYY.MM[.N]`. The tag zero-pads the month for readable, sortable tags;
+the version must not (SemVer forbids leading zeros in the numeric core). Throws
+[`ManifestValidationError`](#manifestvalidationerror) for a tag with no dated
+version (the `packs` latest-pointer, `cve`, an empty string, …). See
+[docs/pack-versioning.md](../pack-versioning.md).
+
+```ts
+packVersionFromReleaseTag('cve-2025.06'); // '2025.6.0'
+packVersionFromReleaseTag('cve-2025.06.1'); // '2025.6.1'
+packVersionFromReleaseTag('packs'); // throws ManifestValidationError
 ```
 
 ## Installer API

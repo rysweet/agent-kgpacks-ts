@@ -152,6 +152,24 @@ authenticated it creates/uploads to the release tag (`--tag`, default `packs`).
 | `--out-dir`   | temp dir         | Where parts + index are written.                 |
 | `--dry-run`   | off              | Build artifacts; skip all `gh` calls.            |
 
+### Versioned tags + provenance
+
+Prefer an **immutable, dated tag** over clobbering `packs` on every rebuild — the
+script publishes to the dated tag and also moves the stable `packs` latest-pointer
+to the same assets, so `wikigr pack pull cve` (default `packs`) keeps working:
+
+```bash
+# Immutable version cve-2025.06 → index version 2025.6.0, + updates the packs pointer
+node scripts/release-pack.mjs --pack cve --tag cve-2025.06
+```
+
+The builder (`build-cve-pack.mjs`) stamps **provenance** (corpus commit/date,
+embedding model, build date) into `manifest.json`; the release script mirrors it
+into `cve.pack-release.json` and fills `build.date`. Override the corpus fields
+with `--corpus-commit` / `--corpus-date`. See
+[docs/pack-versioning.md](pack-versioning.md) for the tag scheme and the full
+provenance field reference.
+
 The round-trip (`release-pack.mjs` → `wikigr pack pull`) is covered end-to-end by
 `packages/cli/test/pack-pull.test.ts`, which packages a fixture pack with the real
 script, serves it over localhost, and verifies a byte-identical multi-part install.
