@@ -3,7 +3,7 @@
 // Assembles an `McpServer` with the ported identity (name + instructions) and the
 // three knowledge-pack tools. Both the packs directory and the query seam are
 // injectable; unset, they fall back to the production defaults
-// (`<cwd>/data/packs` or `$KGPACKS_PACKS_DIR`, and the lazy retrieval runner).
+// (the shared XDG packs dir or `$KGPACKS_PACKS_DIR`, and the lazy retrieval runner).
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 

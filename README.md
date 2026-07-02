@@ -105,6 +105,8 @@ pnpm --filter @kgpacks/frontend dev
 - **[docs/using-the-cve-pack.md](docs/using-the-cve-pack.md) — install & use the
   prebuilt CVE knowledge pack (start here to use the database).**
 - [docs/cve.md](docs/cve.md) — how the CVE pack is built and published.
+- [docs/packs-directory.md](docs/packs-directory.md) — where the CLI/MCP server
+  read & write packs (the XDG default and how to override it).
 - [docs/monorepo.md](docs/monorepo.md) — workspace layout, build/test/lint
   commands, configuration reference, CI, and how to add a package.
 - [docs/packages/db.md](docs/packages/db.md) — the `@kgpacks/db` LadybugDB
