@@ -105,6 +105,8 @@ pnpm --filter @kgpacks/frontend dev
 - **[docs/using-the-cve-pack.md](docs/using-the-cve-pack.md) — install & use the
   prebuilt CVE knowledge pack (start here to use the database).**
 - [docs/cve.md](docs/cve.md) — how the CVE pack is built and published.
+- [docs/cve-corpus.md](docs/cve-corpus.md) — fetching the source CVE corpus from
+  the CVEProject/cvelistV5 release service (`pnpm cve:fetch`).
 - [docs/resumable-build.md](docs/resumable-build.md) — resumable + pipelined CVE
   pack builds (checkpoint/resume, overlapped embed + load).
 - [docs/pack-quantization.md](docs/pack-quantization.md) — the int8 embedding
