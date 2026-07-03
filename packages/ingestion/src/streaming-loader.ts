@@ -16,6 +16,10 @@
 // materialized in `finalize()` (a second pass) so only edges whose BOTH endpoints
 // were loaded survive; vector indexes are built once at the end.
 
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import type { Connection } from '@kgpacks/db';
 
 import { buildVectorIndexes, createSchema, type LoadableArticle } from './loader.js';
@@ -25,6 +29,57 @@ function wordCount(text: string): number {
   const trimmed = text.trim();
   return trimmed === '' ? 0 : trimmed.split(/\s+/).length;
 }
+
+/** RFC4180 CSV field: quote and double any embedded quotes. */
+function csvField(value: string): string {
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
+interface RelRow {
+  s: string;
+  t: string;
+  rel: string;
+  ctx: string;
+}
+
+/**
+ * Bulk-creates ENTITY_RELATION (Entity→Entity) edges scalably. Prefers LadybugDB's
+ * `COPY <Rel> FROM <csv>` — a single bulk import that scales to the full corpus —
+ * and falls back to PK-indexed `UNWIND ... MATCH ... CREATE` batches if COPY is
+ * unavailable or rejects the file. BOTH shapes are non-O(N^2): neither uses a comma
+ * two-pattern `MATCH` over the growing node tables. Returns the number created.
+ */
+async function bulkCreateEntityRelations(conn: Connection, relRows: RelRow[]): Promise<number> {
+  if (relRows.length === 0) return 0;
+  const dir = mkdtempSync(join(tmpdir(), 'kgpacks-rels-'));
+  const file = join(dir, 'entity_relation.csv');
+  try {
+    // Columns: FROM pk, TO pk, then rel properties in declaration order
+    // (relation, context) — the order LadybugDB's REL COPY expects.
+    const csv = relRows
+      .map((r) => `${csvField(r.s)},${csvField(r.t)},${csvField(r.rel)},${csvField(r.ctx)}`)
+      .join('\n');
+    writeFileSync(file, `${csv}\n`);
+    await conn.run(`COPY ENTITY_RELATION FROM "${file.replace(/\\/g, '/')}"`);
+    return relRows.length;
+  } catch {
+    // COPY unsupported/rejected → PK-indexed UNWIND fallback (still ~linear).
+    let created = 0;
+    await inChunks(relRows, RELATION_FALLBACK_CHUNK, async (rows) => {
+      await conn.run(
+        'UNWIND $rows AS r MATCH (a:Entity {entity_id: r.s}) MATCH (b:Entity {entity_id: r.t}) ' +
+          'CREATE (a)-[:ENTITY_RELATION {relation: r.rel, context: r.ctx}]->(b)',
+        { rows },
+      );
+      created += rows.length;
+    });
+    return created;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const RELATION_FALLBACK_CHUNK = 1000;
 
 function toArray(embedding: Float32Array | number[]): number[] {
   return Array.isArray(embedding) ? embedding : Array.from(embedding);
@@ -258,14 +313,7 @@ export async function createPackWriter(
           ctx: rel.context ?? '',
         }))
         .filter((r) => createdEntities.has(r.s) && createdEntities.has(r.t));
-      await inChunks(relRows, chunkSize, async (rows) => {
-        await conn.run(
-          'UNWIND $rows AS r MATCH (a:Entity {entity_id: r.s}) MATCH (b:Entity {entity_id: r.t}) ' +
-            'CREATE (a)-[:ENTITY_RELATION {relation: r.rel, context: r.ctx}]->(b)',
-          { rows },
-        );
-        stats.relationships += rows.length;
-      });
+      stats.relationships += await bulkCreateEntityRelations(conn, relRows);
     }
 
     const seen = new Set<string>();

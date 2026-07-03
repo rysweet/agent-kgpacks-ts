@@ -40,6 +40,16 @@ export { selectFewShot } from './few-shot.js';
 export { cypherRagRetrieve, cypherGeneratorFromAgent } from './cypher-rag.js';
 export { synthesizeFromResults } from './multi-doc-synthesis.js';
 
+export { entityGraph } from './entity-graph.js';
+export type {
+  EntityGraphMode,
+  ResolvedEntityGraphMode,
+  EntityGraphOptions,
+  EntityGraphNode,
+  EntityGraphEdge,
+  EntityGraphResult,
+} from './entity-graph.js';
+
 export type {
   RerankerOptions,
   CrossEncoder,

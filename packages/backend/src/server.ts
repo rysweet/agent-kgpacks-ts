@@ -23,6 +23,7 @@ import { makeKeyGenerator } from './rate-limit-key.js';
 import { registerArticlesRoutes } from './routes/articles.js';
 import { registerChatRoutes } from './routes/chat.js';
 import { registerGraphRoute } from './routes/graph.js';
+import { registerGraphEntitiesRoute } from './routes/graph-entities.js';
 import { registerHealthRoute } from './routes/health.js';
 import { registerHybridRoute } from './routes/hybrid.js';
 import { registerSearchRoute } from './routes/search.js';
@@ -150,6 +151,7 @@ export async function buildServer(options: BuildServerOptions): Promise<FastifyI
   registerSearchRoute(app, ctx);
   registerHybridRoute(app, ctx);
   registerGraphRoute(app, ctx);
+  registerGraphEntitiesRoute(app, ctx);
   registerArticlesRoutes(app, ctx);
 
   return app;

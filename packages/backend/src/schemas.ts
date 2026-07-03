@@ -62,6 +62,18 @@ export const graphQuerySchema = {
   },
 } as const;
 
+export const graphEntitiesQuerySchema = {
+  type: 'object',
+  required: ['entity'],
+  properties: {
+    entity: { type: 'string', minLength: 1, maxLength: 500 },
+    depth: { type: 'integer', minimum: 1, maximum: 3, default: 1 },
+    limit: { type: 'integer', minimum: 1, maximum: 200, default: 50 },
+    type: { type: 'string', maxLength: 200 },
+    mode: { type: 'string', enum: ['auto', 'co-occurrence', 'relation'], default: 'auto' },
+  },
+} as const;
+
 export const articleParamsSchema = {
   type: 'object',
   required: ['title'],

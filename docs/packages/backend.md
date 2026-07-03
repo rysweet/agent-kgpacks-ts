@@ -36,6 +36,7 @@ lifecycle, and the testing strategy. For a short overview and quick start, see t
   - [`GET /api/v1/search`](#get-apiv1search)
   - [`GET /api/v1/hybrid-search`](#get-apiv1hybrid-search)
   - [`GET /api/v1/graph`](#get-apiv1graph)
+  - [`GET /api/v1/graph/entities`](#get-apiv1graphentities)
   - [`GET /api/v1/articles/:title`](#get-apiv1articlestitle)
   - [`GET /api/v1/autocomplete`](#get-apiv1autocomplete)
   - [`GET /api/v1/categories`](#get-apiv1categories)
@@ -465,6 +466,34 @@ Nodes are ordered by `depth` ascending then `title` ascending and de-duplicated.
 
 **Errors:** `400` on invalid parameters (including `depth` out of `[1,3]`);
 `404 NOT_FOUND` for an unknown seed.
+
+---
+
+### `GET /api/v1/graph/entities`
+
+Return the **entity** neighborhood around a seed entity: entities reachable within
+`depth` hops, plus the edges among them. Auto-selects **co-occurrence** (entities
+sharing an article — the CVE-pack default) or **relation** traversal
+(`ENTITY_RELATION` edges) when present. See
+[docs/entity-graph.md](../entity-graph.md).
+
+**Query parameters**
+
+| Field      | Type    | Rules                                 | Default |
+| ---------- | ------- | ------------------------------------- | ------- |
+| `entity`\* | string  | length 1–500                          | —       |
+| `depth`    | integer | 1–3                                   | `1`     |
+| `limit`    | integer | 1–200                                 | `50`    |
+| `type`     | string  | length ≤ 200                          | —       |
+| `mode`     | string  | `auto` \| `relation` \| co-occurrence | `auto`  |
+
+**Response `200`** — an entity graph: `{ seed, mode, nodes: [{ id, name, type,
+depth, articles_count }], edges: [{ source, target, relation, weight }],
+total_nodes, total_edges, execution_time_ms }`. Nodes are ordered `(depth ASC,
+name ASC)` and bounded by `limit`.
+
+**Errors:** `400` on invalid parameters (`MISSING_PARAMETER` / `INVALID_PARAMETER`);
+`404 NOT_FOUND` for an unknown seed entity.
 
 ---
 
