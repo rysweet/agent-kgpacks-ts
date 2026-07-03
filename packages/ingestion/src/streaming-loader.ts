@@ -20,9 +20,14 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { Connection } from '@kgpacks/db';
+import type { Connection, Row } from '@kgpacks/db';
 
-import { buildVectorIndexes, createSchema, type LoadableArticle } from './loader.js';
+import {
+  buildVectorIndexes,
+  createSchema,
+  loadExtensions,
+  type LoadableArticle,
+} from './loader.js';
 import type { ArticleLink, Relationship } from './types.js';
 
 function wordCount(text: string): number {
@@ -119,6 +124,13 @@ export interface PackWriterOptions {
    * (build them) for backward compatibility.
    */
   skipEntityRelations?: boolean;
+  /**
+   * Resume a build over an EXISTING pack: skip {@link createSchema} (the tables
+   * already exist) and rebuild the in-memory cross-batch dedup sets (entities by
+   * `entity_id`, articles by title) from the database, so dedup stays correct
+   * across a restart. Default `false`. See docs/resumable-build.md.
+   */
+  resume?: boolean;
 }
 
 /** Splits `rows` into `size`-bounded slices and runs `fn` on each in order. */
@@ -142,10 +154,26 @@ export async function createPackWriter(
 ): Promise<PackWriter> {
   const chunkSize = options.insertChunkSize ?? 500;
   const skipEntityRelations = options.skipEntityRelations ?? false;
-  const ftsLoaded = await createSchema(conn);
+  const resume = options.resume ?? false;
 
   const createdEntities = new Set<string>();
   const loadedArticles = new Set<string>();
+
+  let ftsLoaded: boolean;
+  if (resume) {
+    // The pack already exists: load extensions only, and repopulate the dedup sets
+    // from the DB so cross-batch dedup survives the restart.
+    ftsLoaded = await loadExtensions(conn);
+    for (const row of await conn.run<Row>('MATCH (e:Entity) RETURN e.entity_id AS id')) {
+      createdEntities.add(String(row.id));
+    }
+    for (const row of await conn.run<Row>('MATCH (a:Article) RETURN a.title AS title')) {
+      loadedArticles.add(String(row.title));
+    }
+  } else {
+    ftsLoaded = await createSchema(conn);
+  }
+
   const pendingRelationships: Relationship[] = [];
   const stats: PackWriterStats = {
     articles: 0,
@@ -159,6 +187,15 @@ export async function createPackWriter(
 
   async function addBatch(items: LoadableArticle[]): Promise<void> {
     if (items.length === 0) return;
+
+    // Idempotency for resumable builds: skip any article already loaded (its title
+    // is in the dedup set). This makes a re-run of an already-committed batch a safe
+    // no-op — the checkpoint sidecar can legitimately lag the DB by one committed
+    // batch after a crash between COMMIT and the sidecar write. Article titles are
+    // the primary key, so re-creating one would otherwise be a hard error.
+    const fresh = items.filter((item) => !loadedArticles.has(item.article.title));
+    if (fresh.length === 0) return;
+    items = fresh;
 
     const articleRows: { title: string; category: string; wc: number; depth: number }[] = [];
     // Section/Chunk rows carry their parent Article title (`at`) so the edge is
