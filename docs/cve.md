@@ -38,19 +38,21 @@ records and records with no English description are skipped.
 
 ## Get the corpus
 
-Download and unzip the nightly all-CVEs release (the asset is double-zipped):
+The corpus is published as **GitHub Release assets** on
+[CVEProject/cvelistV5](https://github.com/CVEProject/cvelistV5). Fetch it with the
+built-in integration, which resolves the latest release, downloads + double-unzips
+the right asset, and records provenance:
 
 ```bash
-mkdir -p .scratch/cve && cd .scratch/cve
-curl -sL -o all.zip.zip \
-  "$(curl -s https://api.github.com/repos/CVEProject/cvelistV5/releases/latest \
-     | grep -o 'https://[^"]*all_CVEs[^"]*\.zip\.zip')"
-unzip -q all.zip.zip               # -> cves.zip  (~360k records)
-unzip -q cves.zip                  # -> cves/<year>/<bucket>/CVE-*.json
+pnpm cve:fetch                     # full corpus -> .scratch/cve/extracted/cves
+pnpm cve:fetch --kind delta        # small "recent changes" corpus (fast to try)
 ```
 
-For a smaller, faster corpus use the much smaller `*_delta_CVEs_*.zip` asset
-instead (recent changes only, ~1k records).
+It prints the exact `pnpm cve:build …` command to run next, pre-filled with the
+release `--corpus-commit`/`--corpus-date` so the built pack is provenance-stamped.
+See [cve-corpus.md](cve-corpus.md) for options (`--tag`, `--dest`, `--max-bytes`,
+`GITHUB_TOKEN`) and the security model. The full baseline is ~550 MB / ~360k
+records; the delta asset is a much smaller recent-changes slice.
 
 ## Download the prebuilt pack (no build required)
 
@@ -75,10 +77,10 @@ the published pack, see [using-the-cve-pack.md](using-the-cve-pack.md).
 pnpm -r build                                              # compile packages first
 
 # A bounded, fast slice (recommended for a usable pack):
-pnpm cve:build --src .scratch/cve/cves --year 2025 --limit 5000
+pnpm cve:build --src .scratch/cve/extracted/cves --year 2025 --limit 5000
 
 # The comprehensive build (all ~360k records — a multi-hour batch):
-pnpm cve:build --src .scratch/cve/cves --out data/packs/cve/pack.db
+pnpm cve:build --src .scratch/cve/extracted/cves --out data/packs/cve/pack.db
 ```
 
 Flags (`scripts/build-cve-pack.mjs`):
@@ -172,7 +174,8 @@ node scripts/release-pack.mjs --pack cve --tag cve-2025.06
 The builder (`build-cve-pack.mjs`) stamps **provenance** (corpus commit/date,
 embedding model, build date) into `manifest.json`; the release script mirrors it
 into `cve.pack-release.json` and fills `build.date`. Override the corpus fields
-with `--corpus-commit` / `--corpus-date`. See
+with `--corpus-commit` / `--corpus-date` — `pnpm cve:fetch` prints these pre-filled
+from the source release (see [cve-corpus.md](cve-corpus.md)). See
 [docs/pack-versioning.md](pack-versioning.md) for the tag scheme and the full
 provenance field reference.
 

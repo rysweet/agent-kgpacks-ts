@@ -27,6 +27,7 @@
     "catalog:list": "node scripts/build-catalog.mjs --list",
     "catalog:build": "node scripts/build-catalog.mjs",
     "catalog:eval": "node scripts/eval-catalog.mjs",
+    "cve:fetch": "node scripts/fetch-cve-corpus.mjs",
     "cve:build": "node scripts/build-cve-pack.mjs",
     "bundle:cli": "node scripts/bundle-cli.mjs",
     "prepare": "node scripts/bundle-cli.mjs && husky"
