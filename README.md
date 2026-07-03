@@ -109,6 +109,8 @@ pnpm --filter @kgpacks/frontend dev
   (`cve-YYYY.MM`) and the pack provenance fields.
 - [docs/pack-signing.md](docs/pack-signing.md) — signing & verifying the release
   index (Ed25519 authenticity on top of SHA-256 integrity).
+- [docs/entity-graph.md](docs/entity-graph.md) — entity-graph traversal:
+  `entityGraph()` + `GET /api/v1/graph/entities` (co-occurrence / relation modes).
 - [docs/packs-directory.md](docs/packs-directory.md) — where the CLI/MCP server
   read & write packs (the XDG default and how to override it).
 - [docs/monorepo.md](docs/monorepo.md) — workspace layout, build/test/lint
