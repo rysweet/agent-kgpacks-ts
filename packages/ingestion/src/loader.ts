@@ -66,6 +66,22 @@ function toArray(embedding: Float32Array | number[]): number[] {
  * Returns whether FTS was available.
  */
 export async function createSchema(conn: Connection): Promise<boolean> {
+  const ftsLoaded = await loadExtensions(conn);
+  for (const ddl of NODE_TABLE_DDL) {
+    await conn.run(ddl);
+  }
+  for (const ddl of REL_TABLE_DDL) {
+    await conn.run(ddl);
+  }
+  return ftsLoaded;
+}
+
+/**
+ * Loads the required LadybugDB extensions WITHOUT creating tables — used when
+ * resuming a build over an existing pack (whose tables already exist). `vector` is
+ * mandatory; `fts` is best-effort. Returns whether FTS was available.
+ */
+export async function loadExtensions(conn: Connection): Promise<boolean> {
   let ftsLoaded = false;
   for (const ext of EXTENSIONS) {
     try {
@@ -79,12 +95,6 @@ export async function createSchema(conn: Connection): Promise<boolean> {
       }
       // FTS is optional; the read path uses title CONTAINS, not an FTS index.
     }
-  }
-  for (const ddl of NODE_TABLE_DDL) {
-    await conn.run(ddl);
-  }
-  for (const ddl of REL_TABLE_DDL) {
-    await conn.run(ddl);
   }
   return ftsLoaded;
 }

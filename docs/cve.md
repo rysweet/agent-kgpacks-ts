@@ -83,14 +83,20 @@ pnpm cve:build --src .scratch/cve/cves --out data/packs/cve/pack.db
 
 Flags (`scripts/build-cve-pack.mjs`):
 
-| Flag                      | Default                  | Meaning                                                         |
-| ------------------------- | ------------------------ | --------------------------------------------------------------- |
-| `--src`                   | (required)               | Directory tree of `CVE-*.json` files.                           |
-| `--year`                  | all                      | Restrict to one CVE year.                                       |
-| `--limit`                 | all                      | Cap the number of records.                                      |
-| `--out`                   | `data/packs/cve/pack.db` | Output pack path (gitignored).                                  |
-| `--batch`                 | `96`                     | Embedding batch size.                                           |
-| `--with-entity-relations` | off (skipped)            | Build `ENTITY_RELATION` edges (see the performance note below). |
+| Flag                       | Default                  | Meaning                                                                                  |
+| -------------------------- | ------------------------ | ---------------------------------------------------------------------------------------- |
+| `--src`                    | (required)               | Directory tree of `CVE-*.json` files.                                                    |
+| `--year`                   | all                      | Restrict to one CVE year.                                                                |
+| `--limit`                  | all                      | Cap the number of records.                                                               |
+| `--out`                    | `data/packs/cve/pack.db` | Output pack path (gitignored).                                                           |
+| `--batch`                  | `96`                     | Embedding batch size.                                                                    |
+| `--with-entity-relations`  | off (skipped)            | Build `ENTITY_RELATION` edges (see the performance note below).                          |
+| `--resume` / `--no-resume` | auto                     | Resume from / ignore a build checkpoint ([docs/resumable-build.md](resumable-build.md)). |
+| `--checkpoint-every`       | `50`                     | Batches between durable checkpoints (bounds crash re-work).                              |
+
+The build is **resumable and pipelined**: it checkpoints progress so an interrupted
+run continues from the last checkpoint (`--resume`), and it overlaps embedding with
+DB load so cores are not idle — see [docs/resumable-build.md](resumable-build.md).
 
 It prints a JSON summary (`mapped`, `articles`, `sections`, `chunks`, `entities`,
 `relationships`, `seconds`).

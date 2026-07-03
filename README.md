@@ -105,6 +105,8 @@ pnpm --filter @kgpacks/frontend dev
 - **[docs/using-the-cve-pack.md](docs/using-the-cve-pack.md) — install & use the
   prebuilt CVE knowledge pack (start here to use the database).**
 - [docs/cve.md](docs/cve.md) — how the CVE pack is built and published.
+- [docs/resumable-build.md](docs/resumable-build.md) — resumable + pipelined CVE
+  pack builds (checkpoint/resume, overlapped embed + load).
 - [docs/pack-versioning.md](docs/pack-versioning.md) — versioned release tags
   (`cve-YYYY.MM`) and the pack provenance fields.
 - [docs/pack-signing.md](docs/pack-signing.md) — signing & verifying the release
