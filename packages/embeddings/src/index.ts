@@ -8,6 +8,8 @@
 
 import { pipeline, type FeatureExtractionPipeline } from '@huggingface/transformers';
 
+export { quantizeInt8, dequantizeInt8, QUANT_DIM } from './quantize.js';
+
 // Validated Spike B configuration (cosine = 1.000000 vs the reference oracle).
 // These are locked constants — there is intentionally nothing to configure.
 const MODEL_ID = 'Xenova/bge-base-en-v1.5';

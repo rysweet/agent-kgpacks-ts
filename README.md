@@ -107,6 +107,8 @@ pnpm --filter @kgpacks/frontend dev
 - [docs/cve.md](docs/cve.md) — how the CVE pack is built and published.
 - [docs/resumable-build.md](docs/resumable-build.md) — resumable + pipelined CVE
   pack builds (checkpoint/resume, overlapped embed + load).
+- [docs/pack-quantization.md](docs/pack-quantization.md) — the int8 embedding
+  quantization spike (~4× smaller vectors) and its recall-parity adoption gate.
 - [docs/pack-versioning.md](docs/pack-versioning.md) — versioned release tags
   (`cve-YYYY.MM`) and the pack provenance fields.
 - [docs/pack-signing.md](docs/pack-signing.md) — signing & verifying the release
