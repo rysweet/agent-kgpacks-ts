@@ -50,7 +50,10 @@ jobs:
       - name: Pre-install LadybugDB extensions (avoid parallel-download races)
         run: node scripts/preinstall-extensions.mjs
 
-      - name: Test (packages + Spike A)
+      # `pnpm -r test` runs every package suite, including the perf/scaling guards:
+      # the multi-part release/streaming-install accounting guard and the
+      # streaming-loader ~linear edge-creation guard (see docs/ci-perf-guards.md).
+      - name: Test (packages + Spike A + perf guards)
         run: pnpm -r test
 
       - name: Test (root structural suites)
