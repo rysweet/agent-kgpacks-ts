@@ -115,6 +115,8 @@ pnpm --filter @kgpacks/frontend dev
   read & write packs (the XDG default and how to override it).
 - [docs/monorepo.md](docs/monorepo.md) — workspace layout, build/test/lint
   commands, configuration reference, CI, and how to add a package.
+- [docs/ci-perf-guards.md](docs/ci-perf-guards.md) — the CI performance/scaling
+  guards (multi-part release accounting + streaming-loader ~linear edge creation).
 - [docs/packages/db.md](docs/packages/db.md) — the `@kgpacks/db` LadybugDB
   wrapper API and the Spike A vector smoke-test tutorial.
 - [docs/packages/agent.md](docs/packages/agent.md) — the `@kgpacks/agent` GitHub

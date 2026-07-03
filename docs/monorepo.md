@@ -257,7 +257,10 @@ in-progress runs for the same ref. All dependencies are pinned to exact versions
 5. **Lint** — `pnpm lint`
 6. **Format check** — `pnpm format:check`
 7. **Build** — `pnpm -r build`
-8. **Test** — `pnpm -r test` (includes Spike A)
+8. **Test** — `pnpm -r test` (includes Spike A and the
+   [perf/scaling guards](ci-perf-guards.md): multi-part release accounting +
+   streaming-loader ~linear edge creation)
+9. **Test (root)** — `pnpm test:root` (structural suites)
 
 pnpm's store is cached between runs to speed installs.
 
