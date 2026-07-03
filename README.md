@@ -109,6 +109,8 @@ pnpm --filter @kgpacks/frontend dev
   pack builds (checkpoint/resume, overlapped embed + load).
 - [docs/pack-quantization.md](docs/pack-quantization.md) — the int8 embedding
   quantization spike (~4× smaller vectors) and its recall-parity adoption gate.
+- [docs/cve-eval.md](docs/cve-eval.md) — evaluating the CVE pack (both arms + pinned
+  judge) and the committed eval-results artifact.
 - [docs/pack-versioning.md](docs/pack-versioning.md) — versioned release tags
   (`cve-YYYY.MM`) and the pack provenance fields.
 - [docs/pack-signing.md](docs/pack-signing.md) — signing & verifying the release
