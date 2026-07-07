@@ -54,9 +54,13 @@ describe('scaffold — workspace wiring', () => {
 describe('scaffold — root package.json', () => {
   const pkg = (): Record<string, unknown> => readJson('package.json');
 
-  it('is a private ESM root pinned to Node 22+ and an exact pnpm version', () => {
+  it('is a packable ESM root pinned to Node 22+ and an exact pnpm version', () => {
     const p = pkg();
-    expect(p.private).toBe(true);
+    // The root IS the installable `wikigr` tarball, so it must NOT be private
+    // (that would block `npm pack`). Accidental publish is instead prevented by
+    // the `prepublishOnly` publish guard (see test/guard-publish.test.ts).
+    expect(p.private).toBeUndefined();
+    expect((p.scripts as Record<string, string>).prepublishOnly).toMatch(/guard-publish/);
     expect(p.type).toBe('module');
     expect((p.engines as Record<string, string>).node).toMatch(/22/);
     expect(String(p.packageManager)).toMatch(/^pnpm@9\.\d+\.\d+$/);
