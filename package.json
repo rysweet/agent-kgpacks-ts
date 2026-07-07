@@ -1,7 +1,6 @@
 {
   "name": "agent-kgpacks-ts",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "description": "TypeScript port of agent-kgpacks — a LadybugDB-backed knowledge-pack platform.",
   "license": "MIT",
@@ -30,7 +29,9 @@
     "cve:fetch": "node scripts/fetch-cve-corpus.mjs",
     "cve:build": "node scripts/build-cve-pack.mjs",
     "bundle:cli": "node scripts/bundle-cli.mjs",
-    "prepare": "node scripts/bundle-cli.mjs && husky"
+    "prepare": "node scripts/bundle-cli.mjs && node scripts/setup-husky.mjs",
+    "prepack": "node scripts/bundle-cli.mjs",
+    "prepublishOnly": "node scripts/guard-publish.mjs"
   },
   "lint-staged": {
     "*.{ts,tsx,mts,cts,mjs,cjs,js}": [
