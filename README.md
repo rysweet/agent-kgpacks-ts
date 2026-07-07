@@ -26,12 +26,15 @@ uses the GitHub Copilot CLI (install and sign in with `copilot`).
 
 ## Install from git (without publishing to npm)
 
-This package is **not published to the npm registry** (it stays `private`), but the
-`wikigr` CLI can be installed straight from this repository. On install, a `prepare`
-step bundles the CLI and its internal `@kgpacks/*` workspace packages into a single
-self-contained file (`dist/wikigr.mjs`); only the real runtime dependencies
+This package is **not published to any npm registry** — publishing is the job of a
+downstream private-feed pipeline, and `npm publish` from this repo is blocked unless
+`KGPACKS_ALLOW_PUBLISH=1` is set. The `wikigr` CLI can, however, be installed
+straight from this repository or from a locally built tarball. On install, a
+`prepare` step bundles the CLI and its internal `@kgpacks/*` workspace packages into
+a single self-contained file (`dist/wikigr.mjs`); only the real runtime dependencies
 (`@ladybugdb/core`, `@huggingface/transformers`, `@github/copilot-sdk`, `commander`)
-are installed from npm — no workspace resolution is required on the consumer side.
+are installed from npm — no pnpm and no workspace resolution is required on the
+consumer side. See **[docs/packaging.md](docs/packaging.md)** for the full details.
 
 ```bash
 # Install the CLI globally from the git repo
@@ -125,6 +128,8 @@ pnpm --filter @kgpacks/frontend dev
   commands, configuration reference, CI, and how to add a package.
 - [docs/ci-perf-guards.md](docs/ci-perf-guards.md) — the CI performance/scaling
   guards (multi-part release accounting + streaming-loader ~linear edge creation).
+- [docs/packaging.md](docs/packaging.md) — how the self-contained `wikigr` tarball
+  is built, installed, verified, and why publishing is blocked from this repo.
 - [docs/packages/db.md](docs/packages/db.md) — the `@kgpacks/db` LadybugDB
   wrapper API and the Spike A vector smoke-test tutorial.
 - [docs/packages/agent.md](docs/packages/agent.md) — the `@kgpacks/agent` GitHub
