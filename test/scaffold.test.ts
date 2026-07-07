@@ -54,13 +54,27 @@ describe('scaffold — workspace wiring', () => {
 describe('scaffold — root package.json', () => {
   const pkg = (): Record<string, unknown> => readJson('package.json');
 
-  it('is a private ESM root pinned to Node 22+ and an exact pnpm version', () => {
+  it('is a publishable ESM root pinned to Node 22+ and an exact pnpm version', () => {
     const p = pkg();
-    expect(p.private).toBe(true);
+    // The root package is the installable `wikigr` artifact, so it must NOT be
+    // marked private (that would block `npm pack`/publish of the tarball).
+    // Publishing is instead gated by the prepublishOnly guard below.
+    expect(p.private).toBeUndefined();
     expect(p.type).toBe('module');
     expect((p.engines as Record<string, string>).node).toMatch(/22/);
     expect(String(p.packageManager)).toMatch(/^pnpm@9\.\d+\.\d+$/);
   });
+
+  it('builds the CLI bundle on prepare/prepack and guards publish', () => {
+    const scripts = pkg().scripts as Record<string, string>;
+    // The esbuild bundle must run on both prepare and prepack so `pnpm pack`
+    // always produces dist/wikigr.mjs.
+    expect(scripts.prepare).toMatch(/bundle-cli\.mjs/);
+    expect(scripts.prepack).toMatch(/bundle-cli\.mjs/);
+    // Publishing from this repo is blocked unless the downstream pipeline opts in.
+    expect(scripts.prepublishOnly).toMatch(/guard-publish\.mjs/);
+  });
+
 
   it('fans build/test/typecheck across the workspace and exposes lint + format', () => {
     const scripts = pkg().scripts as Record<string, string>;
