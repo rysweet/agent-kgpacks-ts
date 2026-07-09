@@ -123,8 +123,8 @@ Arguments:
 
 Options:
   -k, --k <n>    number of results to retrieve (default: 5)
-  --mode <mode>  retrieval strategy (choices: "vector", "hybrid", default:
-                 "vector")
+  --mode <mode>  retrieval strategy (choices: "vector", "hybrid", "lexical",
+                 default: "vector")
   -h, --help     display help for command
 "
 `;

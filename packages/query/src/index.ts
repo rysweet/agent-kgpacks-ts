@@ -12,6 +12,7 @@ export { validateCypher } from './cypher-safety.js';
 
 export { vectorRetrieve } from './vector.js';
 export { hybridRetrieve } from './hybrid.js';
+export { lexicalRetrieve } from './lexical.js';
 
 export { QueryError, CypherValidationError, RerankOptionError } from './errors.js';
 
@@ -21,6 +22,7 @@ export {
   DEFAULT_STOP_WORDS,
   DEFAULT_NODE_TABLE,
   DEFAULT_VECTOR_INDEX,
+  PACK_DB_VERSION,
 } from './constants.js';
 
 export type {

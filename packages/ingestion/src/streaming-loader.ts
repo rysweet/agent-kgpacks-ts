@@ -211,6 +211,12 @@ export async function createPackWriter(
       level: number;
       wc: number;
       idx: number;
+      cveId: string;
+      affectedProducts: string;
+      aliases: string;
+      cpes: string;
+      purls: string;
+      ecosystems: string;
     }[] = [];
     const chunkRows: {
       id: string;
@@ -249,6 +255,12 @@ export async function createPackWriter(
           level: section.level,
           wc: wordCount(section.content),
           idx: i,
+          cveId: section.cveId ?? '',
+          affectedProducts: section.affectedProducts ?? '',
+          aliases: section.aliases ?? '',
+          cpes: section.cpes ?? '',
+          purls: section.purls ?? '',
+          ecosystems: section.ecosystems ?? '',
         });
       }
 
@@ -310,7 +322,9 @@ export async function createPackWriter(
       conn.run(
         'UNWIND $rows AS r MATCH (a:Article {title: r.at}) ' +
           'CREATE (a)-[:HAS_SECTION {section_index: r.idx}]->(:Section {id: r.id, ' +
-          'title: r.title, content: r.content, embedding: r.emb, level: r.level, word_count: r.wc})',
+          'title: r.title, content: r.content, embedding: r.emb, level: r.level, word_count: r.wc, ' +
+          'cve_id: r.cveId, affected_products: r.affectedProducts, aliases: r.aliases, ' +
+          'cpes: r.cpes, purls: r.purls, ecosystems: r.ecosystems})',
         { rows },
       ),
     );
