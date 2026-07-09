@@ -28,6 +28,7 @@ import { cypherGeneratorFromAgent, cypherRagRetrieve } from './cypher-rag.js';
 import { QueryError } from './errors.js';
 import { selectFewShot } from './few-shot.js';
 import { hybridRetrieve } from './hybrid.js';
+import { lexicalRetrieve } from './lexical.js';
 import { synthesizeFromResults } from './multi-doc-synthesis.js';
 import { graphRerank } from './reranker.js';
 import type {
@@ -116,6 +117,21 @@ function mergeCypherRows(
   return [...byId.values()];
 }
 
+/** Unions two result lists, deduping by id and keeping the higher score. */
+function unionByMaxScore(
+  primary: RetrieverResult[],
+  secondary: RetrieverResult[],
+): RetrieverResult[] {
+  const byId = new Map<string, RetrieverResult>();
+  for (const result of [...primary, ...secondary]) {
+    const existing = byId.get(result.id);
+    if (existing === undefined || result.score > existing.score) {
+      byId.set(result.id, result);
+    }
+  }
+  return [...byId.values()];
+}
+
 /**
  * Creates a retriever bound to `conn`.
  *
@@ -151,11 +167,11 @@ export function createRetriever(conn: Connection, opts: CreateRetrieverOptions =
   const loader = conn as { loadExtension?: (name: string) => Promise<void> };
   let vectorReady: Promise<void> | undefined;
   let ftsReady: Promise<void> | undefined;
-  async function ensureExtensions(hybrid: boolean): Promise<void> {
+  async function ensureExtensions(needsFts: boolean): Promise<void> {
     if (typeof loader.loadExtension !== 'function') return;
     vectorReady ??= loader.loadExtension('vector');
     await vectorReady;
-    if (hybrid) {
+    if (needsFts) {
       ftsReady ??= loader.loadExtension('fts');
       await ftsReady;
     }
@@ -168,12 +184,22 @@ export function createRetriever(conn: Connection, opts: CreateRetrieverOptions =
     const k = options.k ?? DEFAULT_K;
     assertValidK(k);
 
-    // Stage 0: CORE vector/hybrid retrieval (always runs).
-    await ensureExtensions((options.mode ?? 'vector') === 'hybrid');
+    // Stage 0: CORE vector/hybrid/lexical retrieval (always runs).
+    const mode = options.mode ?? 'vector';
+    // FTS extension is loaded for hybrid and lexical (the structured/keyword
+    // modes); vector-only never needs it.
+    await ensureExtensions(mode === 'hybrid' || mode === 'lexical');
     let results: RetrieverResult[];
-    if ((options.mode ?? 'vector') === 'hybrid') {
+    if (mode === 'hybrid') {
       const weights = options.weights ?? DEFAULT_WEIGHTS;
       results = await hybridRetrieve(conn, embedder, query, k, weights, config, stopWords);
+    } else if (mode === 'lexical') {
+      // Union exact structured-field hits with semantic hits, keeping the higher
+      // score per id: an exact coordinate match surfaces even when the vector
+      // encoder ranks it low, without losing the semantic recall vector provides.
+      const vectorHits = await vectorRetrieve(conn, embedder, query, k, config);
+      const lexicalHits = await lexicalRetrieve(conn, query, k, config);
+      results = unionByMaxScore(lexicalHits, vectorHits);
     } else {
       results = await vectorRetrieve(conn, embedder, query, k, config);
     }

@@ -130,7 +130,8 @@ async function loadSections(
     }
     await conn.run(
       'CREATE (:Section {id: $id, title: $title, content: $content, embedding: $emb, ' +
-        'level: $level, word_count: $wc})',
+        'level: $level, word_count: $wc, cve_id: $cveId, affected_products: $affectedProducts, ' +
+        'aliases: $aliases, cpes: $cpes, purls: $purls, ecosystems: $ecosystems})',
       {
         id: section.id,
         title: section.title,
@@ -138,6 +139,12 @@ async function loadSections(
         emb: toArray(embedding),
         level: section.level,
         wc: wordCount(section.content),
+        cveId: section.cveId ?? '',
+        affectedProducts: section.affectedProducts ?? '',
+        aliases: section.aliases ?? '',
+        cpes: section.cpes ?? '',
+        purls: section.purls ?? '',
+        ecosystems: section.ecosystems ?? '',
       },
     );
     await conn.run(

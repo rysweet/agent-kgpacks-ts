@@ -37,6 +37,11 @@ export const NODE_TABLE_DDL: readonly string[] = [
      expansion_depth INT64,
      PRIMARY KEY(title)
    )`,
+  // `Section` additionally carries structured retrieval keys (cve_id,
+  // affected_products, aliases, cpes, purls, ecosystems) populated by the CVE
+  // adapter. They are ADDITIVE: vector/hybrid readers select only
+  // id/title/content/embedding, so an older reader still opens the pack; the
+  // `lexical` retrieve mode reads these columns for exact coordinate matching.
   `CREATE NODE TABLE Section(
      id STRING,
      title STRING,
@@ -44,6 +49,12 @@ export const NODE_TABLE_DDL: readonly string[] = [
      embedding FLOAT[${EMBEDDING_DIM}],
      level INT64,
      word_count INT64,
+     cve_id STRING,
+     affected_products STRING,
+     aliases STRING,
+     cpes STRING,
+     purls STRING,
+     ecosystems STRING,
      PRIMARY KEY(id)
    )`,
   `CREATE NODE TABLE Chunk(

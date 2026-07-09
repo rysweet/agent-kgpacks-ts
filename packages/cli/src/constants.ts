@@ -23,7 +23,7 @@ export const DEFAULT_K = 5;
 export const DEFAULT_MODE = 'vector';
 
 /** Retrieval modes accepted by `query --mode`. */
-export const RETRIEVE_MODES = ['vector', 'hybrid'] as const;
+export const RETRIEVE_MODES = ['vector', 'hybrid', 'lexical'] as const;
 
 // ── INGESTION (Phase 2) ─────────────────────────────────────────────────────
 

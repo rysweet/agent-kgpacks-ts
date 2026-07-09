@@ -13,7 +13,9 @@ export interface RetrieverResult {
   /**
    * Relevance score, higher is better. For `vector` mode this is cosine
    * similarity `1 - distance` clamped to `[0, 1]`; for `hybrid` mode it is the
-   * weighted sum of the vector, graph, and keyword signals.
+   * weighted sum of the vector, graph, and keyword signals; for `lexical` mode
+   * it is the fraction of query terms matched over the structured fields (an
+   * exact full-query match scores `1`), unioned with vector by max score.
    */
   score: number;
   /** The retrieved section content. */
@@ -21,7 +23,7 @@ export interface RetrieverResult {
 }
 
 /** Retrieval strategy. */
-export type RetrieveMode = 'vector' | 'hybrid';
+export type RetrieveMode = 'vector' | 'hybrid' | 'lexical';
 
 /** Per-signal weights for {@link RetrieveMode} `'hybrid'`. */
 export interface HybridWeights {

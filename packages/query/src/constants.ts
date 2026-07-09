@@ -46,14 +46,49 @@ export const DEFAULT_NODE_TABLE = 'Section';
 /** Vector index name (reference schema `embedding_idx`). */
 export const DEFAULT_VECTOR_INDEX = 'embedding_idx';
 
-// Single-format assumption (accepted limitation): the reader targets exactly ONE
-// pack schema — a `Section` node table with a 768-dim `FLOAT[]` vector under the
-// `embedding_idx` index, as produced by @kgpacks/ingestion. There is deliberately
-// no on-disk format/schema-version field or negotiation: packs are built and read
-// by the same repo at the same version, so speculative versioning would be dead
-// weight. If the schema ever changes incompatibly, introduce a version marker and
-// branch here; until then a mismatched/foreign pack fails fast at query time
-// rather than being silently mis-read.
+// ── PACK FORMAT VERSIONING ──────────────────────────────────────────────────
+//
+// Packs are additive across format versions: every `Section` still carries the
+// v1 read keys (`id`, `content`, `title`, `embedding FLOAT[768]` under
+// `embedding_idx`), so a reader at ANY version opens ANY pack for the
+// vector/hybrid path. What changes across versions is OPT-IN capability:
+//
+//   v1 — vector + hybrid only.
+//   v2 — adds the structured `Section` columns (cve_id, affected_products,
+//        aliases, cpes, purls, ecosystems) that back the `lexical` retrieve
+//        mode's exact coordinate matching.
+//
+// `lexical` is the one mode that needs v2 columns. Rather than silently
+// mis-read a v1 pack (returning empty because the columns don't exist), the
+// lexical path probes for a structured column up front and FAILS FAST with a
+// clear "rebuild / re-pull, or use --mode hybrid" hint. Vector/hybrid never
+// touch the extra columns, so they keep working against v1 packs unchanged.
+
+/** Current pack format version written by @kgpacks/ingestion (see block above). */
+export const PACK_DB_VERSION = 2;
+
+/**
+ * Structured `Section` columns (v2+) the `lexical` retrieve mode matches over,
+ * highest-signal first. These are trusted, developer-defined identifiers
+ * interpolated into the lexical Cypher (never end-user input).
+ */
+export const LEXICAL_FIELDS: readonly string[] = [
+  'aliases',
+  'purls',
+  'cpes',
+  'affected_products',
+  'cve_id',
+  'ecosystems',
+];
+
+/** Per-term LIMIT for each lexical field scan (bounds a broad substring match). */
+export const LEXICAL_ROW_CAP = 200;
+
+/** Max query terms the lexical path scans (bounds the per-term query fan-out). */
+export const LEXICAL_MAX_TERMS = 12;
+
+/** Minimum length of a lexical query term (drops noise like single characters). */
+export const LEXICAL_MIN_TERM_LENGTH = 2;
 
 // ── ENHANCEMENTS constants ──────────────────────────────────────────────────
 

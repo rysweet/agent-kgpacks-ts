@@ -52,6 +52,23 @@ export interface Section {
   content: string;
   /** Heading depth (0 = lead / article intro). */
   level: number;
+
+  // ── Structured retrieval keys (optional, CVE packs) ─────────────────────────
+  // Populated by the CVE adapter and persisted to the additive `Section` columns
+  // for the `lexical` retrieve mode. Absent for prose (e.g. Wikipedia) sections,
+  // which persist empty strings.
+  /** The CVE id this section describes (e.g. `CVE-2021-44228`). */
+  cveId?: string;
+  /** Affected product names, `'; '`-joined. */
+  affectedProducts?: string;
+  /** Package/import-path aliases (e.g. `code.gitea.io/gitea`), `'; '`-joined. */
+  aliases?: string;
+  /** CPE identifiers, `'; '`-joined. */
+  cpes?: string;
+  /** Package URLs (purls), `'; '`-joined. */
+  purls?: string;
+  /** Package ecosystems (e.g. `go`, `npm`), `'; '`-joined. */
+  ecosystems?: string;
 }
 
 /** A fetched + cleaned source document, split into sections. */
