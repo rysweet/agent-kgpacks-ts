@@ -1,63 +1,61 @@
 # Pack release versioning & provenance
 
-Published knowledge packs are **versioned** and carry **provenance** — a record of
-exactly which corpus, embedding model, and build produced them. This lets you pin
-a reproducible pack, audit where a pack came from, and roll forward or back without
-ambiguity.
+Published knowledge packs carry one manifest-derived **version**, deterministic
+artifact identity, lineage, checksums, and provenance. Publication is immutable:
+an existing exact release is a no-op, while any tag or asset mismatch fails.
 
 This document covers the release-tag scheme, the provenance fields written into
 `manifest.json` and the `<name>.pack-release.json` index, and how `wikigr pack
 pull` selects a version.
 
-## Release tags: immutable versions + a stable "latest" pointer
+## Release-tag convention
 
-Packs are published to GitHub Releases (see [docs/cve.md](cve.md)). Instead of
-clobbering a single `packs` tag on every rebuild, each build is published under an
-**immutable, dated version tag**, and the `packs` tag is kept as a **stable pointer
-to the latest** version:
+Packs are published to GitHub Releases (see [docs/cve.md](cve.md)). A dated tag
+identifies one immutable release:
 
-| Tag             | Meaning                                                                                                                                 |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `cve-YYYY.MM`   | An **immutable** release of the CVE pack built in that month (e.g. `cve-2025.06`). Never overwritten.                                   |
-| `cve-YYYY.MM.N` | A second/third rebuild in the same month (`N` starts at `0`), still immutable.                                                          |
-| `packs`         | The **stable latest** pointer: always the newest published version's assets. Backwards-compatible with existing `wikigr pack pull cve`. |
+| Tag             | Meaning                                                                                              |
+| --------------- | ---------------------------------------------------------------------------------------------------- |
+| `cve-YYYY.MM`   | Conventional dated release name (for example, `cve-2025.06`).                                        |
+| `cve-YYYY.MM.N` | Conventional additional build in the same month (`N` starts at `0`).                                 |
+| `packs`         | Optional explicitly published channel; it is never moved as a side effect of publishing another tag. |
 
-Pack **manifest** `version` fields use a **SemVer 2.0** string derived from the
-tag, so `wikigr pack info cve` and the registry's version comparison (see
-[`@kgpacks/packs` versioning](packages/packs.md)) order releases correctly.
+For a dated tag, the release script derives the expected SemVer and requires it
+to equal the archived manifest version. It never rewrites either value.
 
 > **Tag vs. version — the month is _not_ zero-padded in the version.** The git
 > **tag** zero-pads the month for readable, lexically-sortable tags
-> (`cve-2025.06`). The manifest **version** must omit that pad — SemVer 2.0 forbids
-> leading zeros in the numeric core, so `2025.06.0` is **invalid** and is rejected
-> by `@kgpacks/packs`'s validator. The tag `cve-2025.06` therefore maps to version
-> `2025.6.0`, and `cve-2025.06.1` to `2025.6.1`. Numeric comparison still orders
-> months correctly (`2025.6.0` < `2025.11.0`).
+> (`cve-2025.06`). The derived index **version** omits that pad because SemVer 2.0
+> forbids leading zeros in the numeric core. The tag `cve-2025.06` maps to
+> `2025.6.0`, and `cve-2025.06.1` maps to `2025.6.1`.
 
 ## Pull a specific version
 
-`wikigr pack pull cve` defaults to the `packs` tag (latest), unchanged. To pin an
-immutable version, pass its tag:
+`wikigr pack pull cve` defaults to `packs` for backward compatibility. Immutable
+consumers should select a dated tag:
 
 ```bash
 wikigr pack pull cve                       # latest (the `packs` pointer)
-wikigr pack pull cve --tag cve-2025.06      # pinned, immutable version
+wikigr pack pull cve --tag cve-2025.06      # selected dated release
 wikigr pack pull cve --tag cve-2025.06.1    # a specific rebuild
 ```
 
 After install, verify what you got:
 
 ```bash
-wikigr pack info cve      # prints version + full provenance block
+wikigr pack info cve      # prints the archived manifest version + provenance
 ```
 
 ## Provenance
 
-Every published pack records **how it was built** in two places, written
-identically so they can be cross-checked:
+Build provenance can appear in two places:
 
 1. the pack's `manifest.json` (`provenance` object), and
 2. the `<name>.pack-release.json` release index (`provenance` object).
+
+The release script starts with manifest provenance and applies explicit
+command-line overrides. Update-capable manifests additionally record `packId`,
+`buildId`, `contentDigest`, base lineage, `deltaId`, the raw delta hash, versions,
+update counts, graph/provenance counts, and sorted payload checksums.
 
 ### Fields
 
@@ -79,7 +77,7 @@ Any field whose value cannot be determined at build time is written as the strin
 ```jsonc
 {
   "name": "cve",
-  "version": "2025.6.0",
+  "version": "1.0.0",
   "description": "Full CVE knowledge pack (MITRE/CVE Program corpus).",
   "graph_stats": {
     "articles": 343007,
@@ -119,7 +117,7 @@ integrity fields:
   "totalBytes": 4084862976,
   "partSize": 1992294400,
   "provenance": {
-    /* identical to the manifest block above */
+    /* copied from the manifest unless release options override fields */
   },
   "parts": [
     { "file": "cve.tar.gz.000", "bytes": 1992294400, "sha256": "…" },
@@ -129,22 +127,22 @@ integrity fields:
 }
 ```
 
-> Provenance is **validated on load** by the manifest schema
-> ([`@kgpacks/packs`](packages/packs.md)): each field, when present, must be a
-> string (dates ISO-formatted). As with the rest of the manifest, dangerous keys
-> (`__proto__`, `constructor`, `prototype`) are stripped when the object is
-> rebuilt, so untrusted release JSON cannot pollute prototypes.
+> Manifest provenance receives **structural validation** from
+> [`@kgpacks/packs`](packages/packs.md): declared string fields must be strings and
+> embedding dimensions must be a non-negative number. It does not verify date
+> formats, corpus identity, completeness, or correspondence with `pack.db`.
+> Dangerous keys (`__proto__`, `constructor`, `prototype`) are stripped when the
+> object is rebuilt.
 
 ## Publishing with provenance
 
-`scripts/release-pack.mjs` captures provenance automatically and writes it into
-both the manifest (already present in the packaged `pack.db` directory) and the
-index. The builder (`scripts/build-cve-pack.mjs`) stamps the corpus commit/date
-and embedding model at build time; the release script fills `build.date` and the
-version tag:
+The builder (`scripts/build-cve-pack.mjs`) writes corpus, embedding, and build
+provenance into `manifest.json`. `scripts/release-pack.mjs` reads that block and
+writes it into the release index, with any explicit overrides. It does not modify
+the archived manifest:
 
 ```bash
-# Publish an immutable, dated version and update the `packs` latest pointer
+# Publish one immutable dated release
 node scripts/release-pack.mjs --pack cve --tag cve-2025.06
 
 # Inspect the artifacts (including the provenance block) without uploading
@@ -152,12 +150,24 @@ node scripts/release-pack.mjs --pack cve --tag cve-2025.06 --dry-run --out-dir /
 cat /tmp/cve-rel/cve.pack-release.json | jq .provenance
 ```
 
-| Flag              | Default          | Meaning                                                                                                  |
-| ----------------- | ---------------- | -------------------------------------------------------------------------------------------------------- |
-| `--tag`           | `packs`          | Release tag. Use `cve-YYYY.MM` for an immutable version; the script also updates `packs` to point at it. |
-| `--corpus-commit` | from build stamp | Override the recorded corpus commit (else taken from the pack manifest / build stamp).                   |
-| `--corpus-date`   | from build stamp | Override the recorded corpus date.                                                                       |
-| `--model`         | manifest model   | Override the recorded embedding model id.                                                                |
+| Flag              | Default             | Meaning                                                                       |
+| ----------------- | ------------------- | ----------------------------------------------------------------------------- |
+| `--tag`           | `<name>-v<version>` | The immutable manifest-derived release tag. No other tag is moved or updated. |
+| `--corpus-commit` | from manifest       | Override the corpus commit in the release index.                              |
+| `--corpus-date`   | from manifest       | Override the corpus date in the release index.                                |
+| `--model`         | manifest model      | Override the embedding model in the release index.                            |
+
+### Publication guarantees
+
+The default tag is derived from the manifest (for example, `cve-v2025.6.0`). For
+an explicit dated tag, the derived version (`cve-2025.06` becomes `2025.6.0`) must
+equal the manifest version. Only comprehensively validated schema-v2 packs may be
+published. Tar members use stable ordering, epoch timestamps, and numeric owner
+metadata. A new release is created as a draft, assets are uploaded without
+`--clobber`, and the draft is published only after upload succeeds. If the tag
+already exists, every remote asset name, size, and SHA-256 digest must match for a
+no-op success; otherwise publication fails without replacing assets or moving the
+tag.
 
 See [docs/cve.md](cve.md#publish-a-pack-as-a-release-artifact) for the full
 publishing flow and the remaining `release-pack.mjs` flags, and

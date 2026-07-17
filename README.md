@@ -116,8 +116,8 @@ pnpm --filter @kgpacks/frontend dev
   quantization spike (~4× smaller vectors) and its recall-parity adoption gate.
 - [docs/cve-eval.md](docs/cve-eval.md) — evaluating the CVE pack (both arms + pinned
   judge) and the committed eval-results artifact.
-- [docs/pack-versioning.md](docs/pack-versioning.md) — versioned release tags
-  (`cve-YYYY.MM`) and the pack provenance fields.
+- [docs/pack-versioning.md](docs/pack-versioning.md) — immutable release-tag/version
+  conventions (`cve-YYYY.MM`), deterministic identity, and provenance fields.
 - [docs/pack-signing.md](docs/pack-signing.md) — signing & verifying the release
   index (Ed25519 authenticity on top of SHA-256 integrity).
 - [docs/entity-graph.md](docs/entity-graph.md) — entity-graph traversal:

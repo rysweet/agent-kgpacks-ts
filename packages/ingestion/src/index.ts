@@ -237,6 +237,21 @@ export { loadPack, createSchema, loadExtensions, buildVectorIndexes } from './lo
 export type { LoadableArticle, LoadPackInput, LoadPackStats } from './loader.js';
 export { createPackWriter } from './streaming-loader.js';
 export type { PackWriter, PackWriterOptions, PackWriterStats } from './streaming-loader.js';
+export { CVE_ADAPTER_VERSION, cveToGraph } from './cve-adapter.js';
+export {
+  INCREMENTAL_SCHEMA_VERSION,
+  UPDATE_TOOL_VERSION,
+  buildCvePack,
+  updateKnowledgePack,
+  validateKnowledgePack,
+} from './incremental-update.js';
+export type {
+  BuildCvePackConfig,
+  PackCheckpoint,
+  PackValidationResult,
+  UpdateKnowledgePackConfig,
+  UpdateKnowledgePackResult,
+} from './incremental-update.js';
 export {
   EMBEDDING_DIM,
   SECTION_TABLE,

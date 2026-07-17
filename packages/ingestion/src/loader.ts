@@ -24,6 +24,12 @@ export interface LoadableArticle {
   /** One embedding per `chunks[i]`, same order. */
   chunkEmbeddings: ReadonlyArray<Float32Array | number[]>;
   extraction: ExtractionResult;
+  /** Exact source bytes used by the adapter, retained for deterministic updates. */
+  sourcePayload?: string;
+  /** SHA-256 of {@link sourcePayload}. Required for provenance-capable packs. */
+  sourcePayloadHash?: string;
+  /** Version of the deterministic source adapter/extractor. */
+  extractorVersion?: string;
   /**
    * BFS distance from the nearest seed (seed = 0). Persisted on the `Article`
    * node so `/stats` can report the by-depth distribution. Defaults to `0` when
@@ -113,6 +119,23 @@ async function loadArticleNode(
       category: article.category ?? '',
       wc: totalWords,
       depth: expansionDepth,
+    },
+  );
+}
+
+async function loadArticleSource(conn: Connection, item: LoadableArticle): Promise<void> {
+  if (item.sourcePayload === undefined) return;
+  if (!item.sourcePayloadHash || !item.extractorVersion) {
+    throw new Error(`Missing source provenance for article ${item.article.title}`);
+  }
+  await conn.run(
+    'CREATE (:ArticleSource {title: $title, payload: $payload, payload_sha256: $hash, ' +
+      'extractor_version: $version})',
+    {
+      title: item.article.title,
+      payload: item.sourcePayload,
+      hash: item.sourcePayloadHash,
+      version: item.extractorVersion,
     },
   );
 }
@@ -227,22 +250,49 @@ async function loadEntities(
 
 async function loadRelationships(
   conn: Connection,
+  article: Article,
   extraction: ExtractionResult,
   createdEntities: Set<string>,
+  createdRelationships: Set<string>,
+  extractorVersion: string,
 ): Promise<number> {
   let count = 0;
+  const local = new Set<string>();
   for (const rel of extraction.relationships) {
     const source = rel.source.trim();
     const target = rel.target.trim();
     if (!createdEntities.has(source) || !createdEntities.has(target)) {
       continue; // only connect entities that were actually loaded
     }
-    await conn.run(
-      'MATCH (a:Entity {entity_id: $s}), (b:Entity {entity_id: $t}) ' +
-        'CREATE (a)-[:ENTITY_RELATION {relation: $r, context: $c}]->(b)',
-      { s: source, t: target, r: rel.relation, c: rel.context ?? '' },
-    );
-    count++;
+    const context = rel.context ?? '';
+    const signature = JSON.stringify([source, rel.relation, target, context]);
+    if (!local.has(signature)) {
+      local.add(signature);
+      await conn.run(
+        'CREATE (:RelationSupport {support_id: $id, article_title: $article, signature: $signature, ' +
+          'source_entity_id: $s, target_entity_id: $t, relation: $r, context: $c, ' +
+          'extractor_version: $version})',
+        {
+          id: JSON.stringify([article.title, signature]),
+          article: article.title,
+          signature,
+          s: source,
+          t: target,
+          r: rel.relation,
+          c: context,
+          version: extractorVersion,
+        },
+      );
+    }
+    if (!createdRelationships.has(signature)) {
+      createdRelationships.add(signature);
+      await conn.run(
+        'MATCH (a:Entity {entity_id: $s}), (b:Entity {entity_id: $t}) ' +
+          'CREATE (a)-[:ENTITY_RELATION {relation: $r, context: $c}]->(b)',
+        { s: source, t: target, r: rel.relation, c: context },
+      );
+      count++;
+    }
   }
   return count;
 }
@@ -295,6 +345,7 @@ export async function loadPack(conn: Connection, input: LoadPackInput): Promise<
 
   const loadedArticles = new Set<string>();
   const createdEntities = new Set<string>();
+  const createdRelationships = new Set<string>();
   const stats: LoadPackStats = {
     articles: 0,
     sections: 0,
@@ -307,6 +358,7 @@ export async function loadPack(conn: Connection, input: LoadPackInput): Promise<
 
   for (const item of input.articles) {
     await loadArticleNode(conn, item.article, item.expansionDepth ?? 0);
+    await loadArticleSource(conn, item);
     await loadSections(conn, item.article, item.sectionEmbeddings);
     await loadChunks(conn, item.chunks, item.chunkEmbeddings);
     stats.entities += await loadEntities(conn, item.article, item.extraction, createdEntities);
@@ -319,7 +371,14 @@ export async function loadPack(conn: Connection, input: LoadPackInput): Promise<
 
   // Relationships + links run after all nodes exist so endpoints resolve.
   for (const item of input.articles) {
-    stats.relationships += await loadRelationships(conn, item.extraction, createdEntities);
+    stats.relationships += await loadRelationships(
+      conn,
+      item.article,
+      item.extraction,
+      createdEntities,
+      createdRelationships,
+      item.extractorVersion ?? 'legacy',
+    );
   }
   stats.links = await loadLinks(conn, input.links, loadedArticles);
 

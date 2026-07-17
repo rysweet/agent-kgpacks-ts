@@ -54,6 +54,10 @@ See [cve-corpus.md](cve-corpus.md) for options (`--tag`, `--dest`, `--max-bytes`
 `GITHUB_TOKEN`) and the security model. The full baseline is ~550 MB / ~360k
 records; the delta asset is a much smaller recent-changes slice.
 
+The delta asset can be converted to stable NDJSON and applied to a completed
+schema-v2 pack with `wikigr update`; see
+[cve-corpus.md](cve-corpus.md) and [Incremental updates](#incremental-updates).
+
 ## Download the prebuilt pack (no build required)
 
 The full CVE pack is published as a multi-part **GitHub Release** artifact, so you
@@ -91,6 +95,7 @@ Flags (`scripts/build-cve-pack.mjs`):
 | `--year`                   | all                      | Restrict to one CVE year.                                                                |
 | `--limit`                  | all                      | Cap the number of records.                                                               |
 | `--out`                    | `data/packs/cve/pack.db` | Output pack path (gitignored).                                                           |
+| `--version`                | `1.0.0`                  | Immutable manifest version.                                                              |
 | `--batch`                  | `96`                     | Embedding batch size.                                                                    |
 | `--with-entity-relations`  | off (skipped)            | Build `ENTITY_RELATION` edges (see the performance note below).                          |
 | `--resume` / `--no-resume` | auto                     | Resume from / ignore a build checkpoint ([docs/resumable-build.md](resumable-build.md)). |
@@ -102,6 +107,35 @@ DB load so cores are not idle — see [docs/resumable-build.md](resumable-build.
 
 It prints a JSON summary (`mapped`, `articles`, `sections`, `chunks`, `entities`,
 `relationships`, `seconds`).
+
+Pass `--with-entity-relations` when producing a base for incremental updates.
+That mode publishes schema-v2 source payloads, article/entity support, relation
+support, checksums, a content digest, and a deterministic build ID. Builds that
+skip live entity relations remain readable legacy packs but are intentionally
+rejected as update bases.
+
+Completed output directories are immutable. The builder refuses to replace a
+directory that already contains `manifest.json`; choose a new versioned output
+directory for each corpus snapshot.
+
+## Incremental updates
+
+```bash
+wikigr update --base data/packs/cve-2026.06 \
+  --delta .scratch/cve/delta.ndjson \
+  --output data/packs/cve-2026.07 \
+  --version 2026.7.0
+```
+
+The base remains read-only. Existing records are compared by exact source-payload
+SHA-256 after the CVE adapter emits compact JSON (transport whitespace is ignored):
+equal records are preserved, changed records replace their prior
+article-supported graph, and absent records remain. Duplicate keys and explicit
+deletes fail. Shared entities and relations survive while another article still
+supports them. Generated indexes are rebuilt and the staged output is
+comprehensively validated before atomic publication. Use `wikigr update --resume
+<output>.work` only for interrupted incremental work; it is unrelated to
+`pnpm cve:build --resume`.
 
 > **Comprehensive scale & performance.** The builder **streams**: each batch is
 > embedded, bulk-loaded via `createPackWriter`, and discarded, so peak memory is a
@@ -136,7 +170,7 @@ built pack as a multi-part, integrity-checked GitHub Release artifact that
 `wikigr pack pull` consumes:
 
 ```bash
-# Package data/packs/cve (manifest.json + pack.db) and upload to the `packs` release
+# Package data/packs/cve and upload to the manifest-derived `cve-v<version>` release
 node scripts/release-pack.mjs --pack cve
 
 # Inspect the artifacts locally without uploading (writes parts + index to --out-dir)
@@ -148,34 +182,39 @@ node scripts/release-pack.mjs --pack cve --dry-run --out-dir /tmp/cve-rel
 it, and splits the stream into `--part-size` chunks (default 1900 MiB, safely
 under GitHub's 2 GiB asset limit), writing each `cve.tar.gz.NNN` part and a
 `cve.pack-release.json` index with per-part and overall SHA-256 sums. With `gh`
-authenticated it creates/uploads to the release tag (`--tag`, default `packs`).
+authenticated it creates/uploads to the release tag (`--tag`, default
+`<name>-v<manifest-version>`).
 
-| Flag          | Default          | Meaning                                          |
-| ------------- | ---------------- | ------------------------------------------------ |
-| `--pack`      | (required)       | Pack directory name under `--packs-dir`.         |
-| `--packs-dir` | `data/packs`     | Packs root.                                      |
-| `--tag`       | `packs`          | Release tag to create/upload to.                 |
-| `--repo`      | gh-resolved repo | `owner/repo` to publish to.                      |
-| `--part-size` | `1900MiB`        | Max bytes per part (`B`/`KB`/`MB`/`GB`/`MiB`/…). |
-| `--out-dir`   | temp dir         | Where parts + index are written.                 |
-| `--dry-run`   | off              | Build artifacts; skip all `gh` calls.            |
+| Flag          | Default             | Meaning                                          |
+| ------------- | ------------------- | ------------------------------------------------ |
+| `--pack`      | (required)          | Pack directory name under `--packs-dir`.         |
+| `--packs-dir` | `data/packs`        | Packs root.                                      |
+| `--tag`       | `<name>-v<version>` | Immutable release tag derived from the manifest. |
+| `--repo`      | gh-resolved repo    | `owner/repo` to publish to.                      |
+| `--part-size` | `1900MiB`           | Max bytes per part (`B`/`KB`/`MB`/`GB`/`MiB`/…). |
+| `--out-dir`   | temp dir            | Where parts + index are written.                 |
+| `--dry-run`   | off                 | Build artifacts; skip all `gh` calls.            |
 
-### Versioned tags + provenance
+### Versioned tag convention + provenance
 
-Prefer an **immutable, dated tag** over clobbering `packs` on every rebuild — the
-script publishes to the dated tag and also moves the stable `packs` latest-pointer
-to the same assets, so `wikigr pack pull cve` (default `packs`) keeps working:
+A dated tag identifies one immutable release. Its derived SemVer must exactly
+match the manifest version:
 
 ```bash
-# Immutable version cve-2025.06 → index version 2025.6.0, + updates the packs pointer
+# Tag cve-2025.06 requires manifest version 2025.6.0
 node scripts/release-pack.mjs --pack cve --tag cve-2025.06
 ```
 
 The builder (`build-cve-pack.mjs`) stamps **provenance** (corpus commit/date,
-embedding model, build date) into `manifest.json`; the release script mirrors it
-into `cve.pack-release.json` and fills `build.date`. Override the corpus fields
-with `--corpus-commit` / `--corpus-date` — `pnpm cve:fetch` prints these pre-filled
-from the source release (see [cve-corpus.md](cve-corpus.md)). See
+embedding model, deterministic build date) into `manifest.json`; the release script mirrors it
+into `cve.pack-release.json`. Override the
+corpus fields with `--corpus-commit` / `--corpus-date` — `pnpm cve:fetch` prints
+these pre-filled from the source release (see [cve-corpus.md](cve-corpus.md)).
+
+The script requires comprehensive schema-v2 validation before publication,
+creates deterministic tar metadata, uploads to a draft without `--clobber`, and
+publishes only after upload. An exact existing release is a no-op; mismatched tags
+or assets fail without replacement. Publishing never mutates another tag. See
 [docs/pack-versioning.md](pack-versioning.md) for the tag scheme and the full
 provenance field reference.
 

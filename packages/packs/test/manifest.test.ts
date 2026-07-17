@@ -71,6 +71,13 @@ describe('@kgpacks/packs — validateManifest', () => {
     expect(validateManifest(m)).toEqual(m);
   });
 
+  it('accepts the immutable update version grammar for schema-v2 manifests', () => {
+    expect(validateManifest({ name: 'cve', version: '2026.07', schemaVersion: '2' }).version).toBe(
+      '2026.07',
+    );
+    expect(() => validateManifest({ name: 'cve', version: '2026.07' })).toThrow();
+  });
+
   it.each([
     ['missing name', { version: '1.0.0' }],
     ['non-string name', { name: 123, version: '1.0.0' }],

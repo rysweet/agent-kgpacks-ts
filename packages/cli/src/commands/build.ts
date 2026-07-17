@@ -30,7 +30,7 @@ import type { CliContext } from '../context.js';
 import { CliError } from '../errors.js';
 import { EXIT_USAGE } from '../exit-codes.js';
 import { printJson } from '../io.js';
-import { resolveExistingPackDir, resolveNewPackDir } from '../pack-dir.js';
+import { resolveNewPackDir } from '../pack-dir.js';
 import { parsePositiveInt } from '../parse.js';
 
 /** How a build verb resolves its destination pack directory. */
@@ -88,15 +88,6 @@ export function registerCreate(parent: Command, ctx: CliContext): Command {
     name: 'create',
     description: 'Build a new pack database from seed URLs or a config file.',
     resolvePackDir: resolveNewPackDir,
-  });
-}
-
-/** Registers `update` (resume / extend an existing pack) on `parent`. */
-export function registerUpdate(parent: Command, ctx: CliContext): Command {
-  return registerBuild(parent, ctx, {
-    name: 'update',
-    description: "Resume / extend an existing pack's graph from new seeds.",
-    resolvePackDir: resolveExistingPackDir,
   });
 }
 

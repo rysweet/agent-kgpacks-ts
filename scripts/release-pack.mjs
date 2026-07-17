@@ -24,10 +24,18 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createGzip } from 'node:zlib';
 import { createHash, createPrivateKey, createPublicKey, sign as edSign } from 'node:crypto';
-import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  createWriteStream,
+  createReadStream,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { basename, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -40,7 +48,7 @@ const has = (n) => args.includes(n);
 
 const pack = opt('--pack');
 const packsDir = opt('--packs-dir', join(root, 'data', 'packs'));
-const tag = opt('--tag', 'packs');
+const requestedTag = opt('--tag');
 const repo = opt('--repo'); // default: the gh-resolved repo for the cwd
 const notes = opt('--notes');
 const modelArg = opt('--model');
@@ -101,6 +109,10 @@ for (const [label, p] of [
 }
 
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+if (manifest.name !== pack) {
+  console.error(`manifest name ${JSON.stringify(manifest.name)} does not match --pack ${pack}`);
+  process.exit(2);
+}
 const model = modelArg ?? manifest.model ?? manifest.synthesis_model;
 
 // A dated release tag (`<name>-YYYY.MM[.N]`) pins an immutable version whose
@@ -109,13 +121,31 @@ const model = modelArg ?? manifest.model ?? manifest.synthesis_model;
 // @kgpacks/packs' packVersionFromReleaseTag (inlined so this script has no build
 // dependency on the compiled package).
 function deriveVersionFromTag(t) {
-  const m = /-(\d{4})\.(\d{2})(?:\.(\d+))?$/.exec(typeof t === 'string' ? t : '');
+  const escapedPack = pack.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const m = new RegExp(`^${escapedPack}-(\\d{4})\\.(\\d{2})(?:\\.(\\d+))?$`).exec(
+    typeof t === 'string' ? t : '',
+  );
   if (!m) return null;
   const month = Number(m[2]);
   if (month < 1 || month > 12) return null;
   return `${Number(m[1])}.${month}.${m[3] !== undefined ? Number(m[3]) : 0}`;
 }
-const version = deriveVersionFromTag(tag) ?? String(manifest.version ?? '0.0.0');
+const version = String(manifest.version ?? '');
+const manifestTag = `${pack}-v${version}`;
+const tag = requestedTag ?? manifestTag;
+const taggedVersion = deriveVersionFromTag(tag);
+if (requestedTag && tag !== manifestTag && taggedVersion === null) {
+  console.error(
+    `release tag ${tag} must equal the manifest-derived tag ${manifestTag} or be a matching dated tag`,
+  );
+  process.exit(2);
+}
+if (taggedVersion && taggedVersion !== version) {
+  console.error(
+    `release tag ${tag} implies version ${taggedVersion}, but manifest declares ${version}`,
+  );
+  process.exit(2);
+}
 
 // Provenance is mirrored from the pack manifest into the release index so the two
 // can be cross-checked; overrides + the release-time build.date fill any gaps.
@@ -130,7 +160,6 @@ function buildProvenance() {
   const embedding = { ...(base.embedding ?? {}) };
   if (model && !embedding.model) embedding.model = model;
   const build = { ...(base.build ?? {}) };
-  if (!build.date) build.date = new Date().toISOString();
   const provenance = {};
   if (Object.keys(corpus).length) provenance.corpus = corpus;
   if (Object.keys(embedding).length) provenance.embedding = embedding;
@@ -146,7 +175,20 @@ const provenance = buildProvenance();
 async function buildParts(outDir) {
   const tar = spawn(
     'tar',
-    ['--format=ustar', '-C', packDir, '-cf', '-', 'manifest.json', 'pack.db'],
+    [
+      '--format=ustar',
+      '--sort=name',
+      '--mtime=@0',
+      '--owner=0',
+      '--group=0',
+      '--numeric-owner',
+      '-C',
+      packDir,
+      '-cf',
+      '-',
+      'manifest.json',
+      'pack.db',
+    ],
     { stdio: ['ignore', 'pipe', 'inherit'] },
   );
   const gzip = createGzip({ level: 6 });
@@ -220,7 +262,7 @@ async function buildParts(outDir) {
     format: 'tar.gz-multipart-v1',
     model: model ?? undefined,
     provenance,
-    createdAt: new Date().toISOString(),
+    ...(provenance?.build?.date ? { createdAt: provenance.build.date } : {}),
     sha256: overall.digest('hex'),
     totalBytes,
     partSize,
@@ -276,29 +318,155 @@ function releaseExists(t) {
   return spawnSync('gh', a, { stdio: 'ignore' }).status === 0;
 }
 
-/** Create the release tag `t` if it does not exist, then upload `assets` to it. */
-function publishTo(t) {
-  if (!releaseExists(t)) {
-    const createArgs = [
-      'release',
-      'create',
-      t,
-      '--title',
-      t === 'packs' ? 'Knowledge packs' : `Knowledge pack ${pack} ${version}`,
-      '--notes',
-      notes ?? `Knowledge-pack release assets. Install with: wikigr pack pull <name>`,
-    ];
-    if (repo) createArgs.push('--repo', repo);
-    gh(createArgs);
+function releaseIsDraft(t) {
+  const args = ['release', 'view', t, '--json', 'isDraft', '--jq', '.isDraft'];
+  if (repo) args.push('--repo', repo);
+  const result = spawnSync('gh', args, { encoding: 'utf8' });
+  return result.status === 0 && String(result.stdout).trim() === 'true';
+}
+
+function remoteAssets(t) {
+  const args = [
+    'release',
+    'view',
+    t,
+    '--json',
+    'assets',
+    '--jq',
+    '.assets[] | [.name,.size,.digest] | @tsv',
+  ];
+  if (repo) args.push('--repo', repo);
+  const result = spawnSync('gh', args, { encoding: 'utf8' });
+  if (result.status !== 0) return null;
+  return new Map(
+    String(result.stdout ?? '')
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        const [name, size, digest] = line.split('\t');
+        return [name, { size: Number(size), digest }];
+      }),
+  );
+}
+
+async function hashAsset(path) {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return `sha256:${hash.digest('hex')}`;
+}
+
+async function matchingRemoteAssets(t, assets) {
+  const remote = remoteAssets(t);
+  if (!remote) return null;
+  const local = new Map();
+  for (const asset of assets) {
+    local.set(basename(asset), {
+      path: asset,
+      size: statSync(asset).size,
+      digest: await hashAsset(asset),
+    });
   }
-  const uploadArgs = ['release', 'upload', t, ...currentAssets, '--clobber'];
+  for (const [name, expected] of remote) {
+    const asset = local.get(name);
+    if (!asset || expected.size !== asset.size || expected.digest !== asset.digest) return null;
+  }
+  return { remote, local };
+}
+
+async function exactReleaseExists(t, assets) {
+  const matching = await matchingRemoteAssets(t, assets);
+  return (
+    matching !== null &&
+    matching.remote.size === matching.local.size &&
+    assets.every(
+      (asset) =>
+        matching.remote.get(basename(asset))?.digest ===
+        matching.local.get(basename(asset))?.digest,
+    )
+  );
+}
+
+async function waitForExactReleaseAssets(t, assets) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    if (await exactReleaseExists(t, assets)) return true;
+    if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  return false;
+}
+
+/** Create a draft release and publish it only after immutable assets are uploaded. */
+async function publishTo(t) {
+  if (releaseExists(t)) {
+    if (await exactReleaseExists(t, currentAssets)) {
+      if (releaseIsDraft(t)) {
+        const publishArgs = ['release', 'edit', t, '--draft=false'];
+        if (repo) publishArgs.push('--repo', repo);
+        gh(publishArgs);
+        return true;
+      }
+      return false;
+    }
+    if (releaseIsDraft(t)) {
+      const matching = await matchingRemoteAssets(t, currentAssets);
+      if (matching) {
+        const missing = currentAssets.filter((asset) => !matching.remote.has(basename(asset)));
+        if (missing.length > 0) {
+          const uploadArgs = ['release', 'upload', t, ...missing];
+          if (repo) uploadArgs.push('--repo', repo);
+          gh(uploadArgs);
+        }
+        if (!(await waitForExactReleaseAssets(t, currentAssets))) {
+          console.error(
+            `release ${t} assets could not be verified; leaving the release as a draft`,
+          );
+          process.exit(1);
+        }
+        const publishArgs = ['release', 'edit', t, '--draft=false'];
+        if (repo) publishArgs.push('--repo', repo);
+        gh(publishArgs);
+        return true;
+      }
+    }
+    console.error(`release ${t} already exists with mismatched assets; refusing to overwrite it`);
+    process.exit(1);
+  }
+  const createArgs = [
+    'release',
+    'create',
+    t,
+    '--draft',
+    '--title',
+    `Knowledge pack ${pack} ${version}`,
+    '--notes',
+    notes ?? `Knowledge-pack release assets. Install with: wikigr pack pull <name>`,
+  ];
+  if (repo) createArgs.push('--repo', repo);
+  gh(createArgs);
+  const uploadArgs = ['release', 'upload', t, ...currentAssets];
   if (repo) uploadArgs.push('--repo', repo);
   gh(uploadArgs);
+  if (!(await waitForExactReleaseAssets(t, currentAssets))) {
+    console.error(`release ${t} assets could not be verified; leaving the release as a draft`);
+    process.exit(1);
+  }
+  const publishArgs = ['release', 'edit', t, '--draft=false'];
+  if (repo) publishArgs.push('--repo', repo);
+  gh(publishArgs);
+  return true;
 }
 // Assets to publish — set in main() once built.
 let currentAssets = [];
 
 async function main() {
+  if (manifest.schemaVersion === '2') {
+    const { validateKnowledgePack } = await import('../packages/ingestion/dist/index.js');
+    await validateKnowledgePack(packDir);
+  } else if (!dryRun) {
+    throw new Error(
+      'refusing to publish a pack without comprehensive schema-v2 validation; rebuild it as an update-capable pack',
+    );
+  }
   const outDir = opt('--out-dir', await mkdtemp(join(tmpdir(), 'kgpacks-release-')));
   mkdirSync(outDir, { recursive: true });
   console.error(`[release] packaging pack=${pack} v${version} → ${outDir}`);
@@ -336,13 +504,11 @@ async function main() {
     return;
   }
 
-  // Publish to the requested tag (immutable when dated), then move the stable
-  // `packs` latest-pointer to the same assets so `wikigr pack pull <name>` (which
-  // defaults to `packs`) keeps working and always resolves the newest version.
-  publishTo(tag);
-  if (tag !== 'packs') publishTo('packs');
+  const published = await publishTo(tag);
   console.error(
-    `[release] uploaded ${assets.length} asset(s) to ${tag}${tag !== 'packs' ? ' (+ packs pointer)' : ''}`,
+    published
+      ? `[release] uploaded and verified ${assets.length} asset(s) on ${tag}`
+      : `[release] ${tag} already contains the exact assets; nothing changed`,
   );
   console.log(JSON.stringify({ tag, repo: repo ?? '(default)', ...index }, null, 2));
 }

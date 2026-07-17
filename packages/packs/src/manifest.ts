@@ -16,6 +16,7 @@ export const MANIFEST_FILENAME = 'manifest.json';
 // Ported verbatim from the upstream source: 1–64 chars, alphanumeric lead, then
 // ASCII letters/digits/underscore/hyphen. Anchored + bounded ⇒ ReDoS-safe.
 export const PACK_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
+export const IMMUTABLE_PACK_VERSION_RE = /^[0-9A-Za-z]+(?:[._-][0-9A-Za-z]+)*$/;
 
 const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -153,9 +154,13 @@ export function validateManifest(value: unknown): PackManifest {
       `invalid pack name ${JSON.stringify(name)} (must match PACK_NAME_RE)`,
     );
   }
-  if (typeof version !== 'string' || !isValidSemver(version)) {
+  const validVersion =
+    typeof version === 'string' &&
+    (isValidSemver(version) ||
+      (value.schemaVersion === '2' && IMMUTABLE_PACK_VERSION_RE.test(version)));
+  if (!validVersion) {
     throw new ManifestValidationError(
-      `invalid version ${JSON.stringify(version)} (must be valid SemVer 2.0)`,
+      `invalid version ${JSON.stringify(version)} (must be SemVer 2.0, or an immutable schema-v2 version)`,
     );
   }
   if ('description' in value && typeof value.description !== 'string') {

@@ -14,14 +14,15 @@ Commands:
                          (multi-part, integrity-checked).
   list                   List installed packs.
   info <pack>            Print a pack's full manifest.
-  validate <pack>        Validate a pack's manifest.
+  validate <pack>        Validate a pack's manifest, payloads, graph
+                         provenance, and indexes.
   remove <pack>          Remove an installed pack.
   create [options]       Build a new pack database from seed URLs or a config
                          file.
   eval [options]         Evaluate a pack: with-pack vs training-only, scored by
                          a pinned judge.
-  update [options]       Resume / extend an existing pack's graph from new
-                         seeds.
+  update [options]       Build a new immutable pack version from a completed
+                         base and CVE delta.
 "
 `;
 
@@ -39,14 +40,15 @@ Commands:
                          (multi-part, integrity-checked).
   list                   List installed packs.
   info <pack>            Print a pack's full manifest.
-  validate <pack>        Validate a pack's manifest.
+  validate <pack>        Validate a pack's manifest, payloads, graph
+                         provenance, and indexes.
   remove <pack>          Remove an installed pack.
   create [options]       Build a new pack database from seed URLs or a config
                          file.
   eval [options]         Evaluate a pack: with-pack vs training-only, scored by
                          a pinned judge.
-  update [options]       Resume / extend an existing pack's graph from new
-                         seeds.
+  update [options]       Build a new immutable pack version from a completed
+                         base and CVE delta.
 "
 `;
 
@@ -102,7 +104,7 @@ Options:
 exports[`help/usage golden snapshots > matches the pack validate help snapshot > pack validate 1`] = `
 "Usage: wikigr pack validate [options] <pack>
 
-Validate a pack's manifest.
+Validate a pack's manifest, payloads, graph provenance, and indexes.
 
 Arguments:
   pack        pack directory name
@@ -146,8 +148,8 @@ Commands:
                                      the installed packs.
   create [options]                   Build a new pack database from seed URLs
                                      or a config file.
-  update [options]                   Resume / extend an existing pack's graph
-                                     from new seeds.
+  update [options]                   Build a new immutable pack version from a
+                                     completed base and CVE delta.
   research-sources [options]         Discover candidate source URLs reachable
                                      from the seeds (fetch-only).
   pack                               Manage installed knowledge packs.

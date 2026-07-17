@@ -12,20 +12,57 @@ changing the resulting pack**:
 Both apply to `scripts/build-cve-pack.mjs` (the `pnpm cve:build` entry point). The
 output `pack.db` is **identical** whether or not a build was resumed or pipelined.
 
+## Resume is not an incremental update
+
+Resume recovers one interrupted build of one source snapshot. It does not apply a
+new corpus delta to a completed pack, compare source payloads, replace changed
+CVEs, or remove facts that disappeared from a changed record.
+
+The checkpoint parameter hash includes the ordered source-file content digest,
+source path, target version, corpus revision, build options, and
+tool/schema/adapter versions. A changed source tree or implementation version is
+therefore rejected rather than combined with an old partial build:
+
+```bash
+pnpm cve:build --src .scratch/cve/extracted/cves \
+  --out data/packs/cve/pack.db \
+  --no-resume
+```
+
+The resume loader's article-title skip exists only to make replay after a crash
+idempotent. It cannot detect a changed CVE with the same ID. Completed,
+provenance-capable packs are updated separately:
+
+```bash
+wikigr update --base data/packs/cve-2026.06 --delta delta.ndjson \
+  --output data/packs/cve-2026.07 --version 2026.7.0
+wikigr update --resume data/packs/cve-2026.07.work
+```
+
+Incremental work uses `<output>.work/update-state.json`, records every delta
+ordinal/key/hash, and never reads or adopts a full-build checkpoint. Its durable
+graph-copy checkpoints are transactional and identify processed delta records. The
+completion checkpoint is written only after the staged database, indexes, manifest,
+and checksums validate; resume then publishes those exact staged bytes rather than
+rebuilding a second artifact.
+
 ## Resumable builds
 
 ### The checkpoint sidecar
 
-As it makes durable progress, the builder writes a `<out>.build-checkpoint.json`
-sidecar next to the output pack (e.g. `data/packs/cve/pack.db.build-checkpoint.json`).
-It records exactly what has been durably loaded:
+As it makes durable progress, the builder writes a sibling
+`<pack-dir>.build-work.build-checkpoint.json` sidecar (for example,
+`data/packs/cve.build-work.build-checkpoint.json`). The database itself is built
+in a sibling staging directory so `data/packs/cve` appears only after the complete
+pack directory is atomically renamed. The sidecar records exactly what has been
+durably loaded:
 
 ```jsonc
 {
   "version": 1,
   "batchIndex": 1284, // last durably-checkpointed batch
   "sourceOffset": 123264, // position in the deterministic record scan
-  "tmpOut": "data/packs/cve/pack.db.building-9f2c…", // the partial build DB to reopen
+  "tmpOut": "data/packs/cve.building-9f2c…/pack.db", // staged DB to reopen
   "counts": { "articles": 123264, "skipped": 0 },
   "paramsHash": "9f2c…", // hash of build params (see below)
   "updatedAt": "2025-06-15T02:41:07Z",
@@ -65,13 +102,13 @@ pnpm cve:build --src .scratch/cve/cves --out data/packs/cve/pack.db --no-resume
 
 On resume the builder:
 
-1. **Validates the parameters hash.** The checkpoint records a hash of the inputs
-   that affect output (source path, `--year`, `--limit`, `--batch`, embedding
-   model, `--with-entity-relations`). If the current parameters do not match, the
-   builder **refuses to resume** and tells you to `--no-resume` — a checkpoint from
-   a different build can never corrupt a new one. (Resume is also refused for a
-   `--with-entity-relations` build: those Entity→Entity edges are materialized in a
-   single final pass and cannot be reconstructed from a mid-build checkpoint.)
+1. **Validates the parameters hash.** The checkpoint records a hash of the source
+   path, ordered source bytes, target/corpus identity, implementation versions,
+   and build settings (`--year`, `--limit`, `--batch`, embedding model,
+   `--with-entity-relations`). If the current settings do not match, the builder
+   **refuses to resume** and tells you to `--no-resume`. Existing
+   `RelationSupport` rows restore the deferred final-pass relationship plan, so
+   provenance-capable `--with-entity-relations` builds can also resume safely.
 2. **Discards the temp DB's WAL.** An abrupt crash can leave a torn trailing WAL
    record that LadybugDB refuses to replay. The checkpointed **main** DB (all
    batches up to the last sidecar) is intact, so the build reopens the recorded

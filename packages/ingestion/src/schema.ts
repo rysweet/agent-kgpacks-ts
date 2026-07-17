@@ -73,6 +73,31 @@ export const NODE_TABLE_DDL: readonly string[] = [
      description STRING,
      PRIMARY KEY(entity_id)
    )`,
+  `CREATE NODE TABLE ArticleSource(
+     title STRING,
+     payload STRING,
+     payload_sha256 STRING,
+     extractor_version STRING,
+     PRIMARY KEY(title)
+   )`,
+  `CREATE NODE TABLE RelationSupport(
+     support_id STRING,
+     article_title STRING,
+     signature STRING,
+     source_entity_id STRING,
+     target_entity_id STRING,
+     relation STRING,
+     context STRING,
+     extractor_version STRING,
+     PRIMARY KEY(support_id)
+   )`,
+  `CREATE NODE TABLE UpdateApplication(
+     article_title STRING,
+     source_payload_sha256 STRING,
+     base_payload_sha256 STRING,
+     result STRING,
+     PRIMARY KEY(article_title)
+   )`,
 ];
 
 /** Relationship-table DDL (created after all node tables exist). */

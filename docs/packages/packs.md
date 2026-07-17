@@ -32,17 +32,17 @@ external contracts are preserved verbatim:
   raises a typed error (Python `raise` parity). There are no silent failures and
   no partial writes.
 
+> **Validation scope.** `validateManifest` and `loadManifestFromDir` validate
+> manifest structure. `wikigr pack validate` additionally performs comprehensive
+> payload, graph-provenance, count, orphan, relationship, checksum, and vector-index
+> validation for schema-v2 update-capable packs. Legacy manifests retain
+> structural-only validation and cannot be incremental-update bases.
+
 > **Scope (Phase 1):** read / install / validate / list / remove. Pack
 > **creation** (building a new `.tar.gz` from a graph) is Phase 2 and is not part
 > of this package's surface. Network install-from-URL (and its SSRF/HTTPS-only
 > allow-listing) is also out of Phase-1 scope — `installPack` takes a **local
 > archive path** only.
-
-> **Status — intended Phase-1 surface.** This document is the design spec for the
-> package: it describes the **target** API and behavior, pinned down by the test
-> suite ([Testing](#testing)) as the modules land. Treat the signatures, error
-> types, and messages below as the contract to implement against, not yet a record
-> of shipped code.
 
 ## Installation
 
@@ -86,7 +86,7 @@ for (const pack of listPacks(installRoot)) {
 
 // 3. Inspect one pack by name.
 const info = packInfo(installRoot, 'world-history');
-console.log(info.manifest.graph_stats); // { node_count: 12000, edge_count: 48000 }
+console.log(info.manifest.graph_stats); // { articles: 12000, entities: 48000, size_mb: 512.4 }
 
 // 4. Read a manifest directly off disk.
 const manifest = loadManifestFromDir('./packs/world-history');
@@ -129,9 +129,11 @@ never strips fields it does not model.
 
 ```ts
 interface GraphStats {
-  node_count: number; // non-negative integer
-  edge_count: number; // non-negative integer
-  [extra: string]: number; // additional numeric graph metrics are preserved
+  articles?: number;
+  entities?: number;
+  relationships?: number;
+  size_mb?: number;
+  [stat: string]: number | undefined;
 }
 
 interface EvalScores {
@@ -140,7 +142,7 @@ interface EvalScores {
 
 interface PackManifest {
   name: string; // required — must match PACK_NAME_RE
-  version: string; // required — must be valid SemVer 2.0
+  version: string; // SemVer, or schema-v2 immutable version grammar
   description?: string;
   graph_stats?: GraphStats;
   eval_scores?: EvalScores;
@@ -152,9 +154,9 @@ interface PackManifest {
 | Field          | Required | Validated when present                                                                                                                                                                  |
 | -------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `name`         | yes      | matches [`PACK_NAME_RE`](#pack_name_re)                                                                                                                                                 |
-| `version`      | yes      | valid SemVer 2.0 (see [`isValidSemver`](#isvalidsemverv-string-boolean))                                                                                                                |
+| `version`      | yes      | SemVer 2.0; schema-v2 manifests may use `[0-9A-Za-z]+(?:[._-][0-9A-Za-z]+)*`                                                                                                            |
 | `description`  | no       | string                                                                                                                                                                                  |
-| `graph_stats`  | no       | `node_count` / `edge_count` are non-negative integers; extras numeric                                                                                                                   |
+| `graph_stats`  | no       | every value is a non-negative finite number; no particular key is required                                                                                                              |
 | `eval_scores`  | no       | every value is a finite number                                                                                                                                                          |
 | `provenance`   | no       | section string fields (`corpus`/`embedding`/`build`) are strings; `embedding.dimensions` numeric; nested dangerous keys stripped (see [docs/pack-versioning.md](../pack-versioning.md)) |
 | _(other keys)_ | no       | passed through untouched (lossless round-trip)                                                                                                                                          |
@@ -186,9 +188,9 @@ typed `PackManifest`. **Throws** [`ManifestValidationError`](#class-manifestvali
 with a descriptive message on any violation:
 
 - missing or non-string `name`, or `name` not matching `PACK_NAME_RE`;
-- missing or non-string `version`, or `version` not valid SemVer;
-- `graph_stats` present but malformed (`node_count` / `edge_count` missing,
-  non-integer, or negative);
+- missing/non-string `version`, or a version outside the applicable grammar;
+- `graph_stats` present but not an object, or containing a non-finite,
+  non-numeric, or negative value;
 - `eval_scores` present but containing a non-finite or non-numeric value.
 
 Dangerous JSON keys (`__proto__`, `constructor`, `prototype`) are never copied
@@ -200,7 +202,7 @@ import { validateManifest } from '@kgpacks/packs';
 const m = validateManifest({
   name: 'world-history',
   version: '1.2.0',
-  graph_stats: { node_count: 12000, edge_count: 48000 },
+  graph_stats: { articles: 12000, entities: 48000, size_mb: 512.4 },
 });
 // m is typed PackManifest
 
@@ -275,8 +277,9 @@ parseVersion('1.4.2-rc.1+build.9');
 
 ### `isValidSemver(v: string): boolean`
 
-Returns `true` if `v` is a valid SemVer 2.0 string, `false` otherwise. This is the
-predicate used by `validateManifest` for the `version` field.
+Returns `true` if `v` is a valid SemVer 2.0 string, `false` otherwise. Legacy
+manifests require this grammar; schema-v2 immutable manifests additionally accept
+`IMMUTABLE_PACK_VERSION_RE`.
 
 ```ts
 isValidSemver('1.0.0'); // true
@@ -327,11 +330,11 @@ latestVersion([]); // undefined
 
 ### `packVersionFromReleaseTag(tag: string): string`
 
-Derives an **unpadded** SemVer 2.0 pack version from an immutable dated release
+Derives an **unpadded** SemVer 2.0 pack version from a conventional dated release
 tag `<name>-YYYY.MM[.N]`. The tag zero-pads the month for readable, sortable tags;
 the version must not (SemVer forbids leading zeros in the numeric core). Throws
 [`ManifestValidationError`](#manifestvalidationerror) for a tag with no dated
-version (the `packs` latest-pointer, `cve`, an empty string, …). See
+version (the mutable `packs` release, `cve`, an empty string, …). See
 [docs/pack-versioning.md](../pack-versioning.md).
 
 ```ts

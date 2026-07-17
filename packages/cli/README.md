@@ -42,7 +42,7 @@ RUNTIME
   pack install <archive.tar.gz>  Install a pack from a local gzip-compressed tarball.
   pack list                      List installed packs.
   pack info <pack>               Print a pack's full manifest.
-  pack validate <pack>           Validate a pack's manifest.
+  pack validate <pack>           Validate manifest and, for schema-v2 packs, payloads/graph/indexes.
   pack remove <pack>             Remove an installed pack.
 
 INGESTION
@@ -50,10 +50,9 @@ INGESTION
           [--max-depth <n>] [--max-articles <n>]
           [--chunk-size <n>] [--chunk-overlap <n>]
                                  Build a new pack database from seed URLs / a config.
-  update  --pack <name> (--seeds <url...> | --config <file>)
-          [--max-depth <n>] [--max-articles <n>]
-          [--chunk-size <n>] [--chunk-overlap <n>]
-                                 Resume / extend an existing pack's graph.
+  update  --base <pack-dir> --delta <file> --output <pack-dir> --version <version>
+          [--work-dir <dir>]
+  update  --resume <work-dir>    Build or resume an immutable incremental CVE update.
   research-sources --seeds <url...> [--max-depth <n>] [--max-articles <n>]
                                  Discover / seed candidate source URLs for a domain.
   pack create  ...               Alias of `create`, under the `pack` group.
@@ -129,23 +128,48 @@ wikigr create --pack ada \
   --max-depth 1 --max-articles 25
 ```
 
-### `update` — resume / extend a pack
+### `update` — immutable incremental CVE update
 
 ```
-wikigr [--packs-dir <dir>] update --pack <name> (--seeds <url...> | --config <file>)
-       [--max-depth <n>] [--max-articles <n>] [--chunk-size <n>] [--chunk-overlap <n>]
+wikigr update --base <pack-dir> --delta <file> --output <pack-dir> \
+  --version <version> [--work-dir <dir>]
+wikigr update --resume <work-dir>
 ```
 
-Opens an **existing** pack and re-runs the pipeline with additional seeds,
-extending its graph in place. The pack must already exist — an unknown pack exits
-`3` (pack not found). Resume/extend semantics come from `buildPack`'s title-level
-dedup: already-loaded articles are skipped, new ones are appended. Flags, config
-handling, and the JSON-counts output are identical to [`create`](#create--build-a-new-pack)
-(the counts reflect what this run loaded).
+Fresh mode requires all four named inputs. The base is opened read-only and must
+be a completed schema-v2 CVE pack containing exact source payloads and relation
+support. The target version must differ from the base and match
+`[0-9A-Za-z]+(?:[._-][0-9A-Za-z]+)*`. Delta files are NDJSON:
+one CVE 5.x record per line. Records are deterministic upserts keyed by `cveId`;
+duplicate keys and explicit delete envelopes are rejected before work starts.
+The CVE adapter emits compact JSON payload bytes, so transport-only whitespace
+does not turn an otherwise identical record into a modification.
 
 ```sh
-wikigr update --pack ada --seeds https://en.wikipedia.org/wiki/Analytical_Engine
+wikigr update \
+  --base data/packs/cve-2026.06 \
+  --delta .scratch/cve/delta.ndjson \
+  --output data/packs/cve-2026.07 \
+  --version 2026.7.0
 ```
+
+Identical payload bytes are preserved without re-embedding, changed articles are
+replaced, and missing keys are added. Omission never deletes. The engine rebuilds
+the complete target database and both vector indexes from the final graph, then
+validates checksums, counts, provenance, relationships, orphans, and exact index
+membership before an atomic rename. The base is never modified.
+
+Work defaults to `<output>.work`. Fresh mode refuses an existing work directory
+and prints resume guidance. `--resume` is mutually exclusive with fresh options
+and verifies the saved paths, input hashes, and tool/schema/adapter versions.
+Transactional graph-copy checkpoints track processed delta ordinals, keys, and
+hashes. The completed-work checkpoint is made durable only after staging validates,
+so resume publishes the exact staged payload instead of rebuilding it.
+This state is independent of the CVE full builder's sibling
+`<pack-dir>.build-work.build-checkpoint.json`; see
+[resumable builds](../../docs/resumable-build.md).
+An existing valid output with the same `buildId` is a no-op success. Every other
+output collision fails without overwrite.
 
 ### `research-sources` — discover candidate URLs
 

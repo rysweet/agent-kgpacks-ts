@@ -25,8 +25,9 @@ import { EXIT_PACK_NOT_FOUND, EXIT_USAGE } from '../exit-codes.js';
 import { printJson } from '../io.js';
 import { pullPack } from '../pack-pull.js';
 import { resolveExistingPackDir } from '../pack-dir.js';
-import { registerCreate, registerUpdate } from './build.js';
+import { registerCreate } from './build.js';
 import { registerEval } from './eval.js';
+import { registerUpdate } from './update.js';
 
 /** Registers the `pack` command group on `parent`. */
 export function registerPack(parent: Command, ctx: CliContext): void {
@@ -107,14 +108,26 @@ export function registerPack(parent: Command, ctx: CliContext): void {
 
   pack
     .command('validate')
-    .description("Validate a pack's manifest.")
+    .description("Validate a pack's manifest, payloads, graph provenance, and indexes.")
     .argument('<pack>', 'pack directory name')
-    .action((name: string, _opts: unknown, command: Command) => {
+    .action(async (name: string, _opts: unknown, command: Command) => {
       const dir = resolveExistingPackDir(packsDirOf(command), name);
       if (!existsSync(join(dir, MANIFEST_FILENAME))) {
         throw new CliError(`pack not found: ${name}`, EXIT_PACK_NOT_FOUND);
       }
       const manifest = loadManifestFromDir(dir);
+      if (manifest.schemaVersion === '2') {
+        const { validateKnowledgePack } = await import('@kgpacks/ingestion');
+        const validation = await validateKnowledgePack(dir);
+        printJson(ctx.io, {
+          valid: true,
+          name: manifest.name,
+          version: manifest.version,
+          buildId: manifest.buildId,
+          counts: validation.counts,
+        });
+        return;
+      }
       printJson(ctx.io, { valid: true, name: manifest.name, version: manifest.version });
     });
 
