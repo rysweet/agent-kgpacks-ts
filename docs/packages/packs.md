@@ -646,6 +646,10 @@ true })` for isolated, self-cleaning temp directories.
 
 ## See also
 
+- [Incremental update reference](../reference/incremental-update.md) — the
+  schema-v2 update, complete validation, resume, and publication API.
+- [Incremental update how-to](../howto/update-knowledge-pack.md) — safely operate
+  a CVE delta update.
 - [docs/packages/db.md](./db.md) — reading the pack's graph database once it's
   installed.
 - [docs/monorepo.md](../monorepo.md) — workspace layout, scripts, configuration,

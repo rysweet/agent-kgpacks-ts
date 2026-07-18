@@ -105,6 +105,13 @@ pnpm --filter @kgpacks/frontend dev
 
 ## Documentation
 
+- **[Incremental CVE update tutorial](docs/tutorials/incremental-cve-update.md) —
+  apply and validate a committed mixed CVE delta end to end.**
+- [Incremental update how-to](docs/howto/update-knowledge-pack.md) — production
+  update, resume, validation, collision, and failure procedures.
+- [Incremental update reference](docs/reference/incremental-update.md) — CLI,
+  TypeScript API, configuration, delta, validation, resume, and publication
+  contracts.
 - **[docs/using-the-cve-pack.md](docs/using-the-cve-pack.md) — install & use the
   prebuilt CVE knowledge pack (start here to use the database).**
 - [docs/cve.md](docs/cve.md) — how the CVE pack is built and published.

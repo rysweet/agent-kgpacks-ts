@@ -131,6 +131,10 @@ the run continued from a checkpoint.
 
 ## Related docs
 
+- [Incremental update how-to](howto/update-knowledge-pack.md) — resume a
+  copy-on-write delta update, which uses a separate workspace and state machine.
+- [Incremental update reference](reference/incremental-update.md) — durable
+  phases and resume reconciliation for schema-v2 pack updates.
 - [docs/cve.md](cve.md) — the CVE build pipeline, corpus, and mapping.
 - [docs/entity-graph.md](entity-graph.md) — scalable `--with-entity-relations` loads.
 - [docs/pack-versioning.md](pack-versioning.md) — provenance stamped at build time.
