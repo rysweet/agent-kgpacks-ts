@@ -71,11 +71,9 @@ On resume the builder:
 
 1. **Validates the parameters hash.** The checkpoint records a hash of the inputs
    that affect output (source path, `--year`, `--limit`, `--batch`, embedding
-   model, `--with-entity-relations`). If the current parameters do not match, the
+   model). If the current parameters do not match, the
    builder **refuses to resume** and tells you to `--no-resume` — a checkpoint from
-   a different build can never corrupt a new one. (Resume is also refused for a
-   `--with-entity-relations` build: those Entity→Entity edges are materialized in a
-   single final pass and cannot be reconstructed from a mid-build checkpoint.)
+   a different build can never corrupt a new one.
 2. **Discards the temp DB's WAL.** An abrupt crash can leave a torn trailing WAL
    record that LadybugDB refuses to replay. The checkpointed **main** DB (all
    batches up to the last sidecar) is intact, so the build reopens the recorded
@@ -169,7 +167,7 @@ the run continued from a checkpoint.
 ## Related docs
 
 - [docs/cve.md](cve.md) — the CVE build pipeline, corpus, and mapping.
-- [docs/entity-graph.md](entity-graph.md) — scalable `--with-entity-relations` loads.
+- [docs/entity-graph.md](entity-graph.md) — entity graph loading and traversal.
 - [docs/pack-versioning.md](pack-versioning.md) — provenance stamped at build time.
 - [Incremental CVE update](howto/incremental-cve-update.md) — immutable update and
   resume workflow.

@@ -116,6 +116,8 @@ export interface ArticleLink {
  * unit tests inject a deterministic fake so no model is downloaded.
  */
 export interface Embedder {
+  /** Stable model/configuration identity required by resumable incremental builds. */
+  readonly modelId?: string;
   generate(texts: string[]): Promise<Float32Array[]>;
 }
 

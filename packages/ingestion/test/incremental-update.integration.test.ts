@@ -27,6 +27,7 @@ const BASE_SOURCE = join(FIXTURES, 'base.ndjson');
 const DELTA = join(FIXTURES, 'delta.ndjson');
 
 const embedder: Embedder = {
+  modelId: 'test-deterministic-embedder-v1',
   async generate(texts) {
     return texts.map((text) => {
       const out = new Float32Array(768);
@@ -128,6 +129,53 @@ describe('incremental CVE pack update', () => {
   });
 
   afterAll(() => rmSync(temp, { recursive: true, force: true }));
+
+  it('canonicalizes object keys by Unicode scalar value', async () => {
+    const source = join(temp, 'unicode-source.ndjson');
+    const record = JSON.parse(readFileSync(BASE_SOURCE, 'utf8').split('\n')[0]);
+    record['\uE000'] = 'private-use';
+    record['😀'] = 'astral';
+    writeFileSync(source, `${JSON.stringify(record)}\n`);
+    const unicodePack = join(temp, 'unicode-pack');
+
+    await buildCvePack({
+      source,
+      output: unicodePack,
+      packId: 'cve-unicode',
+      version: '1.0.0',
+      embedder,
+    });
+
+    const sources = await rows<{ payload: string }>(
+      unicodePack,
+      'MATCH (s:ArticleSource) RETURN s.payload AS payload',
+    );
+    expect(sources[0].payload.indexOf('"\uE000"')).toBeLessThan(sources[0].payload.indexOf('"😀"'));
+  });
+
+  it('isolates concurrent full-build staging and publishes exactly one output', async () => {
+    const concurrentOutput = join(temp, 'concurrent-base');
+    const builds = await Promise.allSettled([
+      buildCvePack({
+        source: BASE_SOURCE,
+        output: concurrentOutput,
+        packId: 'cve-concurrent',
+        version: '1.0.0',
+        embedder,
+      }),
+      buildCvePack({
+        source: BASE_SOURCE,
+        output: concurrentOutput,
+        packId: 'cve-concurrent',
+        version: '1.0.0',
+        embedder,
+      }),
+    ]);
+
+    expect(builds.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(builds.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    await expect(validateKnowledgePack(concurrentOutput)).resolves.toMatchObject({ valid: true });
+  });
 
   it('adds, replaces, preserves, rebuilds indexes, and records immutable lineage', async () => {
     writeFileSync(`${output}.build-checkpoint.json`, '{"sourceOffset":999}\n');
@@ -341,6 +389,14 @@ describe('incremental CVE pack update', () => {
       /key does not match/i,
     ],
     ['malformed records', { not: 'a CVE record' }, /valid CVE stable key/i],
+    [
+      'malformed CVE identifiers',
+      {
+        cveMetadata: { cveId: 'CVE-2025-1', state: 'PUBLISHED' },
+        containers: { cna: { descriptions: [{ lang: 'en', value: 'invalid identifier' }] } },
+      },
+      /valid CVE stable key/i,
+    ],
   ])('preflights and rejects %s before creating work', async (name, record, expected) => {
     const delta = join(temp, `${name.replace(/\W+/g, '-')}.ndjson`);
     const rejectedOutput = join(temp, `${name.replace(/\W+/g, '-')}-output`);
@@ -466,19 +522,22 @@ describe('incremental CVE pack update', () => {
     expect(treeDigest(base)).toBe(baseDigest);
   });
 
-  it('rejects a malformed target version before creating work', async () => {
-    const invalidOutput = join(temp, 'invalid-version');
-    await expect(
-      updateKnowledgePack({
-        base,
-        delta: DELTA,
-        output: invalidOutput,
-        version: '2026..07',
-        embedder,
-      }),
-    ).rejects.toThrow(/invalid target version/i);
-    expect(existsSync(`${invalidOutput}.work`)).toBe(false);
-  });
+  it.each(['2026..07', 'foo'])(
+    'rejects malformed or undiscoverable target version %s before creating work',
+    async (version) => {
+      const invalidOutput = join(temp, `invalid-version-${version.replace(/\W+/g, '-')}`);
+      await expect(
+        updateKnowledgePack({
+          base,
+          delta: DELTA,
+          output: invalidOutput,
+          version,
+          embedder,
+        }),
+      ).rejects.toThrow(/invalid target version/i);
+      expect(existsSync(`${invalidOutput}.work`)).toBe(false);
+    },
+  );
 
   it('rejects entity metadata not emitted by the retained source payloads', async () => {
     const corrupted = join(temp, 'corrupted-entity-pack');
@@ -619,6 +678,13 @@ describe('incremental CVE pack update', () => {
     const stagedPayload = readFileSync(join(workDir, 'staging', 'pack.db'));
     const stagedManifest = readFileSync(join(workDir, 'staging', 'manifest.json'));
     expect(existsSync(`${join(resumedOutput, 'pack.db')}.build-checkpoint.json`)).toBe(false);
+
+    await expect(
+      updateKnowledgePack({
+        resume: workDir,
+        embedder: { ...embedder, modelId: 'different-test-embedder' },
+      }),
+    ).rejects.toThrow(/embedding model changed/i);
 
     await expect(
       updateKnowledgePack({

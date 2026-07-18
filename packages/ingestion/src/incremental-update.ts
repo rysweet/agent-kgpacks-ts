@@ -7,6 +7,7 @@ import {
   fsyncSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   openSync,
   readFileSync,
   realpathSync,
@@ -19,11 +20,16 @@ import {
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { Database, type Connection } from '@kgpacks/db';
-import { BgeEmbedder } from '@kgpacks/embeddings';
-import { loadManifestFromDir, saveManifest, type PackManifest } from '@kgpacks/packs';
+import { BGE_MODEL_ID, BgeEmbedder } from '@kgpacks/embeddings';
+import {
+  isValidSemver,
+  loadManifestFromDir,
+  saveManifest,
+  type PackManifest,
+} from '@kgpacks/packs';
 
 import { chunkArticle } from './chunking.js';
-import { CVE_ADAPTER_VERSION, cveToGraph } from './cve-adapter.js';
+import { CVE_ADAPTER_VERSION, CVE_ID_RE, cveToGraph } from './cve-adapter.js';
 import { KnowledgePackUpdateError, KnowledgePackValidationError } from './errors.js';
 import { loadPack, type LoadableArticle } from './loader.js';
 import { createPackWriter } from './streaming-loader.js';
@@ -35,11 +41,11 @@ const VERSION_RE = /^[0-9A-Za-z]+(?:[._-][0-9A-Za-z]+)*$/;
 const SHA256_RE = /^[a-f0-9]{64}$/;
 const STATE_FILE = 'update-state.json';
 const METADATA_ID = 'pack';
-const PROVENANCE = {
+const provenanceFor = (embeddingModel: string) => ({
   corpus: { name: 'cve-records', commit: null, date: null },
-  embedding: { model: 'configured-embedder', dimensions: 768 },
+  embedding: { model: embeddingModel, dimensions: 768 },
   build: { tool_version: UPDATE_TOOL_VERSION },
-} as const;
+});
 
 interface DeltaRecord {
   ordinal: number;
@@ -70,6 +76,7 @@ interface UpdateState {
   schemaVersion: string;
   extractorVersion: string;
   toolVersion: string;
+  embeddingModel: string;
   records: Array<{ ordinal: number; key: string; hash: string; processed: boolean }>;
 }
 
@@ -91,6 +98,7 @@ export interface PublishBuiltCvePackConfig {
   output: string;
   packId: string;
   version: string;
+  embeddingModelId?: string;
 }
 
 interface FreshUpdateConfig {
@@ -180,15 +188,42 @@ function sha256(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
+function compareUnicodeScalars(left: string, right: string): number {
+  const leftPoints = [...left].map((value) => value.codePointAt(0) ?? 0);
+  const rightPoints = [...right].map((value) => value.codePointAt(0) ?? 0);
+  const length = Math.min(leftPoints.length, rightPoints.length);
+  for (let index = 0; index < length; index++) {
+    if (leftPoints[index] !== rightPoints[index]) return leftPoints[index] - rightPoints[index];
+  }
+  return leftPoints.length - rightPoints.length;
+}
+
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   if (value && typeof value === 'object') {
     return `{${Object.keys(value as Record<string, unknown>)
-      .sort()
+      .sort(compareUnicodeScalars)
       .map((key) => `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`)
       .join(',')}}`;
   }
+
   return JSON.stringify(value);
+}
+
+function embedderModelId(embedder: Embedder): string {
+  const modelId = embedder.modelId?.trim();
+  if (!modelId) {
+    throw new Error('incremental knowledge-pack embedders must declare a stable modelId');
+  }
+  return modelId;
+}
+
+function provenanceEmbeddingModel(provenance: Record<string, unknown>): string | null {
+  const embedding = provenance.embedding;
+  if (!embedding || typeof embedding !== 'object' || Array.isArray(embedding)) return null;
+  const model = (embedding as Record<string, unknown>).model;
+  const dimensions = (embedding as Record<string, unknown>).dimensions;
+  return typeof model === 'string' && model !== '' && dimensions === 768 ? model : null;
 }
 
 function assertScalarStrings(value: unknown, location: string): void {
@@ -259,7 +294,7 @@ function readDelta(path: string): ParsedDelta {
       metadata && typeof metadata === 'object'
         ? String((metadata as Record<string, unknown>).cveId ?? '').trim()
         : String(object.key ?? '').trim();
-    if (!/^CVE-\d{4}-\d+$/.test(key)) {
+    if (!CVE_ID_RE.test(key)) {
       throw new Error(`delta record ${ordinal + 1} has no valid CVE stable key`);
     }
     if (object.key !== undefined && String(object.key).trim() !== key) {
@@ -293,7 +328,7 @@ function readDelta(path: string): ParsedDelta {
 }
 
 function assertVersion(version: string): void {
-  if (!VERSION_RE.test(version)) {
+  if (!VERSION_RE.test(version) || !isValidSemver(version)) {
     throw new Error(`invalid target version ${JSON.stringify(version)}`);
   }
 }
@@ -378,6 +413,7 @@ function asUpdateState(value: unknown, path: string): UpdateState {
     'schemaVersion',
     'extractorVersion',
     'toolVersion',
+    'embeddingModel',
   ] as const;
   if (strings.some((key) => typeof state[key] !== 'string' || state[key] === '')) {
     throw new Error(`invalid update resume state at ${path}`);
@@ -385,6 +421,7 @@ function asUpdateState(value: unknown, path: string): UpdateState {
   if (
     (state.phase !== 'prepared' && state.phase !== 'delta-applied') ||
     !VERSION_RE.test(String(state.version)) ||
+    !isValidSemver(String(state.version)) ||
     ![
       state.buildId,
       state.deltaId,
@@ -410,7 +447,7 @@ function asUpdateState(value: unknown, path: string): UpdateState {
       !Number.isInteger(item.ordinal) ||
       Number(item.ordinal) < 0 ||
       typeof item.key !== 'string' ||
-      !/^CVE-\d{4}-\d+$/.test(item.key) ||
+      !CVE_ID_RE.test(item.key) ||
       typeof item.hash !== 'string' ||
       !SHA256_RE.test(item.hash) ||
       typeof item.processed !== 'boolean' ||
@@ -451,6 +488,7 @@ function buildIdFor(input: {
   version: string;
   baseContentDigest: string | null;
   deltaId: string | null;
+  embeddingModel: string;
 }): string {
   return sha256(
     canonical({
@@ -770,11 +808,13 @@ export async function buildCvePack(config: BuildCvePackConfig): Promise<void> {
   if (existsSync(config.output)) throw new Error(`output already exists: ${config.output}`);
   const parsed = readDelta(config.source);
   assertNoReplacePublicationAvailable();
+  const embeddingModel = embedderModelId(config.embedder);
   const buildId = buildIdFor({
     packId: config.packId,
     version: config.version,
     baseContentDigest: null,
     deltaId: null,
+    embeddingModel,
   });
   const metadata: DurablePackMetadata = {
     packId: config.packId,
@@ -784,7 +824,7 @@ export async function buildCvePack(config: BuildCvePackConfig): Promise<void> {
     extractorVersion: CVE_ADAPTER_VERSION,
     toolVersion: UPDATE_TOOL_VERSION,
     buildId,
-    provenance: PROVENANCE,
+    provenance: provenanceFor(embeddingModel),
     basePackId: null,
     baseVersion: null,
     baseBuildId: null,
@@ -792,9 +832,11 @@ export async function buildCvePack(config: BuildCvePackConfig): Promise<void> {
     deltaId: null,
     deltaFileSha256: null,
   };
-  const staging = `${resolve(config.output)}.build-${buildId.slice(0, 12)}`;
-  rmSync(staging, { recursive: true, force: true });
-  mkdirSync(staging, { recursive: true });
+  const output = resolve(config.output);
+  mkdirSync(dirname(output), { recursive: true });
+  const staging = mkdtempSync(
+    join(dirname(output), `.${basename(output)}.build-${buildId.slice(0, 12)}-`),
+  );
   try {
     const loadables = [];
     for (const record of parsed.records)
@@ -805,6 +847,7 @@ export async function buildCvePack(config: BuildCvePackConfig): Promise<void> {
       output: config.output,
       packId: config.packId,
       version: config.version,
+      embeddingModelId: embeddingModel,
     });
   } catch (error) {
     rmSync(staging, { recursive: true, force: true });
@@ -825,6 +868,7 @@ export async function publishBuiltCvePack(config: PublishBuiltCvePackConfig): Pr
   }
   assertSameFilesystem(output, staging);
   assertNoReplacePublicationAvailable();
+  const embeddingModel = config.embeddingModelId ?? BGE_MODEL_ID;
   const metadata: DurablePackMetadata = {
     packId: config.packId,
     version: config.version,
@@ -837,8 +881,9 @@ export async function publishBuiltCvePack(config: PublishBuiltCvePackConfig): Pr
       version: config.version,
       baseContentDigest: null,
       deltaId: null,
+      embeddingModel,
     }),
-    provenance: PROVENANCE,
+    provenance: provenanceFor(embeddingModel),
     basePackId: null,
     baseVersion: null,
     baseBuildId: null,
@@ -1039,6 +1084,7 @@ async function expectedUpdateFor(
     version: state.version,
     baseContentDigest: baseValidation.contentDigest,
     deltaId: parsed.deltaId,
+    embeddingModel: state.embeddingModel,
   });
   if (state.buildId !== buildId) {
     throw new Error('update build ID does not match the current base, delta, and target version');
@@ -1091,7 +1137,7 @@ function targetMetadata(
     extractorVersion: CVE_ADAPTER_VERSION,
     toolVersion: UPDATE_TOOL_VERSION,
     buildId: input.buildId,
-    provenance: PROVENANCE,
+    provenance: base.provenance,
     basePackId: base.packId,
     baseVersion: base.version,
     baseBuildId: base.buildId,
@@ -1346,6 +1392,10 @@ async function updateKnowledgePackInternal(
 ): Promise<UpdateKnowledgePackResult> {
   if ('resume' in config) {
     const state = readState(config.resume);
+    const embedder = config.embedder ?? new BgeEmbedder();
+    if (embedderModelId(embedder) !== state.embeddingModel) {
+      throw new Error('embedding model changed since the interrupted update');
+    }
     if (resolve(config.resume) !== resolve(state.workDir)) {
       throw new Error('update resume state does not match the requested work directory');
     }
@@ -1399,13 +1449,7 @@ async function updateKnowledgePackInternal(
       rmSync(state.workDir, { recursive: true, force: true });
       return resultFromValidation(state, completed, true);
     }
-    return executeUpdate(
-      state,
-      parsed,
-      expected,
-      config.embedder ?? new BgeEmbedder(),
-      config.onCheckpoint,
-    );
+    return executeUpdate(state, parsed, expected, embedder, config.onCheckpoint);
   }
 
   assertVersion(config.version);
@@ -1416,6 +1460,14 @@ async function updateKnowledgePackInternal(
   const parsed = readDelta(deltaPath);
   const baseValidation = await validateKnowledgePack(base);
   const baseMetadata = baseValidation.metadata;
+  const embedder = config.embedder ?? new BgeEmbedder();
+  const embeddingModel = embedderModelId(embedder);
+  const baseEmbeddingModel = provenanceEmbeddingModel(baseMetadata.provenance);
+  if (baseEmbeddingModel !== embeddingModel) {
+    throw new Error(
+      `embedding model ${JSON.stringify(embeddingModel)} does not match base pack model ${JSON.stringify(baseEmbeddingModel)}`,
+    );
+  }
   if (config.version === baseMetadata.version) {
     throw new Error('target version must differ from the base version');
   }
@@ -1432,6 +1484,7 @@ async function updateKnowledgePackInternal(
     version: config.version,
     baseContentDigest: baseValidation.contentDigest,
     deltaId: parsed.deltaId,
+    embeddingModel,
   });
   const workDir = resolve(config.workDir ?? `${output}.work`);
   assertDisjointPaths(base, output, workDir);
@@ -1457,6 +1510,7 @@ async function updateKnowledgePackInternal(
     schemaVersion: INCREMENTAL_SCHEMA_VERSION,
     extractorVersion: CVE_ADAPTER_VERSION,
     toolVersion: UPDATE_TOOL_VERSION,
+    embeddingModel,
     records: parsed.records.map((record) => ({
       ordinal: record.ordinal,
       key: record.key,
@@ -1491,13 +1545,7 @@ async function updateKnowledgePackInternal(
     throw error;
   }
   writeState(state);
-  return executeUpdate(
-    state,
-    parsed,
-    expected,
-    config.embedder ?? new BgeEmbedder(),
-    config.onCheckpoint,
-  );
+  return executeUpdate(state, parsed, expected, embedder, config.onCheckpoint);
 }
 
 export async function updateKnowledgePack(
@@ -1593,15 +1641,17 @@ async function validateKnowledgePackInternal(packDir: string): Promise<PackValid
     }
     const metadata = await readPackMetadata(connection);
     const applications = await readUpdateApplications(connection);
+    const embeddingModel = provenanceEmbeddingModel(metadata.provenance);
     if (
       metadata.packId === '' ||
-      metadata.version === '' ||
+      !isValidSemver(metadata.version) ||
       metadata.schemaVersion !== INCREMENTAL_SCHEMA_VERSION ||
       metadata.adapterVersion !== CVE_ADAPTER_VERSION ||
       metadata.extractorVersion !== CVE_ADAPTER_VERSION ||
       metadata.toolVersion !== UPDATE_TOOL_VERSION ||
       !SHA256_RE.test(metadata.buildId) ||
-      canonical(metadata.provenance) !== canonical(PROVENANCE)
+      embeddingModel === null ||
+      canonical(metadata.provenance) !== canonical(provenanceFor(embeddingModel))
     ) {
       throw new Error('pack database metadata identity or provenance is invalid');
     }
@@ -1630,7 +1680,7 @@ async function validateKnowledgePackInternal(packDir: string): Promise<PackValid
       if (
         !incremental ||
         applicationKeys.has(application.key) ||
-        !/^CVE-\d{4}-\d+$/.test(application.key) ||
+        !CVE_ID_RE.test(application.key) ||
         application.operation !== 'upsert' ||
         !SHA256_RE.test(application.resultPayloadSha256) ||
         (application.basePayloadSha256 !== null &&
@@ -1672,6 +1722,7 @@ async function validateKnowledgePackInternal(packDir: string): Promise<PackValid
         adapterVersion: metadata.adapterVersion,
         extractorVersion: metadata.extractorVersion,
         toolVersion: metadata.toolVersion,
+        embeddingModel,
       }),
     );
     if (expectedBuildId !== metadata.buildId) {

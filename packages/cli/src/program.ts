@@ -54,6 +54,33 @@ export interface BuildProgramOptions {
   cwd?: string;
 }
 
+function normalizeUpdateVersion(argv: readonly string[]): string[] {
+  let index = 0;
+  const skipGlobalOptions = (): void => {
+    while (index < argv.length) {
+      if (argv[index] === '--packs-dir') index += 2;
+      else if (argv[index].startsWith('--packs-dir=')) index++;
+      else break;
+    }
+  };
+  skipGlobalOptions();
+  let updateIndex = -1;
+  if (argv[index] === 'update') {
+    updateIndex = index;
+  } else if (argv[index] === 'pack') {
+    index++;
+    skipGlobalOptions();
+    if (argv[index] === 'update') updateIndex = index;
+  }
+  if (updateIndex < 0) return [...argv];
+  return argv.map((arg, position) => {
+    if (position <= updateIndex) return arg;
+    if (arg === '--version') return '--target-version';
+    if (arg.startsWith('--version=')) return `--target-version=${arg.slice('--version='.length)}`;
+    return arg;
+  });
+}
+
 function applyExitAndOutput(command: Command, io: Io): void {
   command.exitOverride();
   command.configureOutput({
@@ -99,5 +126,11 @@ export function buildProgram(options: BuildProgramOptions = {}): Command {
   registerPack(program, ctx);
 
   applyExitAndOutput(program, io);
+  const parseAsync = program.parseAsync.bind(program);
+  program.parseAsync = (argv, parseOptions) =>
+    parseAsync(
+      argv && parseOptions?.from === 'user' ? normalizeUpdateVersion(argv) : argv,
+      parseOptions,
+    );
   return program;
 }

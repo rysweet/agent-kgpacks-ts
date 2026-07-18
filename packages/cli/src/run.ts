@@ -22,37 +22,6 @@ import { buildProgram, type BuildProgramOptions } from './program.js';
 /** Options for {@link run} (same injectable surface as {@link buildProgram}). */
 export type RunOptions = BuildProgramOptions;
 
-function normalizeUpdateVersion(argv: string[]): string[] {
-  let index = 0;
-  const skipGlobalOptions = (): void => {
-    while (index < argv.length) {
-      if (argv[index] === '--packs-dir') {
-        index += 2;
-      } else if (argv[index].startsWith('--packs-dir=')) {
-        index++;
-      } else {
-        break;
-      }
-    }
-  };
-  skipGlobalOptions();
-  let updateIndex = -1;
-  if (argv[index] === 'update') {
-    updateIndex = index;
-  } else if (argv[index] === 'pack') {
-    index++;
-    skipGlobalOptions();
-    if (argv[index] === 'update') updateIndex = index;
-  }
-  if (updateIndex < 0) return argv;
-  return argv.map((arg, index) => {
-    if (index <= updateIndex) return arg;
-    if (arg === '--version') return '--target-version';
-    if (arg.startsWith('--version=')) return `--target-version=${arg.slice('--version='.length)}`;
-    return arg;
-  });
-}
-
 /** Runs the CLI for `argv` and resolves to the process exit code. */
 export async function run(argv: string[], options: RunOptions = {}): Promise<number> {
   const io = options.io ?? processIo;
@@ -64,7 +33,7 @@ export async function run(argv: string[], options: RunOptions = {}): Promise<num
   }
 
   try {
-    await program.parseAsync(normalizeUpdateVersion(argv), { from: 'user' });
+    await program.parseAsync(argv, { from: 'user' });
     return EXIT_OK;
   } catch (err) {
     if (err instanceof CommanderError) {

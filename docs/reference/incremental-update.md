@@ -330,10 +330,9 @@ The required LadybugDB surface is:
 | HNSW index   | `Section.embedding_idx`     | `embedding`, 768 dimensions, cosine                                                                                                |
 | HNSW index   | `Chunk.chunk_embedding_idx` | `embedding`, 768 dimensions, cosine                                                                                                |
 
-The full CVE builder must create this schema and provenance on a fresh baseline.
-`--with-entity-relations` controls materialized Entity-to-Entity edges; it does
-not create the source/support metadata and cannot upgrade a legacy pack.
-Update-capable baselines require the live edges and complete provenance schema.
+The full CVE builder creates this schema, provenance, and the required live
+Entity-to-Entity edges on a fresh baseline. It cannot upgrade a legacy pack;
+update-capable baselines require the complete provenance schema.
 
 A schema-v2 full-build baseline uses `lineage: { base: null, delta: null }`, an
 `update` object with zero counts and an empty `records` array, null durable
@@ -713,7 +712,7 @@ Durable update state records:
 - canonical base, delta, output, and work paths;
 - target version and deterministic IDs;
 - exact `baseTreeDigest` and delta-file hashes;
-- schema/adapter/extractor/tool versions;
+- schema/adapter/extractor/tool versions and embedding-model identity;
 - current durable phase;
 - each delta ordinal, key, operation, nullable payload hash, and advisory
   processed status.
@@ -732,7 +731,7 @@ engine reconciles sidecar lag from durable database state; it never assumes
 that sidecar progress proves a database commit. Before continuing, resume
 re-canonicalizes every saved path and revalidates the sidecar schema, target
 version, exact base tree and delta bytes, semantic `deltaId`, staged database,
-durable applications, and all recorded component versions.
+durable applications, all recorded component versions, and the embedding model.
 
 The durable phases are `prepared`, `applying`, `finalizing`, `ready`, and
 `promoting`. Each transition is written atomically only after its preceding

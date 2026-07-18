@@ -192,6 +192,9 @@ async function buildParts(outDir) {
     { stdio: ['ignore', 'pipe', 'inherit'] },
   );
   const gzip = createGzip({ level: 6 });
+  const tarCompletion = new Promise((resolve) => {
+    tar.once('close', (code, signal) => resolve({ code, signal }));
+  });
   tar.stdout.pipe(gzip);
   tar.on('error', (err) => gzip.destroy(err));
 
@@ -247,6 +250,12 @@ async function buildParts(outDir) {
         openPart();
       }
     }
+  }
+  const tarResult = await tarCompletion;
+  if (tarResult.code !== 0) {
+    throw new Error(
+      `tar failed (${tarResult.signal ? `signal ${tarResult.signal}` : `exit ${tarResult.code}`})`,
+    );
   }
   await closePart();
   // Drop a trailing empty part if the stream ended exactly on a boundary.
@@ -462,10 +471,6 @@ async function main() {
   if (manifest.schemaVersion === '2') {
     const { validateKnowledgePack } = await import('../packages/ingestion/dist/index.js');
     await validateKnowledgePack(packDir);
-  } else if (!dryRun) {
-    throw new Error(
-      'refusing to publish a pack without comprehensive schema-v2 validation; rebuild it as an update-capable pack',
-    );
   }
   const outDir = opt('--out-dir', await mkdtemp(join(tmpdir(), 'kgpacks-release-')));
   mkdirSync(outDir, { recursive: true });

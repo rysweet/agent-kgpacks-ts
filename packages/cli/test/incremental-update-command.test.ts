@@ -4,7 +4,9 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { buildProgram } from '../src/program.js';
 import { EXIT_OK, EXIT_USAGE } from '../src/exit-codes.js';
+import { createBufferedIo } from '../src/io.js';
 import { parseStdout, runCli } from './helpers/run-cli.js';
 
 describe.each([
@@ -53,6 +55,7 @@ describe.each([
       version: '2.0.0',
       workDir: undefined,
     });
+
     expect(parseStdout(result)).toMatchObject({
       packId: 'cve',
       version: '2.0.0',
@@ -60,6 +63,28 @@ describe.each([
       modified: 1,
       unchanged: 1,
     });
+  });
+
+  it('scopes --version to update when parsing the program directly', async () => {
+    const updateKnowledgePack = vi.fn(async () => ({
+      packId: 'cve',
+      version: '2.0.0',
+      buildId: 'a'.repeat(64),
+      deltaId: 'b'.repeat(64),
+      added: 1,
+      modified: 0,
+      unchanged: 0,
+      noop: false,
+      output,
+    }));
+    const program = buildProgram({ updateKnowledgePack, io: createBufferedIo() });
+
+    await program.parseAsync(
+      [...command, '--base', base, '--delta', delta, '--output', output, '--version', '2.0.0'],
+      { from: 'user' },
+    );
+
+    expect(updateKnowledgePack).toHaveBeenCalledWith(expect.objectContaining({ version: '2.0.0' }));
   });
 
   it('runs resume mode with only the work directory', async () => {

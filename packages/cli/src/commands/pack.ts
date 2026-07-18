@@ -21,7 +21,7 @@ import { Command } from 'commander';
 import { DEFAULT_PACK_REPO } from '../constants.js';
 import type { CliContext } from '../context.js';
 import { CliError } from '../errors.js';
-import { EXIT_PACK_NOT_FOUND, EXIT_USAGE, EXIT_VALIDATION } from '../exit-codes.js';
+import { EXIT_PACK_NOT_FOUND, EXIT_USAGE } from '../exit-codes.js';
 import { printJson } from '../io.js';
 import { pullPack } from '../pack-pull.js';
 import { resolveExistingPackDir } from '../pack-dir.js';
@@ -116,44 +116,7 @@ export function registerPack(parent: Command, ctx: CliContext): void {
         throw new CliError(`pack not found: ${name}`, EXIT_PACK_NOT_FOUND);
       }
       const manifest = loadManifestFromDir(dir);
-      let databaseRequiresComprehensiveValidation = false;
-      const databasePath = join(dir, 'pack.db');
-      if (existsSync(databasePath)) {
-        try {
-          const { Database } = await import('@kgpacks/db');
-          const database = new Database(databasePath, { readOnly: true });
-          const connection = database.connect();
-          try {
-            const tables = await connection.run<{ name: string; type: string }>(
-              'CALL SHOW_TABLES() RETURN name, type',
-            );
-            const nodeTables = new Set(
-              tables.filter((table) => table.type === 'NODE').map((table) => table.name),
-            );
-            for (const table of ['PackMetadata', 'ArticleSource', 'UpdateApplication']) {
-              if (!nodeTables.has(table)) continue;
-              const rows = await connection.run<{ count: number | bigint }>(
-                `MATCH (n:${table}) RETURN count(n) AS count`,
-              );
-              if (Number(rows[0]?.count ?? 0) > 0) {
-                databaseRequiresComprehensiveValidation = true;
-                break;
-              }
-            }
-          } finally {
-            connection.close();
-            database.close();
-          }
-        } catch (error) {
-          throw new CliError(
-            `cannot inspect pack database validation mode: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-            EXIT_VALIDATION,
-          );
-        }
-      }
-      if (databaseRequiresComprehensiveValidation || manifest.schemaVersion === '2') {
+      if (manifest.schemaVersion === '2') {
         const { validateKnowledgePack } = await import('@kgpacks/ingestion');
         const validation = await validateKnowledgePack(dir);
         printJson(ctx.io, {

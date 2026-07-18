@@ -92,7 +92,6 @@ Flags (`scripts/build-cve-pack.mjs`):
 | `--limit`                  | all                      | Cap the number of records.                                                               |
 | `--out`                    | `data/packs/cve/pack.db` | Output pack path (gitignored).                                                           |
 | `--batch`                  | `96`                     | Embedding batch size.                                                                    |
-| `--with-entity-relations`  | off (skipped)            | Build `ENTITY_RELATION` edges (see the performance note below).                          |
 | `--resume` / `--no-resume` | auto                     | Resume from / ignore a build checkpoint ([docs/resumable-build.md](resumable-build.md)). |
 | `--checkpoint-every`       | `50`                     | Batches between durable checkpoints (bounds crash re-work).                              |
 
@@ -112,11 +111,9 @@ incremental updates by writing the complete provenance schema: singleton
 indexes. It will generate the manifest from this durable state and run complete
 pack validation before publication.
 
-`--with-entity-relations` only controls materialized `ENTITY_RELATION` edges. It
-does not add the provenance schema and cannot upgrade a legacy or prototype
-pack. Update-capable bases require those live edges and the complete schema-v2
-provenance; the flag alone is not sufficient. Existing packs without exact
-source and support records must be rebuilt from the corpus.
+Update-capable bases require live `ENTITY_RELATION` edges and the complete
+schema-v2 provenance. Existing packs without exact source and support records
+must be rebuilt from the corpus.
 
 > **Comprehensive scale & performance.** The builder **streams**: each batch is
 > embedded, bulk-loaded via `createPackWriter`, and discarded, so peak memory is a
@@ -126,11 +123,9 @@ source and support records must be rebuilt from the corpus.
 > remaining cost is CPU embedding (~10–15 texts/sec). The full ~360k corpus is an
 > overnight batch — run it detached on a server.
 >
-> `ENTITY_RELATION` (Entity→Entity) edges are **skipped by default**: no
-> retrieval/graph read path traverses them and building them is super-linear at
-> scale (it dominated finalize on the full corpus — hours). Pass
-> `--with-entity-relations` to include them. The HNSW vector-index build in
-> finalize is ~linear (a few minutes at full scale).
+> `ENTITY_RELATION` (Entity→Entity) edges are required for schema-v2 provenance
+> validation. Building them remains the dominant finalization cost on the full
+> corpus. The HNSW vector-index build is ~linear (a few minutes at full scale).
 
 ## Apply an incremental CVE delta
 

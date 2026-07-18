@@ -18,7 +18,13 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
-import { PackInstallError, installPackFromStream } from '@kgpacks/packs';
+import {
+  PackInstallError,
+  compareVersions,
+  installPackFromStream,
+  isValidSemver,
+  packVersionFromReleaseTag,
+} from '@kgpacks/packs';
 
 import {
   DEFAULT_PACK_REPO,
@@ -99,60 +105,96 @@ export function resolvePackBaseUrl(
   return `https://github.com/${repo}/releases/download/${tag}`;
 }
 
-async function discoverLatestPackBaseUrl(name: string, repo: string): Promise<string> {
+export async function discoverLatestPackBaseUrl(name: string, repo: string): Promise<string> {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) {
     throw new PackInstallError(`invalid pack repository: ${repo}`);
   }
-  const apiUrl = `https://api.github.com/repos/${repo}/releases?per_page=100`;
-  let response: Response;
-  try {
-    response = await fetch(apiUrl, {
-      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'wikigr-pack-pull' },
-    });
-  } catch (error) {
-    throw new PackInstallError(
-      `cannot discover pack releases from ${repo}: ${(error as Error).message}`,
-    );
-  }
-  if (!response.ok) {
-    throw new PackInstallError(
-      `cannot discover pack releases from ${repo} (HTTP ${response.status})`,
-    );
-  }
-  let releases: unknown;
-  try {
-    releases = await response.json();
-  } catch (error) {
-    throw new PackInstallError(
-      `invalid release discovery response from ${repo}: ${(error as Error).message}`,
-    );
-  }
-  if (!Array.isArray(releases)) {
-    throw new PackInstallError(`invalid release discovery response from ${repo}`);
-  }
   const expectedAsset = `${name}${PACK_RELEASE_INDEX_SUFFIX}`;
-  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const tagPattern = new RegExp(`^${escapedName}-v[0-9A-Za-z]+(?:[._-][0-9A-Za-z]+)*$`);
-  for (const value of releases) {
-    if (!value || typeof value !== 'object') continue;
-    const release = value as {
-      tag_name?: unknown;
-      draft?: unknown;
-      assets?: unknown;
-    };
-    const tag = typeof release.tag_name === 'string' ? release.tag_name : '';
-    if (release.draft === true || !tagPattern.test(tag) || !Array.isArray(release.assets)) continue;
-    const hasIndex = release.assets.some(
-      (asset) =>
-        asset !== null &&
-        typeof asset === 'object' &&
-        (asset as { name?: unknown }).name === expectedAsset,
-    );
-    if (hasIndex) return `https://github.com/${repo}/releases/download/${tag}`;
+  const candidates: Array<{ tag: string; version: string }> = [];
+  for (let page = 1; ; page++) {
+    const apiUrl = `https://api.github.com/repos/${repo}/releases?per_page=100&page=${page}`;
+    let response: Response;
+    try {
+      response = await fetch(apiUrl, {
+        headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'wikigr-pack-pull' },
+      });
+    } catch (error) {
+      throw new PackInstallError(
+        `cannot discover pack releases from ${repo}: ${(error as Error).message}`,
+      );
+    }
+    if (!response.ok) {
+      throw new PackInstallError(
+        `cannot discover pack releases from ${repo} (HTTP ${response.status})`,
+      );
+    }
+    let releases: unknown;
+    try {
+      releases = await response.json();
+    } catch (error) {
+      throw new PackInstallError(
+        `invalid release discovery response from ${repo}: ${(error as Error).message}`,
+      );
+    }
+    if (!Array.isArray(releases)) {
+      throw new PackInstallError(`invalid release discovery response from ${repo}`);
+    }
+    for (const value of releases) {
+      if (!value || typeof value !== 'object') continue;
+      const release = value as {
+        tag_name?: unknown;
+        draft?: unknown;
+        assets?: unknown;
+      };
+      const tag = typeof release.tag_name === 'string' ? release.tag_name : '';
+      const version = versionFromImmutableTag(name, tag);
+      if (release.draft === true || version === null || !Array.isArray(release.assets)) continue;
+      const hasIndex = release.assets.some(
+        (asset) =>
+          asset !== null &&
+          typeof asset === 'object' &&
+          (asset as { name?: unknown }).name === expectedAsset,
+      );
+      if (hasIndex) candidates.push({ tag, version });
+    }
+    if (releases.length < 100) break;
   }
+  const latest = candidates.reduce<(typeof candidates)[number] | undefined>(
+    (selected, candidate) => {
+      if (!selected) return candidate;
+      if (isValidSemver(candidate.version) && isValidSemver(selected.version)) {
+        return compareVersions(candidate.version, selected.version) > 0 ? candidate : selected;
+      }
+      return candidate.version.localeCompare(selected.version, undefined, { numeric: true }) > 0
+        ? candidate
+        : selected;
+    },
+    undefined,
+  );
+  if (latest) return `https://github.com/${repo}/releases/download/${latest.tag}`;
   throw new PackInstallError(
     `no immutable release containing ${expectedAsset} was found in ${repo}`,
   );
+}
+
+function versionFromImmutableTag(name: string, tag: string): string | null {
+  const versionPrefix = `${name}-v`;
+  if (tag.startsWith(versionPrefix)) {
+    const version = tag.slice(versionPrefix.length);
+    return isValidSemver(version) ? version : null;
+  }
+  if (
+    !new RegExp(
+      `^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-\\d{4}\\.\\d{2}(?:\\.\\d+)?$`,
+    ).test(tag)
+  ) {
+    return null;
+  }
+  try {
+    return packVersionFromReleaseTag(tag);
+  } catch {
+    return null;
+  }
 }
 
 async function fetchIndexBytes(url: string): Promise<Buffer> {

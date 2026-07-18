@@ -15,8 +15,6 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { Database } from '@kgpacks/db';
-
 /** A constructed mock packs directory. */
 export interface MockPacks {
   /** Absolute path to the temp base (remove this to clean up). */
@@ -54,8 +52,7 @@ export function makeMockPacks(): MockPacks {
   const alphaDir = join(packsDir, 'alpha-pack');
   mkdirSync(alphaDir, { recursive: true });
   writeJson(join(alphaDir, 'manifest.json'), ALPHA_MANIFEST);
-  const alphaDatabase = new Database(join(alphaDir, 'pack.db'));
-  alphaDatabase.close();
+  writeFileSync(join(alphaDir, 'pack.db'), '');
 
   const betaDir = join(packsDir, 'beta-pack');
   mkdirSync(betaDir, { recursive: true });

@@ -5,9 +5,8 @@
 // API. Two traversal modes:
 //
 //   - co-occurrence: two entities are linked when some Article HAS_ENTITY BOTH.
-//     This is the CVE-pack DEFAULT, whose builder skips ENTITY_RELATION edges.
-//   - relation: traverse explicit Entity→Entity ENTITY_RELATION edges (built only
-//     under `--with-entity-relations`).
+//     This remains the fallback for legacy packs without ENTITY_RELATION edges.
+//   - relation: traverse explicit Entity→Entity ENTITY_RELATION edges.
 //
 // `mode: 'auto'` picks relation when the pack has any ENTITY_RELATION edges, else
 // co-occurrence. Results are bounded and deterministically ordered (depth ASC,

@@ -472,9 +472,9 @@ Nodes are ordered by `depth` ascending then `title` ascending and de-duplicated.
 ### `GET /api/v1/graph/entities`
 
 Return the **entity** neighborhood around a seed entity: entities reachable within
-`depth` hops, plus the edges among them. Auto-selects **co-occurrence** (entities
-sharing an article — the CVE-pack default) or **relation** traversal
-(`ENTITY_RELATION` edges) when present. See
+`depth` hops, plus the edges among them. Auto-selects **relation** traversal
+(`ENTITY_RELATION` edges) for current CVE packs or **co-occurrence** (entities
+sharing an article) for legacy packs. See
 [docs/entity-graph.md](../entity-graph.md).
 
 **Query parameters**

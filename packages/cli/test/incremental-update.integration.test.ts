@@ -15,6 +15,7 @@ import { EXIT_OK } from '../src/exit-codes.js';
 import { parseStdout, runCli } from './helpers/run-cli.js';
 
 const embedder: Embedder = {
+  modelId: 'test-deterministic-embedder-v1',
   async generate(texts) {
     return texts.map((text) => {
       const digest = createHash('sha256').update(text).digest();

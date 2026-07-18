@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -84,14 +84,39 @@ describe('immutable pack release artifacts', () => {
     expect(readFileSync(releaseScript, 'utf8')).not.toContain("'--clobber'");
   });
 
-  it('refuses to publish a pack that cannot be comprehensively validated', () => {
+  it('aborts packaging when tar exits unsuccessfully', () => {
+    const bin = join(temp, 'bin');
+    mkdirSync(bin);
+    const fakeTar = join(bin, 'tar');
+    writeFileSync(fakeTar, '#!/bin/sh\nprintf partial\nexit 42\n');
+    chmodSync(fakeTar, 0o755);
+
     const result = spawnSync(
       'node',
-      [releaseScript, '--pack', 'cve', '--packs-dir', packsDir, '--out-dir', join(temp, 'release')],
-      { encoding: 'utf8' },
+      [
+        releaseScript,
+        '--pack',
+        'cve',
+        '--packs-dir',
+        packsDir,
+        '--out-dir',
+        join(temp, 'tar-failure'),
+        '--dry-run',
+      ],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` },
+      },
     );
+
     expect(result.status).toBe(1);
-    expect(result.stderr).toMatch(/without comprehensive schema-v2 validation/i);
+    expect(result.stderr).toMatch(/tar failed.*exit 42/i);
+  });
+
+  it('preserves the legacy release path while adding schema-v2 validation', () => {
+    expect(readFileSync(releaseScript, 'utf8')).not.toContain(
+      'refusing to publish a pack without comprehensive schema-v2 validation',
+    );
   });
 
   it('derives the default immutable tag from the manifest version', () => {

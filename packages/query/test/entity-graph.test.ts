@@ -84,7 +84,7 @@ afterEach(() => {
   openDb = undefined;
 });
 
-describe('entityGraph — co-occurrence (the CVE-pack default: no ENTITY_RELATION edges)', () => {
+describe('entityGraph — co-occurrence fallback without ENTITY_RELATION edges', () => {
   it('returns the seed at depth 0 and its direct co-occurring neighbors at depth 1', async () => {
     openDb = await seed(false);
     const c: Connection = openDb.connect();
