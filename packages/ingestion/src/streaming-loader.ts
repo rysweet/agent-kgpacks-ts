@@ -158,6 +158,11 @@ export async function createPackWriter(
 
   const createdEntities = new Set<string>();
   const loadedArticles = new Set<string>();
+  const pendingRelationships: Array<{
+    article: string;
+    relationship: Relationship;
+    extractorVersion: string;
+  }> = [];
 
   let ftsLoaded: boolean;
   if (resume) {
@@ -170,11 +175,28 @@ export async function createPackWriter(
     for (const row of await conn.run<Row>('MATCH (a:Article) RETURN a.title AS title')) {
       loadedArticles.add(String(row.title));
     }
+    if (!skipEntityRelations) {
+      for (const row of await conn.run<Row>(
+        'MATCH (p:RelationSupport) RETURN p.article_title AS article, ' +
+          'p.source_entity_id AS source, p.target_entity_id AS target, p.relation AS relation, ' +
+          'p.context AS context, p.extractor_version AS extractorVersion',
+      )) {
+        pendingRelationships.push({
+          article: String(row.article),
+          relationship: {
+            source: String(row.source),
+            target: String(row.target),
+            relation: String(row.relation),
+            context: String(row.context),
+          },
+          extractorVersion: String(row.extractorVersion),
+        });
+      }
+    }
   } else {
     ftsLoaded = await createSchema(conn);
   }
 
-  const pendingRelationships: Relationship[] = [];
   const stats: PackWriterStats = {
     articles: 0,
     sections: 0,
@@ -228,9 +250,36 @@ export async function createPackWriter(
     }[] = [];
     const entityRows: { id: string; name: string; type: string; descr: string }[] = [];
     const hasEntityRows: { at: string; eid: string }[] = [];
+    const sourceRows: {
+      title: string;
+      payload: string;
+      hash: string;
+      version: string;
+    }[] = [];
+    const supportRows: {
+      id: string;
+      article: string;
+      signature: string;
+      source: string;
+      target: string;
+      relation: string;
+      context: string;
+      version: string;
+    }[] = [];
 
     for (const item of items) {
       const { article } = item;
+      if (item.sourcePayload !== undefined) {
+        if (!item.sourcePayloadHash || !item.extractorVersion) {
+          throw new Error(`Missing source provenance for article ${article.title}`);
+        }
+        sourceRows.push({
+          title: article.title,
+          payload: item.sourcePayload,
+          hash: item.sourcePayloadHash,
+          version: item.extractorVersion,
+        });
+      }
       const totalWords = article.sections.reduce((s, sec) => s + wordCount(sec.content), 0);
       articleRows.push({
         title: article.title,
@@ -297,8 +346,31 @@ export async function createPackWriter(
           hasEntityRows.push({ at: article.title, eid: entityId });
         }
       }
-      if (!skipEntityRelations) {
-        for (const rel of item.extraction.relationships) pendingRelationships.push(rel);
+      const localRelationships = new Set<string>();
+      for (const relationship of item.extraction.relationships) {
+        const source = relationship.source.trim();
+        const target = relationship.target.trim();
+        const context = relationship.context ?? '';
+        const signature = JSON.stringify([source, relationship.relation, target, context]);
+        if (localRelationships.has(signature)) continue;
+        localRelationships.add(signature);
+        supportRows.push({
+          id: JSON.stringify([article.title, signature]),
+          article: article.title,
+          signature,
+          source,
+          target,
+          relation: relationship.relation,
+          context,
+          version: item.extractorVersion ?? 'legacy',
+        });
+        if (!skipEntityRelations) {
+          pendingRelationships.push({
+            article: article.title,
+            relationship,
+            extractorVersion: item.extractorVersion ?? 'legacy',
+          });
+        }
       }
 
       loadedArticles.add(article.title);
@@ -311,6 +383,13 @@ export async function createPackWriter(
       conn.run(
         'UNWIND $rows AS r CREATE (:Article {title: r.title, category: r.category, ' +
           'word_count: r.wc, expansion_depth: r.depth})',
+        { rows },
+      ),
+    );
+    await inChunks(sourceRows, chunkSize, (rows) =>
+      conn.run(
+        'UNWIND $rows AS r CREATE (:ArticleSource {title: r.title, payload: r.payload, ' +
+          'payload_sha256: r.hash, extractor_version: r.version})',
         { rows },
       ),
     );
@@ -352,18 +431,33 @@ export async function createPackWriter(
         { rows },
       ),
     );
+    await inChunks(supportRows, chunkSize, (rows) =>
+      conn.run(
+        'UNWIND $rows AS r CREATE (:RelationSupport {support_id: r.id, article_title: r.article, ' +
+          'signature: r.signature, source_entity_id: r.source, target_entity_id: r.target, ' +
+          'relation: r.relation, context: r.context, extractor_version: r.version})',
+        { rows },
+      ),
+    );
   }
 
   async function finalize(links: ArticleLink[] = []): Promise<PackWriterStats> {
     if (!skipEntityRelations) {
+      const relationSignatures = new Set<string>();
       const relRows = pendingRelationships
-        .map((rel) => ({
-          s: rel.source.trim(),
-          t: rel.target.trim(),
-          rel: rel.relation,
-          ctx: rel.context ?? '',
+        .map(({ relationship }) => ({
+          s: relationship.source.trim(),
+          t: relationship.target.trim(),
+          rel: relationship.relation,
+          ctx: relationship.context ?? '',
         }))
-        .filter((r) => createdEntities.has(r.s) && createdEntities.has(r.t));
+        .filter((r) => createdEntities.has(r.s) && createdEntities.has(r.t))
+        .filter((row) => {
+          const signature = JSON.stringify([row.s, row.rel, row.t, row.ctx]);
+          if (relationSignatures.has(signature)) return false;
+          relationSignatures.add(signature);
+          return true;
+        });
       stats.relationships += await bulkCreateEntityRelations(conn, relRows);
     }
 

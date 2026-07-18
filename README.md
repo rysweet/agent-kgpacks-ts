@@ -108,6 +108,11 @@ pnpm --filter @kgpacks/frontend dev
 - **[docs/using-the-cve-pack.md](docs/using-the-cve-pack.md) — install & use the
   prebuilt CVE knowledge pack (start here to use the database).**
 - [docs/cve.md](docs/cve.md) — how the CVE pack is built and published.
+- [docs/howto/incremental-cve-update.md](docs/howto/incremental-cve-update.md) —
+  planned workflow for building and resuming an immutable CVE pack update.
+- [docs/reference/incremental-update.md](docs/reference/incremental-update.md) —
+  planned schema-v2 update API, delta grammar, durable metadata, validation, and
+  atomic publication contract.
 - [docs/cve-corpus.md](docs/cve-corpus.md) — fetching the source CVE corpus from
   the CVEProject/cvelistV5 release service (`pnpm cve:fetch`).
 - [docs/resumable-build.md](docs/resumable-build.md) — resumable + pipelined CVE

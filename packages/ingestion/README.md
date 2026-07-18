@@ -29,6 +29,15 @@ const result = await buildPack({
 // result.entities, result.relationships, result.links
 ```
 
+### [PLANNED] Immutable CVE updates
+
+`@kgpacks/ingestion` supplies the versioned CVE adapter and graph mutation
+facilities used internally by incremental updates. The public lifecycle API
+(`updateKnowledgePack`, `validateKnowledgePack`, request/result and manifest-v2
+types, and typed failures) belongs to `@kgpacks/packs`; it does not reuse
+`buildPack` or mutate an existing base database. See the
+[incremental update reference](../../docs/reference/incremental-update.md).
+
 Every external dependency is an **injectable seam** with a real default, so the
 whole pipeline runs offline in tests:
 
@@ -50,6 +59,7 @@ whole pipeline runs offline in tests:
 | `schema.ts` / `loader.ts` | LadybugDB schema + node/edge/embedding loading and cosine HNSW vector indexes.                                                                  |
 | `expansion.ts`            | Bounded breadth-first link discovery (work queue with `maxDepth` / `maxArticles`).                                                              |
 | `index.ts`                | `buildPack(config)` orchestration.                                                                                                              |
+| `incremental-update.ts`   | [Planned] immutable CVE update, resume, complete schema-v2 validation, and no-replace publication.                                              |
 
 ## Read-side contract (binding)
 

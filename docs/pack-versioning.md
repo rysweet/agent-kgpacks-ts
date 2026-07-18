@@ -26,6 +26,11 @@ Pack **manifest** `version` fields use a **SemVer 2.0** string derived from the
 tag, so `wikigr pack info cve` and the registry's version comparison (see
 [`@kgpacks/packs` versioning](packages/packs.md)) order releases correctly.
 
+The planned schema-v2 incremental API requires the intersection of SemVer 2.0
+and the filesystem-safe token constraint
+`^[0-9A-Za-z]+(?:[._-][0-9A-Za-z]+)*$`. Values such as `2026.7.0` satisfy both.
+A target version must differ from its base version.
+
 > **Tag vs. version — the month is _not_ zero-padded in the version.** The git
 > **tag** zero-pads the month for readable, lexically-sortable tags
 > (`cve-2025.06`). The manifest **version** must omit that pad — SemVer 2.0 forbids
@@ -131,9 +136,49 @@ integrity fields:
 
 > Provenance is **validated on load** by the manifest schema
 > ([`@kgpacks/packs`](packages/packs.md)): each field, when present, must be a
-> string (dates ISO-formatted). As with the rest of the manifest, dangerous keys
+> string. As with the rest of the manifest, dangerous keys
 > (`__proto__`, `constructor`, `prototype`) are stripped when the object is
 > rebuilt, so untrusted release JSON cannot pollute prototypes.
+
+This is structural validation only. `validateManifest` does not open
+`pack.db` or prove that provenance is true. For a schema-v2 pack,
+`validateKnowledgePack` and `wikigr pack validate` compare every provenance,
+identity, lineage, update, count, and file field against database and
+filesystem authority. See
+[validation boundaries](reference/incremental-update.md#validation-boundaries).
+
+## Schema-v2 identity and lineage
+
+An update-capable pack stores identity and provenance in the singleton
+LadybugDB `PackMetadata` record. `manifest.json` is generated from that durable
+record and cross-validated; it is not an independent authority.
+
+The deterministic `buildId` covers the logical pack ID, target version, base
+content digest, semantic delta ID, and identity-affecting
+schema/adapter/extractor/tool versions. The raw delta-file SHA-256 remains
+separate transport provenance. The complete update-capable manifest example,
+including lineage, update records and all three counts, exact whole-pack
+statistics, payload byte sizes/checksums, and `contentDigest`, is in the
+[schema-v2 manifest reference](reference/incremental-update.md#schema-v2-manifest).
+
+Schema-v2 directories contain only `pack.db` and `manifest.json`.
+
+## Immutable update release publication
+
+Incremental pack publication uses an explicit immutable release tag derived
+from the validated manifest. Release tooling must:
+
+- completely validate the pack before archiving;
+- derive the tag, archive name, version, and release metadata from that one
+  manifest;
+- use stable archive ordering and normalized archive metadata;
+- return a no-op only when an existing release has exactly matching validated
+  assets and checksums;
+- fail on any mismatched tag or asset without replacing assets or moving a tag.
+
+The mutable `packs` latest pointer is a legacy distribution mechanism and is
+not changed by immutable incremental publication. Consumers of an incremental
+version pin its explicit release tag.
 
 ## Publishing with provenance
 
@@ -168,3 +213,5 @@ publishing flow and the remaining `release-pack.mjs` flags, and
 - [docs/pack-signing.md](pack-signing.md) — sign & verify the release index.
 - [docs/cve.md](cve.md) — build & publish the CVE pack.
 - [docs/packages/packs.md](packages/packs.md) — manifest schema & versioning helpers.
+- [Incremental update contract](reference/incremental-update.md) — schema-v2
+  identity, lineage, manifest, and complete validation.

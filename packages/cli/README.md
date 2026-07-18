@@ -10,11 +10,13 @@ covers both halves of the platform:
 
 Built on [`@kgpacks/packs`](../packs), [`@kgpacks/query`](../query), and
 [`@kgpacks/db`](../db) for the runtime side, and on
-[`@kgpacks/ingestion`](../ingestion) (`buildPack`) and [`@kgpacks/eval`](../eval)
-(`runEval`) for the ingestion side. The heavy write-side stack (HTTP fetch, the
-embedding model, the LLM extractor/judge) is loaded **lazily**, only when an
-ingestion command actually runs — so constructing the program or running a
-runtime command never pulls in the model runtime.
+[`@kgpacks/ingestion`](../ingestion) (`buildPack`),
+[`@kgpacks/packs`](../packs) (the planned `updateKnowledgePack`), and
+[`@kgpacks/eval`](../eval) (`runEval`) for the
+ingestion side. The heavy write-side stack (HTTP fetch, the embedding model,
+the LLM extractor/judge) is loaded **lazily**, only when an ingestion command
+actually runs — so constructing the program or running a runtime command never
+pulls in the model runtime.
 
 See [docs/PLAN.md](../../docs/PLAN.md) for the porting contract. The **runtime**
 command names, flags, and exit codes are preserved from the upstream Python CLI;
@@ -32,6 +34,10 @@ wikigr --help
 
 ## Commands
 
+The command summary below includes the planned schema-v2 `update` replacement.
+Until it lands, the installed CLI still exposes the legacy seed-based update
+described as deprecated in the detailed section.
+
 ```
 wikigr [--packs-dir <dir>] <command>
 
@@ -42,7 +48,7 @@ RUNTIME
   pack install <archive.tar.gz>  Install a pack from a local gzip-compressed tarball.
   pack list                      List installed packs.
   pack info <pack>               Print a pack's full manifest.
-  pack validate <pack>           Validate a pack's manifest.
+  pack validate <pack>           Validate a manifest; completely validate schema-v2 packs.
   pack remove <pack>             Remove an installed pack.
 
 INGESTION
@@ -50,10 +56,9 @@ INGESTION
           [--max-depth <n>] [--max-articles <n>]
           [--chunk-size <n>] [--chunk-overlap <n>]
                                  Build a new pack database from seed URLs / a config.
-  update  --pack <name> (--seeds <url...> | --config <file>)
-          [--max-depth <n>] [--max-articles <n>]
-          [--chunk-size <n>] [--chunk-overlap <n>]
-                                 Resume / extend an existing pack's graph.
+  update  --base <pack-dir> --delta <file> --output <pack-dir> --version <version>
+          [--work-dir <dir>]
+  update  --resume <work-dir>    Build or resume an immutable incremental CVE update.
   research-sources --seeds <url...> [--max-depth <n>] [--max-articles <n>]
                                  Discover / seed candidate source URLs for a domain.
   pack create  ...               Alias of `create`, under the `pack` group.
@@ -72,16 +77,15 @@ message to **stderr** and set a distinct exit code (see [Exit codes](#exit-codes
 
 ## Ingestion commands
 
-The ingestion commands wrap [`@kgpacks/ingestion`](../ingestion)'s `buildPack`
-pipeline (`fetch → clean/sectionize → extract → chunk → embed → load → expand`)
-and [`@kgpacks/eval`](../eval)'s `runEval`. They write into / read from the
-resolved packs directory exactly like the runtime commands (see
-[Packs-directory resolution](#packs-directory-resolution)).
+`create` wraps [`@kgpacks/ingestion`](../ingestion)'s `buildPack` pipeline
+(`fetch → clean/sectionize → extract → chunk → embed → load → expand`). The
+planned `update` command uses the separate `updateKnowledgePack` schema-v2
+engine, and `pack eval` wraps [`@kgpacks/eval`](../eval)'s `runEval`.
 
 > **Dual surface.** `create` / `update` are mounted **both** at the top level and
-> under the `pack` group (`pack create` / `pack update`). The two mounts share one
-> implementation and one seam, so `wikigr create …` and `wikigr pack create …` are
-> behaviourally identical — they differ only in where they appear in `--help`.
+> under the `pack` group (`pack create` / `pack update`). Each alias pair shares
+> its own implementation and seam: both create spellings call `buildPack`, while
+> both update spellings call `updateKnowledgePack`.
 
 ### `create` — build a new pack
 
@@ -129,23 +133,38 @@ wikigr create --pack ada \
   --max-depth 1 --max-articles 25
 ```
 
-### `update` — resume / extend a pack
+### `update` — immutable incremental CVE update
 
 ```
-wikigr [--packs-dir <dir>] update --pack <name> (--seeds <url...> | --config <file>)
-       [--max-depth <n>] [--max-articles <n>] [--chunk-size <n>] [--chunk-overlap <n>]
+wikigr update --base <pack-dir> --delta <file> --output <pack-dir> \
+  --version <version> [--work-dir <dir>]
+wikigr update --resume <work-dir>
 ```
 
-Opens an **existing** pack and re-runs the pipeline with additional seeds,
-extending its graph in place. The pack must already exist — an unknown pack exits
-`3` (pack not found). Resume/extend semantics come from `buildPack`'s title-level
-dedup: already-loaded articles are skipped, new ones are appended. Flags, config
-handling, and the JSON-counts output are identical to [`create`](#create--build-a-new-pack)
-(the counts reflect what this run loaded).
+Fresh mode requires a completed provenance-capable
+CVE base, strict UTF-8 NDJSON delta, distinct output path, and target version.
+Resume mode accepts only `--resume`.
 
 ```sh
-wikigr update --pack ada --seeds https://en.wikipedia.org/wiki/Analytical_Engine
+wikigr update \
+  --base data/packs/cve-2026.06 \
+  --delta .scratch/cve/delta.ndjson \
+  --output data/packs/cve-2026.07 \
+  --version 2026.7.0
 ```
+
+The base is opened read-only. Operations are keyed by `cveId`: absent upserts
+are `added`, changed canonical payloads are `modified`, identical payloads are
+`unchanged`. Omitted base records remain present. Delete operations and
+`REJECTED` records fail complete preflight. Empty deltas are valid.
+
+The command builds and completely validates a same-filesystem staging pack,
+then publishes it with an atomic no-replace rename. Existing outputs are
+byte-preserving `noop: true` successes only when comprehensive validation proves
+them equivalent; every other file, directory, or symlink collision fails. See
+the
+[incremental update how-to](../../docs/howto/incremental-cve-update.md) and
+[contract reference](../../docs/reference/incremental-update.md).
 
 ### `research-sources` — discover candidate URLs
 
@@ -252,24 +271,28 @@ The install root is resolved in this order:
 
 ## Exit codes
 
-| Code | Meaning                                                      |
-| ---- | ------------------------------------------------------------ |
-| `0`  | Success                                                      |
-| `1`  | Generic / uncaught error                                     |
-| `2`  | Usage / argument-parse error                                 |
-| `3`  | Pack not found (unknown/invalid name or missing dir)         |
-| `4`  | Manifest or Cypher validation failure                        |
-| `5`  | Pack install failure                                         |
-| `6`  | Query / retrieval runtime failure                            |
-| `7`  | Ingestion failure (`create` / `update` / `research-sources`) |
-| `8`  | Evaluation failure (`pack eval`)                             |
+| Code | Meaning                                                             |
+| ---- | ------------------------------------------------------------------- |
+| `0`  | Success                                                             |
+| `1`  | Generic / uncaught error                                            |
+| `2`  | Usage / argument-parse error                                        |
+| `3`  | Pack not found (unknown/invalid name or missing dir)                |
+| `4`  | Manifest or Cypher validation failure                               |
+| `5`  | Pack install failure                                                |
+| `6`  | Query / retrieval runtime failure                                   |
+| `7`  | Ingestion/update failure (`create` / `update` / `research-sources`) |
+| `8`  | Evaluation failure (`pack eval`)                                    |
 
 Codes are stable and part of the package's public contract. Failures are mapped
 by the thrown error's **name** (the mapper never imports the heavy write-side
 packages):
 
-- `7` ← `IngestionError`, `BlockedUrlError`, `FetchError`, `ExtractionError`
-  (from [`@kgpacks/ingestion`](../ingestion)).
+- `7` ← `IngestionError`, `BlockedUrlError`, `FetchError`, `ExtractionError`,
+  and the planned `KnowledgePackUpdateError` (from
+  [`@kgpacks/packs`](../packs)).
+- `4` ← the planned `KnowledgePackValidationError` when
+  `wikigr pack validate` performs complete schema-v2 validation. The update
+  command reports the same condition as an update-domain failure (`7`).
 - `8` ← `EvalError` (from [`@kgpacks/eval`](../eval)).
 
 Codes `0`–`6` are the runtime contract carried over from the upstream Python CLI.
@@ -293,12 +316,13 @@ const code = await run(['status'], { packsDir, io, runQuery });
 an environment/cwd, and a set of **injectable seams** so the heavy stacks stay out
 of tests and are loaded lazily by the production defaults otherwise:
 
-| Seam (`BuildProgramOptions`)                                                                     | Default                                                                                 | Used by                                            |
-| ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| `runQuery`                                                                                       | lazy `@kgpacks/db` + `@kgpacks/query`                                                   | `query`                                            |
-| `buildPack(config): Promise<BuildPackResult>`                                                    | lazy `@kgpacks/ingestion` `buildPack`                                                   | `create`, `update` (`pack create` / `pack update`) |
-| `discoverSources({ seeds, maxDepth, maxArticles }): Promise<string[]>`                           | lazy ingestion fetch + `expandFromSeeds`, with the seed URLs filtered out of the result | `research-sources`                                 |
-| `evalPack({ packDir, packId, sample, perPack, judgeModel, questionsDir? }): Promise<EvalReport>` | lazy `@kgpacks/eval` `runEval` (+ `@kgpacks/query` / `@kgpacks/agent`)                  | `pack eval`                                        |
+| Seam (`BuildProgramOptions`)                                                                     | Default                                                                                 | Used by                  |
+| ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- | ------------------------ |
+| `runQuery`                                                                                       | lazy `@kgpacks/db` + `@kgpacks/query`                                                   | `query`                  |
+| `buildPack(config): Promise<BuildPackResult>`                                                    | lazy `@kgpacks/ingestion` `buildPack`                                                   | `create` (`pack create`) |
+| `updateKnowledgePack(request): Promise<UpdateKnowledgePackResult>`                               | lazy `@kgpacks/packs` `updateKnowledgePack`                                             | `update` (`pack update`) |
+| `discoverSources({ seeds, maxDepth, maxArticles }): Promise<string[]>`                           | lazy ingestion fetch + `expandFromSeeds`, with the seed URLs filtered out of the result | `research-sources`       |
+| `evalPack({ packDir, packId, sample, perPack, judgeModel, questionsDir? }): Promise<EvalReport>` | lazy `@kgpacks/eval` `runEval` (+ `@kgpacks/query` / `@kgpacks/agent`)                  | `pack eval`              |
 
 Because the seams are overridable, the whole surface runs **offline** in tests.
 For example, an ingestion test injects a `buildPack` wrapper that supplies mock
@@ -321,6 +345,8 @@ const code = await run(['create', '--pack', 'tiny', '--seeds', 'https://example.
 // code === 0; query `connection` to assert the articles/sections were loaded.
 ```
 
-`discoverSources` and `evalPack` are injectable the same way. See
+`updateKnowledgePack`, `discoverSources`, and `evalPack` are injectable the same
+way. See the
+[incremental update reference](../../docs/reference/incremental-update.md),
 [docs/PLAN.md](../../docs/PLAN.md) and [docs/monorepo.md](../../docs/monorepo.md)
 for the broader contract.

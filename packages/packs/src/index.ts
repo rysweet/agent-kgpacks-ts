@@ -5,6 +5,7 @@
 // docs/packages/packs.md for the full API reference and security model.
 
 export {
+  IMMUTABLE_PACK_VERSION_RE,
   MANIFEST_FILENAME,
   PACK_NAME_RE,
   validateManifest,
@@ -12,7 +13,20 @@ export {
   loadManifestFromDir,
   saveManifest,
 } from './manifest.js';
-export type { PackManifest, GraphStats, EvalScores, PackProvenance } from './manifest.js';
+export type {
+  PackManifest,
+  PackManifestV2,
+  PackLineageV2,
+  PackUpdateV2,
+  PackUpdateRecordV2,
+  PackFileMetadataV2,
+  UpdateOperation,
+  UpdateClassification,
+  Sha256,
+  GraphStats,
+  EvalScores,
+  PackProvenance,
+} from './manifest.js';
 
 export {
   parseVersion,

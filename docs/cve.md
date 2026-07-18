@@ -103,6 +103,21 @@ DB load so cores are not idle — see [docs/resumable-build.md](resumable-build.
 It prints a JSON summary (`mapped`, `articles`, `sections`, `chunks`, `entities`,
 `relationships`, `seconds`).
 
+### Build an update-capable base
+
+The schema-v2 full builder will make fresh CVE baselines eligible for immutable
+incremental updates by writing the complete provenance schema: singleton
+`PackMetadata`, canonical `ArticleSource` records, article/entity support,
+`RelationSupport`, update-application support, required columns, and required
+indexes. It will generate the manifest from this durable state and run complete
+pack validation before publication.
+
+`--with-entity-relations` only controls materialized `ENTITY_RELATION` edges. It
+does not add the provenance schema and cannot upgrade a legacy or prototype
+pack. Update-capable bases require those live edges and the complete schema-v2
+provenance; the flag alone is not sufficient. Existing packs without exact
+source and support records must be rebuilt from the corpus.
+
 > **Comprehensive scale & performance.** The builder **streams**: each batch is
 > embedded, bulk-loaded via `createPackWriter`, and discarded, so peak memory is a
 > single batch regardless of corpus size. Edges are created with **PK-indexed
@@ -116,6 +131,29 @@ It prints a JSON summary (`mapped`, `articles`, `sections`, `chunks`, `entities`
 > scale (it dominated finalize on the full corpus — hours). Pass
 > `--with-entity-relations` to include them. The HNSW vector-index build in
 > finalize is ~linear (a few minutes at full scale).
+
+## Apply an incremental CVE delta
+
+Incremental update is copy-on-write: it reads an eligible base, applies
+strict-UTF-8 NDJSON operations in stable `cveId` order, completely validates a
+new schema-v2 pack, and atomically publishes a distinct output directory.
+
+```bash
+wikigr update \
+  --base data/packs/cve-2026.06 \
+  --delta .scratch/cve/delta.ndjson \
+  --output data/packs/cve-2026.07 \
+  --version 2026.7.0
+```
+
+Canonical adapter payload bytes determine `added`, `modified`, and `unchanged`.
+Omitted records remain present. Empty deltas are valid. Delete operations and
+`REJECTED` CVEs reject the entire delta.
+
+See [the incremental CVE update how-to](howto/incremental-cve-update.md) for the
+operational workflow and the
+[incremental update reference](reference/incremental-update.md) for the exact
+grammar, API, manifest, validation, resume, and publication contracts.
 
 ## Query
 
@@ -170,6 +208,13 @@ to the same assets, so `wikigr pack pull cve` (default `packs`) keeps working:
 # Immutable version cve-2025.06 → index version 2025.6.0, + updates the packs pointer
 node scripts/release-pack.mjs --pack cve --tag cve-2025.06
 ```
+
+The behavior above describes the current legacy release path. The planned
+schema-v2 incremental release path is stricter: it validates the complete pack,
+publishes only to an explicit immutable tag, treats exact existing assets as a
+no-op, and fails on mismatches without replacing assets or moving any tag. It
+does not update the mutable `packs` pointer. See
+[immutable update release publication](pack-versioning.md#planned-immutable-update-release-publication).
 
 The builder (`build-cve-pack.mjs`) stamps **provenance** (corpus commit/date,
 embedding model, build date) into `manifest.json`; the release script mirrors it

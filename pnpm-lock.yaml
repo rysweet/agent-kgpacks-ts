@@ -202,6 +202,9 @@ importers:
       '@kgpacks/embeddings':
         specifier: workspace:*
         version: link:../embeddings
+      '@kgpacks/packs':
+        specifier: workspace:*
+        version: link:../packs
 
   packages/mcp:
     dependencies:

@@ -16,6 +16,7 @@
   "dependencies": {
     "@kgpacks/agent": "workspace:*",
     "@kgpacks/db": "workspace:*",
-    "@kgpacks/embeddings": "workspace:*"
+    "@kgpacks/embeddings": "workspace:*",
+    "@kgpacks/packs": "workspace:*"
   }
 }

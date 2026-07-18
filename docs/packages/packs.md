@@ -1,10 +1,10 @@
 # `@kgpacks/packs`
 
-The knowledge-pack **metadata and filesystem layer** of the agent-kgpacks
-TypeScript port. It reads and writes pack **manifests**, validates them against
-the (unchanged) on-disk schema, **installs** `.tar.gz` packs into a local install
-root with full **security parity**, and exposes a small **registry** (list / info
-/ remove) plus **SemVer 2.0** versioning helpers.
+The knowledge-pack **metadata, validation, and filesystem lifecycle layer** of the agent-kgpacks
+TypeScript port. It reads and writes pack **manifests**, performs structural
+manifest validation, **installs** `.tar.gz` packs into a local install root with
+full **security parity**, and exposes a small **registry** (list / info / remove)
+plus **SemVer 2.0** versioning helpers.
 
 This package ports the upstream Python `wikigr/packs` modules — `manifest.py`
 (manifest model **and** validation), `installer.py`, `registry.py`, and
@@ -13,8 +13,9 @@ Validation is **not** a separate module here: it lives in `manifest.ts` as
 `validateManifest`, the single schema gate the rest of the package calls. Two
 external contracts are preserved verbatim:
 
-- The **pack on-disk format and manifest schema are unchanged**; existing
-  Python-built packs keep working byte-for-byte (see
+- The legacy pack on-disk format remains supported; existing Python-built packs
+  keep working byte-for-byte. The planned schema-v2 format adds immutable update
+  metadata without changing legacy loading (see
   [docs/PLAN.md](../PLAN.md) → _External Contracts_).
 - The **security checks are ported deliberately and tested adversarially**:
   `PACK_NAME_RE` is carried over exactly, and archive extraction rejects
@@ -22,10 +23,12 @@ external contracts are preserved verbatim:
   every entry **before** any write (see [docs/PLAN.md](../PLAN.md) → _Security
   Parity_).
 
-- **Runtime dependencies:** **none.** The installer uses `node:zlib.gunzipSync`
+- **Current runtime dependencies:** **none.** The installer uses `node:zlib.gunzipSync`
   plus a hand-written `ustar` tar parser; versioning is a hand-rolled SemVer 2.0
   implementation. The package adds nothing to `package.json` and does not depend
-  on `@kgpacks/db` — these are pure metadata / filesystem operations.
+  on `@kgpacks/db`. The planned schema-v2 lifecycle adds workspace integration
+  with `@kgpacks/db` and the versioned CVE adapter in `@kgpacks/ingestion`;
+  legacy manifest/installer imports must remain lightweight.
 - **Module system:** native ESM (NodeNext). Import named exports directly; types
   are re-exported with `export type`.
 - **Error model:** synchronous, **throw-on-invalid** — every validation failure
@@ -111,9 +114,22 @@ packs/
     └── ...                   # any additional pack files (skills, assets, etc.)
 ```
 
-This package treats everything except `manifest.json` as **opaque pack payload**:
-it copies/extracts those files faithfully but never parses them. Reading the
-graph database itself is the job of [`@kgpacks/db`](./db.md).
+A completed schema-v2 pack has a closed layout:
+
+```text
+packs/
+└── cve-2026.07/
+    ├── manifest.json
+    └── pack.db
+```
+
+Unlike a legacy pack, it permits no additional payload, WAL, journal,
+checkpoint, staging, lock, or temporary files.
+
+Legacy install and registry operations treat everything except `manifest.json`
+as **opaque pack payload** and copy/extract it faithfully. The planned complete
+schema-v2 validator and updater open `pack.db` through
+[`@kgpacks/db`](./db.md); structural `validateManifest` remains lightweight.
 
 ### The manifest file
 
@@ -207,6 +223,57 @@ const m = validateManifest({
 validateManifest({ name: '../evil', version: '1.0.0' });
 // throws ManifestValidationError: invalid pack name "../evil" (must match PACK_NAME_RE)
 ```
+
+#### Validation boundary
+
+`validateManifest` is deliberately structural. It validates JSON types, naming
+and version syntax, numeric ranges, and dangerous keys. It does not open
+LadybugDB, hash payloads, recompute graph statistics, or prove identity,
+lineage, provenance, or update classifications.
+
+The planned schema-v2 complete validator is
+`@kgpacks/packs` `validateKnowledgePack(packDir)`. The CLI dispatches
+`wikigr pack validate` to it when `schemaVersion` is `"2"`. It independently
+recomputes durable database and filesystem facts and compares every manifest
+projection. See the
+[incremental update validation contract](../reference/incremental-update.md#validation-boundaries).
+
+### [PLANNED] Incremental lifecycle API
+
+`@kgpacks/packs` owns and exports:
+
+```ts
+updateKnowledgePack(
+  request: UpdateKnowledgePackRequest,
+): Promise<UpdateKnowledgePackResult>;
+
+validateKnowledgePack(
+  packDir: string,
+): Promise<KnowledgePackValidationResult>;
+```
+
+The request union is exact:
+
+```ts
+type UpdateKnowledgePackRequest =
+  | {
+      mode: 'fresh';
+      base: string;
+      delta: string;
+      output: string;
+      version: string;
+      workDir?: string;
+    }
+  | { mode: 'resume'; workDir: string };
+```
+
+The package also exports `FreshUpdateKnowledgePackRequest`,
+`ResumeUpdateKnowledgePackRequest`, the exact ten-field update result, the
+discriminated v1/v2 validation result, `PackManifestV1`, `PackManifestV2` and
+its nested v2 types, plus
+`KnowledgePackUpdateError` and `KnowledgePackValidationError`. The complete
+field-level contract is the
+[incremental update reference](../reference/incremental-update.md#public-typescript-api).
 
 ### `loadManifest(manifestPath: string): PackManifest`
 

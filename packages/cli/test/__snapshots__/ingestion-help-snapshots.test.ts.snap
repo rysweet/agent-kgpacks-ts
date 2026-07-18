@@ -57,17 +57,15 @@ Options:
 exports[`Phase-2 help/usage golden snapshots > matches the pack update help snapshot > pack update 1`] = `
 "Usage: wikigr pack update [options]
 
-Resume / extend an existing pack's graph from new seeds.
+Build a new immutable pack version from a completed base and CVE delta.
 
 Options:
-  --pack <name>        pack directory name
-  --seeds <url...>     seed article URLs (HTTPS)
-  --config <file>      JSON config file (a subset of BuildPackConfig)
-  --max-depth <n>      maximum link-expansion depth from the seeds (default: 1)
-  --max-articles <n>   hard cap on the number of articles ingested (default:
-                       50)
-  --chunk-size <n>     section→chunk window size (characters)
-  --chunk-overlap <n>  overlap between consecutive chunks (characters)
+  --base <pack-dir>    completed provenance-capable base pack
+  --delta <file>       CVE NDJSON upsert delta
+  --output <pack-dir>  new immutable pack directory
+  --version <version>  target pack version
+  --work-dir <dir>     durable update work directory (default: <output>.work)
+  --resume <work-dir>  resume an interrupted incremental update
   -h, --help           display help for command
 "
 `;
@@ -89,17 +87,15 @@ Options:
 exports[`Phase-2 help/usage golden snapshots > matches the update help snapshot > update 1`] = `
 "Usage: wikigr update [options]
 
-Resume / extend an existing pack's graph from new seeds.
+Build a new immutable pack version from a completed base and CVE delta.
 
 Options:
-  --pack <name>        pack directory name
-  --seeds <url...>     seed article URLs (HTTPS)
-  --config <file>      JSON config file (a subset of BuildPackConfig)
-  --max-depth <n>      maximum link-expansion depth from the seeds (default: 1)
-  --max-articles <n>   hard cap on the number of articles ingested (default:
-                       50)
-  --chunk-size <n>     section→chunk window size (characters)
-  --chunk-overlap <n>  overlap between consecutive chunks (characters)
+  --base <pack-dir>    completed provenance-capable base pack
+  --delta <file>       CVE NDJSON upsert delta
+  --output <pack-dir>  new immutable pack directory
+  --version <version>  target pack version
+  --work-dir <dir>     durable update work directory (default: <output>.work)
+  --resume <work-dir>  resume an interrupted incremental update
   -h, --help           display help for command
 "
 `;

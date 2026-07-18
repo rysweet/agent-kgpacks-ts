@@ -41,6 +41,8 @@ const NAME_TO_CODE: Readonly<Record<string, number>> = {
   BlockedUrlError: EXIT_INGESTION,
   FetchError: EXIT_INGESTION,
   ExtractionError: EXIT_INGESTION,
+  KnowledgePackUpdateError: EXIT_INGESTION,
+  KnowledgePackValidationError: EXIT_VALIDATION,
   EvalError: EXIT_EVAL,
 };
 

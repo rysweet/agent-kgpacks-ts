@@ -237,6 +237,25 @@ export { loadPack, createSchema, loadExtensions, buildVectorIndexes } from './lo
 export type { LoadableArticle, LoadPackInput, LoadPackStats } from './loader.js';
 export { createPackWriter } from './streaming-loader.js';
 export type { PackWriter, PackWriterOptions, PackWriterStats } from './streaming-loader.js';
+export { CVE_ADAPTER_VERSION, cveToGraph } from './cve-adapter.js';
+export {
+  INCREMENTAL_SCHEMA_VERSION,
+  UPDATE_TOOL_VERSION,
+  buildCvePack,
+  publishBuiltCvePack,
+  updateKnowledgePack,
+  validateKnowledgePack,
+} from './incremental-update.js';
+export type {
+  BuildCvePackConfig,
+  PublishBuiltCvePackConfig,
+  DurablePackMetadata,
+  DurableUpdateApplication,
+  PackCheckpoint,
+  PackValidationResult,
+  UpdateKnowledgePackConfig,
+  UpdateKnowledgePackResult,
+} from './incremental-update.js';
 export {
   EMBEDDING_DIM,
   SECTION_TABLE,
@@ -248,7 +267,14 @@ export {
   REL_TABLE_DDL,
   VECTOR_INDEX_DDL,
 } from './schema.js';
-export { IngestionError, BlockedUrlError, FetchError, ExtractionError } from './errors.js';
+export {
+  IngestionError,
+  BlockedUrlError,
+  FetchError,
+  ExtractionError,
+  KnowledgePackUpdateError,
+  KnowledgePackValidationError,
+} from './errors.js';
 export type {
   Article,
   ArticleLink,

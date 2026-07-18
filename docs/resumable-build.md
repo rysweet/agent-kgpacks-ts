@@ -12,6 +12,10 @@ changing the resulting pack**:
 Both apply to `scripts/build-cve-pack.mjs` (the `pnpm cve:build` entry point). The
 output `pack.db` is **identical** whether or not a build was resumed or pipelined.
 
+This full-build checkpoint is not an incremental content update. The planned
+`wikigr update --resume` workflow has separate state and authority; see
+[Incremental-update resume](#planned-incremental-update-resume).
+
 ## Resumable builds
 
 ### The checkpoint sidecar
@@ -95,6 +99,39 @@ nodes with `CREATE` (not idempotent on its own), so correctness relies on the
 all-or-nothing batch boundary plus the article-title dedup skip — not on replaying a
 half-committed batch.
 
+## [PLANNED] Incremental-update resume
+
+`wikigr update` uses `<output>.work/update-state.json` plus
+`<output>.work/staging/`, not `<out>.build-checkpoint.json`. Only `staging/` is
+promoted to the output. Fresh update mode refuses existing work and requires
+explicit recovery:
+
+```bash
+wikigr update --resume data/packs/cve-2026.07.work
+```
+
+Incremental durable authority is the staged LadybugDB database:
+
+- `PackMetadata` records update identity, lineage, versions, and source hashes.
+- `UpdateApplication` records each committed key, upsert operation, nullable
+  base hash, result payload hash, and `added | modified | unchanged`
+  classification.
+- Source and support records establish the final graph state.
+
+The sidecar records paths, input fingerprints, phase, and per-record recovery
+positions. It is a recovery index, not evidence that application work
+committed. On resume, the engine reopens staging and reconciles a lagging
+sidecar against durable `UpdateApplication` rows before continuing. A sidecar
+that claims progress absent from LadybugDB is rejected.
+
+Resume also verifies the complete base snapshot, raw and semantic delta hashes,
+target version, and schema/adapter/extractor/tool versions. Changed inputs fail.
+After staging is closed and completely validated, publication uses an atomic
+no-replace promotion; an existing destination is never overwritten.
+
+See the [incremental update contract](reference/incremental-update.md) for the
+phase, validation, and publication guarantees.
+
 ## Pipelined build
 
 Within a single run, embedding and loading are decoupled by a small **double
@@ -134,3 +171,5 @@ the run continued from a checkpoint.
 - [docs/cve.md](cve.md) — the CVE build pipeline, corpus, and mapping.
 - [docs/entity-graph.md](entity-graph.md) — scalable `--with-entity-relations` loads.
 - [docs/pack-versioning.md](pack-versioning.md) — provenance stamped at build time.
+- [Incremental CVE update](howto/incremental-cve-update.md) — immutable update and
+  resume workflow.

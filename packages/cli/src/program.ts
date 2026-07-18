@@ -12,11 +12,12 @@
 
 import { Command } from 'commander';
 
-import { registerCreate, registerUpdate } from './commands/build.js';
+import { registerCreate } from './commands/build.js';
 import { registerPack } from './commands/pack.js';
 import { registerQuery } from './commands/query.js';
 import { registerResearchSources } from './commands/research-sources.js';
 import { registerStatus } from './commands/status.js';
+import { registerUpdate } from './commands/update.js';
 import { resolvePacksDir } from './config.js';
 import { CLI_VERSION, PROGRAM_NAME } from './constants.js';
 import type { CliContext } from './context.js';
@@ -29,6 +30,7 @@ import {
 } from './ingestion-runner.js';
 import { processIo, type Io } from './io.js';
 import { defaultQueryRunner, type QueryRunner } from './query-runner.js';
+import { defaultUpdateKnowledgePack, type UpdateKnowledgePackSeam } from './update-runner.js';
 
 /** Construction options for {@link buildProgram}. */
 export interface BuildProgramOptions {
@@ -38,6 +40,8 @@ export interface BuildProgramOptions {
   runQuery?: QueryRunner;
   /** `create` / `update` build seam. Defaults to the lazy `@kgpacks/ingestion` `buildPack`. */
   buildPack?: BuildPackSeam;
+  /** Immutable incremental update seam. */
+  updateKnowledgePack?: UpdateKnowledgePackSeam;
   /** `research-sources` discovery seam. Defaults to the lazy fetch-only crawler. */
   discoverSources?: DiscoverSourcesSeam;
   /** `pack eval` execution seam. Defaults to the lazy `@kgpacks/eval` `runEval`. */
@@ -68,6 +72,7 @@ export function buildProgram(options: BuildProgramOptions = {}): Command {
     io,
     runQuery: options.runQuery ?? defaultQueryRunner(),
     buildPack: options.buildPack ?? defaultBuildPack(),
+    updateKnowledgePack: options.updateKnowledgePack ?? defaultUpdateKnowledgePack(),
     discoverSources: options.discoverSources ?? defaultDiscoverSources(),
     evalPack: options.evalPack ?? defaultEvalPack(),
     packsDirFor: (flag) =>
