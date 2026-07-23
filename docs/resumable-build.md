@@ -12,9 +12,9 @@ changing the resulting pack**:
 Both apply to `scripts/build-cve-pack.mjs` (the `pnpm cve:build` entry point). The
 output `pack.db` is **identical** whether or not a build was resumed or pipelined.
 
-This full-build checkpoint is not an incremental content update. The planned
+This full-build checkpoint is not an incremental content update. The
 `wikigr update --resume` workflow has separate state and authority; see
-[Incremental-update resume](#planned-incremental-update-resume).
+[Incremental-update resume](#incremental-update-resume).
 
 ## Resumable builds
 
@@ -97,7 +97,7 @@ nodes with `CREATE` (not idempotent on its own), so correctness relies on the
 all-or-nothing batch boundary plus the article-title dedup skip — not on replaying a
 half-committed batch.
 
-## [PLANNED] Incremental-update resume
+## Incremental-update resume
 
 `wikigr update` uses `<output>.work/update-state.json` plus
 `<output>.work/staging/`, not `<out>.build-checkpoint.json`. Only `staging/` is
@@ -105,7 +105,7 @@ promoted to the output. Fresh update mode refuses existing work and requires
 explicit recovery:
 
 ```bash
-wikigr update --resume data/packs/cve-2026.07.work
+wikigr update --resume data/releases/2026.07/cve.work
 ```
 
 Incremental durable authority is the staged LadybugDB database:

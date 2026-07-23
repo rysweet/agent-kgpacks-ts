@@ -104,11 +104,11 @@ It prints a JSON summary (`mapped`, `articles`, `sections`, `chunks`, `entities`
 
 ### Build an update-capable base
 
-The schema-v2 full builder will make fresh CVE baselines eligible for immutable
+The schema-v2 full builder makes fresh CVE baselines eligible for immutable
 incremental updates by writing the complete provenance schema: singleton
 `PackMetadata`, canonical `ArticleSource` records, article/entity support,
 `RelationSupport`, update-application support, required columns, and required
-indexes. It will generate the manifest from this durable state and run complete
+indexes. It generates the manifest from this durable state and runs complete
 pack validation before publication.
 
 Update-capable bases require live `ENTITY_RELATION` edges and the complete
@@ -135,9 +135,9 @@ new schema-v2 pack, and atomically publishes a distinct output directory.
 
 ```bash
 wikigr update \
-  --base data/packs/cve-2026.06 \
+  --base data/releases/2026.06/cve \
   --delta .scratch/cve/delta.ndjson \
-  --output data/packs/cve-2026.07 \
+  --output data/releases/2026.07/cve \
   --version 2026.7.0
 ```
 
@@ -169,7 +169,7 @@ built pack as a multi-part, integrity-checked GitHub Release artifact that
 `wikigr pack pull` consumes:
 
 ```bash
-# Package data/packs/cve (manifest.json + pack.db) and upload to the `packs` release
+# Package data/packs/cve and publish to the manifest-derived immutable tag
 node scripts/release-pack.mjs --pack cve
 
 # Inspect the artifacts locally without uploading (writes parts + index to --out-dir)
@@ -181,13 +181,14 @@ node scripts/release-pack.mjs --pack cve --dry-run --out-dir /tmp/cve-rel
 it, and splits the stream into `--part-size` chunks (default 1900 MiB, safely
 under GitHub's 2 GiB asset limit), writing each `cve.tar.gz.NNN` part and a
 `cve.pack-release.json` index with per-part and overall SHA-256 sums. With `gh`
-authenticated it creates/uploads to the release tag (`--tag`, default `packs`).
+authenticated it creates/uploads to the release tag. Without `--tag`, the tag is
+`<name>-v<manifest.version>`.
 
 | Flag          | Default          | Meaning                                          |
 | ------------- | ---------------- | ------------------------------------------------ |
 | `--pack`      | (required)       | Pack directory name under `--packs-dir`.         |
 | `--packs-dir` | `data/packs`     | Packs root.                                      |
-| `--tag`       | `packs`          | Release tag to create/upload to.                 |
+| `--tag`       | manifest-derived | Immutable tag to create/upload to.               |
 | `--repo`      | gh-resolved repo | `owner/repo` to publish to.                      |
 | `--part-size` | `1900MiB`        | Max bytes per part (`B`/`KB`/`MB`/`GB`/`MiB`/…). |
 | `--out-dir`   | temp dir         | Where parts + index are written.                 |
@@ -195,21 +196,20 @@ authenticated it creates/uploads to the release tag (`--tag`, default `packs`).
 
 ### Versioned tags + provenance
 
-Prefer an **immutable, dated tag** over clobbering `packs` on every rebuild — the
-script publishes to the dated tag and also moves the stable `packs` latest-pointer
-to the same assets, so `wikigr pack pull cve` (default `packs`) keeps working:
+The default immutable tag is `<name>-v<manifest.version>`. A dated tag is also
+accepted when its derived SemVer exactly matches the manifest:
 
 ```bash
-# Immutable version cve-2025.06 → index version 2025.6.0, + updates the packs pointer
+# Immutable version cve-2025.06 → index version 2025.6.0
 node scripts/release-pack.mjs --pack cve --tag cve-2025.06
 ```
 
-The behavior above describes the current legacy release path. The planned
-schema-v2 incremental release path is stricter: it validates the complete pack,
-publishes only to an explicit immutable tag, treats exact existing assets as a
-no-op, and fails on mismatches without replacing assets or moving any tag. It
-does not update the mutable `packs` pointer. See
-[immutable update release publication](pack-versioning.md#planned-immutable-update-release-publication).
+For schema-v2 packs, the script runs complete validation before archiving. It
+creates a draft release, verifies the uploaded asset set, and publishes only
+after verification. An existing exact asset set is a no-op; a mismatch fails
+without replacing assets or moving a tag. Immutable publication does not update
+the legacy mutable `packs` release. See
+[immutable update release publication](pack-versioning.md#immutable-update-release-publication).
 
 The builder (`build-cve-pack.mjs`) stamps **provenance** (corpus commit/date,
 embedding model, build date) into `manifest.json`; the release script mirrors it

@@ -1,7 +1,7 @@
 ---
 title: Incremental knowledge-pack update contract
 description: Reference for the schema-v2 CVE update API, delta grammar, durable metadata, validation, and publication guarantees
-last_updated: 2026-07-17
+last_updated: 2026-07-23
 review_schedule: as-needed
 owner: kgpacks-maintainers
 doc_type: reference
@@ -66,28 +66,28 @@ Global options such as `--packs-dir` do not become request fields.
 
 ## Public TypeScript API
 
-`@kgpacks/packs` will export the lifecycle entry points, request/result types,
-schema-v2 manifest types, and typed failures. The update request is
-discriminated by `mode`; no field aliases or mixed-mode objects are accepted.
+`@kgpacks/ingestion` exports the lifecycle entry points, configuration/result
+types, durable metadata types, and typed failures. `@kgpacks/packs` exports the
+schema-v2 manifest types and structural manifest validator.
 
 ```ts
-interface FreshUpdateKnowledgePackRequest {
-  mode: 'fresh';
+interface FreshUpdateConfig {
   base: string;
   delta: string;
   output: string;
   version: string;
   workDir?: string;
+  embedder?: Embedder;
+  onCheckpoint?: (checkpoint: PackCheckpoint) => void;
 }
 
-interface ResumeUpdateKnowledgePackRequest {
-  mode: 'resume';
-  workDir: string;
+interface ResumeUpdateConfig {
+  resume: string;
+  embedder?: Embedder;
+  onCheckpoint?: (checkpoint: PackCheckpoint) => void;
 }
 
-type UpdateKnowledgePackRequest =
-  | FreshUpdateKnowledgePackRequest
-  | ResumeUpdateKnowledgePackRequest;
+type UpdateKnowledgePackConfig = FreshUpdateConfig | ResumeUpdateConfig;
 
 interface UpdateKnowledgePackResult {
   packId: string;
@@ -101,31 +101,31 @@ interface UpdateKnowledgePackResult {
   output: string;
 }
 
-interface LegacyKnowledgePackValidationResult {
+interface PackValidationResult {
   valid: true;
-  schemaVersion: 1;
-  manifest: PackManifestV1;
+  manifest: PackManifest;
+  metadata: DurablePackMetadata;
+  applications: DurableUpdateApplication[];
+  contentDigest: string;
+  counts: {
+    articles: number;
+    sections: number;
+    chunks: number;
+    entities: number;
+    relationships: number;
+    entitySupport: number;
+    relationSupport: number;
+  };
 }
-
-interface V2KnowledgePackValidationResult {
-  valid: true;
-  schemaVersion: 2;
-  manifest: PackManifestV2;
-  counts: PackGraphStatsV2;
-}
-
-type KnowledgePackValidationResult =
-  | LegacyKnowledgePackValidationResult
-  | V2KnowledgePackValidationResult;
 
 declare function updateKnowledgePack(
-  request: UpdateKnowledgePackRequest,
+  config: UpdateKnowledgePackConfig,
 ): Promise<UpdateKnowledgePackResult>;
 
-declare function validateKnowledgePack(packDir: string): Promise<KnowledgePackValidationResult>;
+declare function validateKnowledgePack(packDir: string): Promise<PackValidationResult>;
 ```
 
-`UpdateKnowledgePackResult` has exactly the ten fields shown above. Successful
+`UpdateKnowledgePackResult` has exactly the nine fields shown above. Successful
 fresh, resume, and matching-destination no-op calls all return that shape.
 Failures throw and never return a partial or success-shaped result.
 `buildId` and `deltaId` are lowercase SHA-256 hex, all three counts are safe
@@ -134,25 +134,27 @@ non-negative integers, and `output` is the canonical absolute output path.
 all-unchanged delta; it is true only when an equivalent destination already
 exists.
 
-The CLI maps fresh flags to `{ mode: 'fresh', base, delta, output, version,
-workDir? }` and `--resume <work-dir>` to `{ mode: 'resume', workDir }`. It
+The CLI maps fresh flags to `{ base, delta, output, version, workDir? }` and
+`--resume <work-dir>` to `{ resume: workDir }`. It
 serializes the returned object once as the only stdout document.
 
 The CLI `BuildProgramOptions` has a separate injectable seam:
 
 ```ts
 updateKnowledgePack?: (
-  request: UpdateKnowledgePackRequest,
+  config: UpdateKnowledgePackConfig,
 ) => Promise<UpdateKnowledgePackResult>;
 ```
 
 `buildPack` remains the seed-based full ingestion seam for `create`; it does not
 implement incremental updates.
 
-`@kgpacks/ingestion` owns update orchestration, the versioned CVE adapter,
-manifest projection, complete validation, resume, and publication. It uses
-`@kgpacks/db` for LadybugDB and `@kgpacks/packs` for manifest serialization.
-The CLI loads this update seam lazily.
+`@kgpacks/ingestion` also exports `PackCheckpoint`, `DurablePackMetadata`,
+`DurableUpdateApplication`, `KnowledgePackUpdateError`, and
+`KnowledgePackValidationError`. It owns update orchestration, the versioned CVE
+adapter, manifest projection, complete validation, resume, and publication. It
+uses `@kgpacks/db` for LadybugDB and `@kgpacks/packs` for manifest
+serialization. The CLI loads this update seam lazily.
 
 ## Delta grammar
 
@@ -349,10 +351,11 @@ ownership or reconstructs provenance heuristically.
 
 ## Version compatibility
 
-Manifest schema dispatch is exact. Missing `schemaVersion` and exact string
-`"1"` select legacy validation; exact string `"2"` selects strict v2
-validation. Numbers, malformed values, and every other major fail. Legacy v1
-packs remain validatable but are never eligible incremental bases.
+Complete update validation accepts only exact string schema version `"2"`.
+Legacy manifests remain eligible for the shared structural checks in
+`validateManifest`, but they are never eligible incremental bases. The CLI
+invokes complete validation only when the loaded manifest declares exact string
+`"2"`; other manifests receive only the shared structural checks.
 
 The first v2 implementation has no implicit adapter or extractor migration. The
 base's `adapterVersion` and `extractorVersion` must exactly equal identifiers in
@@ -418,10 +421,9 @@ type Sha256 = string;
 type UpdateOperation = 'upsert';
 type UpdateClassification = 'added' | 'modified' | 'unchanged';
 
-interface PackManifestV1 {
+interface PackManifest {
   name: string;
   version: string;
-  schemaVersion?: '1';
   description?: string;
   graph_stats?: GraphStats;
   eval_scores?: EvalScores;
@@ -447,36 +449,13 @@ type PackLineageV2 =
       };
     };
 
-interface PackProvenanceV2 {
-  corpus: {
-    name: string;
-    commit: string | null;
-    date: string | null;
-  };
-  embedding: {
-    model: string;
-    dimensions: number;
-  };
-  build: {
-    tool_version: string;
-  };
+interface PackUpdateRecordV2 {
+  key: string;
+  operation: 'upsert';
+  basePayloadSha256: Sha256 | null;
+  resultPayloadSha256: Sha256;
+  classification: UpdateClassification;
 }
-
-type PackUpdateRecordV2 =
-  | {
-      key: string;
-      operation: 'upsert';
-      basePayloadSha256: null;
-      resultPayloadSha256: Sha256;
-      classification: 'added';
-    }
-  | {
-      key: string;
-      operation: 'upsert';
-      basePayloadSha256: Sha256;
-      resultPayloadSha256: Sha256;
-      classification: 'modified' | 'unchanged';
-    };
 
 interface PackUpdateV2 {
   added: number;
@@ -485,49 +464,30 @@ interface PackUpdateV2 {
   records: PackUpdateRecordV2[];
 }
 
-interface PackGraphStatsV2 {
-  articles: number;
-  sections: number;
-  chunks: number;
-  entities: number;
-  relationships: number;
-  entity_support: number;
-  relation_support: number;
-  source_records: number;
-  update_applications: number;
-  payload_bytes: number;
-  size_mb: number;
-}
-
 interface PackFileMetadataV2 {
   path: string;
   size: number;
   sha256: Sha256;
 }
 
-interface PackManifestV2 {
-  name: string;
+interface PackManifestV2 extends PackManifest {
   packId: string;
-  version: string;
   schemaVersion: '2';
   adapterVersion: string;
   extractorVersion: string;
   toolVersion: string;
   buildId: Sha256;
-  provenance: PackProvenanceV2;
   lineage: PackLineageV2;
   update: PackUpdateV2;
-  graph_stats: PackGraphStatsV2;
   files: PackFileMetadataV2[];
   contentDigest: Sha256;
 }
-
-type PackManifest = PackManifestV1 | PackManifestV2;
 ```
 
-The `modified` and `unchanged` variants share a TypeScript shape, so runtime
-validation additionally enforces unequal hashes for `modified` and equal hashes
-for `unchanged`.
+The structural types permit shared legacy fields and extensions. Runtime
+schema-v2 validation additionally requires the provenance and whole-pack
+statistics shown below, enforces a null base hash for `added`, unequal hashes
+for `modified`, and equal hashes for `unchanged`.
 
 A schema-v2 incremental output has this shape:
 
@@ -607,13 +567,14 @@ A schema-v2 incremental output has this shape:
 
 Requirements:
 
-- The public manifest types are `PackManifestV1`, `PackManifestV2`,
-  `PackManifest`, `PackProvenanceV2`, `PackLineageV2`, `PackUpdateV2`,
-  `PackUpdateRecordV2`, `PackGraphStatsV2`, and `PackFileMetadataV2`.
-- `PackManifest` is the `PackManifestV1 | PackManifestV2` union. A missing
-  `schemaVersion` (or explicit `"1"`) uses legacy v1 validation; exact `"2"`
-  uses the strict v2 schema. Unknown schema majors fail rather than falling
-  through to legacy behavior.
+- `@kgpacks/packs` exports `PackManifest`, `PackManifestV2`,
+  `PackLineageV2`, `PackUpdateV2`, `PackUpdateRecordV2`,
+  `PackFileMetadataV2`, `PackProvenance`, `GraphStats`, and the update
+  operation/classification aliases.
+- `validateManifest` validates the shared manifest fields and preserves
+  schema-v2 extension fields without proving their complete shape or semantics.
+  Exact string `schemaVersion: "2"` also enables the immutable version-token
+  grammar.
 - `name` and `packId` must be identical. A baseline has both lineage members
   null and an empty zero-count update. An incremental output has both lineage
   members non-null and non-empty or empty update records matching its delta;
@@ -642,19 +603,19 @@ Requirements:
 `@kgpacks/packs` `validateManifest(value)` is a synchronous structural gate. It
 checks JSON field types, pack naming/version syntax, numeric ranges, and
 prototype-pollution keys. It does not open LadybugDB, hash files, or establish
-that identity, lineage, provenance, counts, and update records are truthful.
+that identity, lineage, provenance, counts, and update records are truthful. It
+does not completely validate the schema-v2 extension fields.
 
 ### Complete pack validation
 
-`validateKnowledgePack(packDir)` and `wikigr pack validate` use one complete
-entry point. For a manifest with no `schemaVersion` (or explicit `"1"`), it
-preserves legacy v1 validation and does not demand schema-v2 tables. Exact
-`"2"` selects complete v2 validation; every other schema major fails. An
-incremental output must always be v2.
+`validateKnowledgePack(packDir)` is the complete schema-v2 entry point and
+rejects any pack that is not exact schema version `"2"`. `wikigr pack validate`
+loads the manifest first: it calls the complete validator for schema-v2 packs
+and retains structural-only validation for legacy manifests.
 
-All failures from this entry point, including v1 structural failures, are
-reported as `KnowledgePackValidationError`. The lower-level synchronous
-`validateManifest` continues to throw `ManifestValidationError`.
+Complete validation failures are reported as
+`KnowledgePackValidationError`. The lower-level synchronous `validateManifest`
+continues to throw `ManifestValidationError`.
 
 The v2 validator reopens `pack.db` read-only and does not consume builder
 summaries, sidecars, or checkpoints. It independently recomputes and verifies:
@@ -711,19 +672,15 @@ Durable update state records:
 
 - canonical base, delta, output, and work paths;
 - target version and deterministic IDs;
-- exact `baseTreeDigest` and delta-file hashes;
-- schema/adapter/extractor/tool versions and embedding-model identity;
+- exact base manifest and `pack.db` hashes plus semantic/raw delta hashes;
+- schema/extractor/tool versions and embedding-model identity;
 - current durable phase;
-- each delta ordinal, key, operation, nullable payload hash, and advisory
-  processed status.
+- each delta ordinal, key, canonical payload hash, and advisory processed
+  status.
 
-`baseTreeDigest` is distinct from manifest `contentDigest`: it snapshots every
-regular file in the input base, including `manifest.json`. It is SHA-256 over
-the canonical path-sorted array of `{ path, size, sha256 }`, using normalized
-POSIX-relative paths. A symlink, special file, duplicate normalized path, or
-directory entry outside the canonical base rejects the snapshot. Resume and
-every terminal path recompute this digest; the exact delta-file SHA-256 is
-recomputed directly from its bytes.
+Schema-v2 directory closure requires exactly `manifest.json` and `pack.db`, so
+the two saved base hashes cover the complete eligible base tree. Resume
+recomputes both hashes and the exact delta-file SHA-256 directly from bytes.
 
 LadybugDB `UpdateApplication` rows and staged database state are authoritative
 for completed application work. The sidecar is a recovery index. On resume, the
@@ -733,17 +690,11 @@ re-canonicalizes every saved path and revalidates the sidecar schema, target
 version, exact base tree and delta bytes, semantic `deltaId`, staged database,
 durable applications, all recorded component versions, and the embedding model.
 
-The durable phases are `prepared`, `applying`, `finalizing`, `ready`, and
-`promoting`. Each transition is written atomically only after its preceding
-database/file durability boundary. Resume behavior is deterministic:
-
-- `prepared` or `applying`: reconcile applications and continue in stable-key
-  order;
-- `finalizing`: discard untrusted projections, reopen/checkpoint the staged
-  database, and repeat finalization;
-- `ready`: completely revalidate staging, then attempt no-replace promotion;
-- `promoting`: validate output first; an equivalent output completes as a
-  no-op, an absent output retries promotion, and any other output fails.
+The durable phases are `prepared` and `delta-applied`. During `prepared`,
+resume reconciles per-record sidecar status with staged source/application
+evidence and continues in stable-key order. During `delta-applied`, resume
+revalidates staging and retries no-replace publication. If publication already
+completed, an equivalent output completes as a no-op; any other output fails.
 
 After successful publication or equivalent-output recovery, the workspace is
 removed. On failure it is retained only if it has reached one of the durable
@@ -789,59 +740,27 @@ contains an intentional resumable checkpoint.
 
 ## Errors and exit codes
 
-`@kgpacks/packs` will expose typed failures. CLI outcomes are:
+`@kgpacks/ingestion` exposes the typed failures. CLI outcomes are:
 
-| Outcome                        | Meaning                                                                                                        |                                                                                                   CLI exit |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------: |
-| Success                        | Fresh publication, resume, or comprehensively equivalent no-op                                                 |                                                                                                        `0` |
-| `KnowledgePackUpdateError`     | Expected update-domain failure: delta, base eligibility, resume mismatch, collision, or publication capability |                                                                                                        `7` |
-| `KnowledgePackValidationError` | Complete pack validation failure with structured diagnostics                                                   | `4` when invoked by `pack validate`; wrapped as update-domain failure during update preflight/finalization |
-| Commander usage error          | Missing, mixed, or unknown CLI options                                                                         |                                                                                                        `2` |
-| Other error                    | Unexpected internal failure                                                                                    |                                                                                                        `1` |
+| Outcome                        | Meaning                                                                                                        | CLI exit |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------- | -------: |
+| Success                        | Fresh publication, resume, or comprehensively equivalent no-op                                                 |      `0` |
+| `KnowledgePackUpdateError`     | Expected update-domain failure: delta, base eligibility, resume mismatch, collision, or publication capability |      `7` |
+| `KnowledgePackValidationError` | Complete pack validation failure                                                                               |      `4` |
+| Commander usage error          | Missing, mixed, or unknown CLI options                                                                         |      `2` |
+| Other error                    | Unexpected internal failure                                                                                    |      `1` |
 
 Update failures emit a diagnostic on stderr and no success JSON. The CLI maps
 error types, not message text.
 
-Standalone validation renders every structured diagnostic on stderr and exits
-`4`. During update, base validation maps to `INELIGIBLE_BASE`, invalid staged
-state maps to `PUBLICATION_FAILED`, invalid resumed state maps to
-`RESUME_MISMATCH`, and a non-equivalent destination maps to
-`OUTPUT_COLLISION`; all exit `7`. Stdout remains empty for every failure.
-
-`KnowledgePackUpdateError` carries a stable `code` covering invalid request or
-delta, ineligible base, version/path/work conflicts, resume mismatch, output
-collision, unsupported publication, and publication failure.
-`KnowledgePackValidationError` carries `packDir` and a non-empty readonly list
-of `{ code, path?, message }` diagnostics. Error messages are human-readable;
-callers branch on class and code, never message text.
+During update, validation failures are wrapped as `KnowledgePackUpdateError`
+and therefore exit `7`. Stdout remains empty for every failure. Both error
+classes currently expose the normal `Error` fields (`name`, `message`, and
+stack); callers branch on class or `name`, not message text.
 
 ```ts
-type KnowledgePackUpdateErrorCode =
-  | 'INVALID_REQUEST'
-  | 'INVALID_DELTA'
-  | 'INELIGIBLE_BASE'
-  | 'VERSION_CONFLICT'
-  | 'PATH_CONFLICT'
-  | 'WORK_DIR_CONFLICT'
-  | 'RESUME_MISMATCH'
-  | 'OUTPUT_COLLISION'
-  | 'PUBLICATION_UNSUPPORTED'
-  | 'PUBLICATION_FAILED';
-
-interface KnowledgePackValidationDiagnostic {
-  code: string;
-  path?: string;
-  message: string;
-}
-
-declare class KnowledgePackUpdateError extends PacksError {
-  readonly code: KnowledgePackUpdateErrorCode;
-}
-
-declare class KnowledgePackValidationError extends PacksError {
-  readonly packDir: string;
-  readonly diagnostics: readonly KnowledgePackValidationDiagnostic[];
-}
+declare class KnowledgePackUpdateError extends IngestionError {}
+declare class KnowledgePackValidationError extends Error {}
 ```
 
 ## Related documentation

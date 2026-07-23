@@ -11,7 +11,7 @@ covers both halves of the platform:
 Built on [`@kgpacks/packs`](../packs), [`@kgpacks/query`](../query), and
 [`@kgpacks/db`](../db) for the runtime side, and on
 [`@kgpacks/ingestion`](../ingestion) (`buildPack`),
-[`@kgpacks/packs`](../packs) (the planned `updateKnowledgePack`), and
+[`@kgpacks/ingestion`](../ingestion) (`updateKnowledgePack`), and
 [`@kgpacks/eval`](../eval) (`runEval`) for the
 ingestion side. The heavy write-side stack (HTTP fetch, the embedding model,
 the LLM extractor/judge) is loaded **lazily**, only when an ingestion command
@@ -34,9 +34,7 @@ wikigr --help
 
 ## Commands
 
-The command summary below includes the planned schema-v2 `update` replacement.
-Until it lands, the installed CLI still exposes the legacy seed-based update
-described as deprecated in the detailed section.
+The command summary below includes the schema-v2 `update` command.
 
 ```
 wikigr [--packs-dir <dir>] <command>
@@ -79,8 +77,8 @@ message to **stderr** and set a distinct exit code (see [Exit codes](#exit-codes
 
 `create` wraps [`@kgpacks/ingestion`](../ingestion)'s `buildPack` pipeline
 (`fetch → clean/sectionize → extract → chunk → embed → load → expand`). The
-planned `update` command uses the separate `updateKnowledgePack` schema-v2
-engine, and `pack eval` wraps [`@kgpacks/eval`](../eval)'s `runEval`.
+`update` command uses the separate `updateKnowledgePack` schema-v2 engine, and
+`pack eval` wraps [`@kgpacks/eval`](../eval)'s `runEval`.
 
 > **Dual surface.** `create` / `update` are mounted **both** at the top level and
 > under the `pack` group (`pack create` / `pack update`). Each alias pair shares
@@ -147,9 +145,9 @@ Resume mode accepts only `--resume`.
 
 ```sh
 wikigr update \
-  --base data/packs/cve-2026.06 \
+  --base data/releases/2026.06/cve \
   --delta .scratch/cve/delta.ndjson \
-  --output data/packs/cve-2026.07 \
+  --output data/releases/2026.07/cve \
   --version 2026.7.0
 ```
 
@@ -288,9 +286,9 @@ by the thrown error's **name** (the mapper never imports the heavy write-side
 packages):
 
 - `7` ← `IngestionError`, `BlockedUrlError`, `FetchError`, `ExtractionError`,
-  and the planned `KnowledgePackUpdateError` (from
-  [`@kgpacks/packs`](../packs)).
-- `4` ← the planned `KnowledgePackValidationError` when
+  and `KnowledgePackUpdateError` (from
+  [`@kgpacks/ingestion`](../ingestion)).
+- `4` ← `KnowledgePackValidationError` when
   `wikigr pack validate` performs complete schema-v2 validation. The update
   command reports the same condition as an update-domain failure (`7`).
 - `8` ← `EvalError` (from [`@kgpacks/eval`](../eval)).
@@ -320,7 +318,7 @@ of tests and are loaded lazily by the production defaults otherwise:
 | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- | ------------------------ |
 | `runQuery`                                                                                       | lazy `@kgpacks/db` + `@kgpacks/query`                                                   | `query`                  |
 | `buildPack(config): Promise<BuildPackResult>`                                                    | lazy `@kgpacks/ingestion` `buildPack`                                                   | `create` (`pack create`) |
-| `updateKnowledgePack(request): Promise<UpdateKnowledgePackResult>`                               | lazy `@kgpacks/packs` `updateKnowledgePack`                                             | `update` (`pack update`) |
+| `updateKnowledgePack(config): Promise<UpdateKnowledgePackResult>`                                | lazy `@kgpacks/ingestion` `updateKnowledgePack`                                         | `update` (`pack update`) |
 | `discoverSources({ seeds, maxDepth, maxArticles }): Promise<string[]>`                           | lazy ingestion fetch + `expandFromSeeds`, with the seed URLs filtered out of the result | `research-sources`       |
 | `evalPack({ packDir, packId, sample, perPack, judgeModel, questionsDir? }): Promise<EvalReport>` | lazy `@kgpacks/eval` `runEval` (+ `@kgpacks/query` / `@kgpacks/agent`)                  | `pack eval`              |
 
