@@ -4,7 +4,7 @@ The `wikigr` command-line interface — a Commander port of the upstream CLI. It
 covers both halves of the platform:
 
 - **RUNTIME** (Phase 1): querying and pack management —
-  `query`, `status`, and `pack { install, list, info, validate, remove }`.
+  `query`, `status`, and `pack { install, pull, list, info, validate, remove }`.
 - **INGESTION** (Phase 2): building and evaluating packs —
   `create`, `update`, `research-sources`, and `pack { create, eval, update }`.
 
@@ -44,6 +44,7 @@ RUNTIME
                                  Query a pack and print ranked retrieval results.
   status                         Show the resolved packs directory + installed packs.
   pack install <archive.tar.gz>  Install a pack from a local gzip-compressed tarball.
+  pack pull <name>               Discover or select, verify, download, and install a release.
   pack list                      List installed packs.
   pack info <pack>               Print a pack's full manifest.
   pack validate <pack>           Validate a manifest; completely validate schema-v2 packs.
@@ -72,6 +73,32 @@ message to **stderr** and set a distinct exit code (see [Exit codes](#exit-codes
 ### `query` defaults
 
 `-k` defaults to `5`; `--mode` defaults to `vector`.
+
+### `pack pull` — install a release
+
+```text
+wikigr [--packs-dir <dir>] pack pull <name>
+       [--repo <owner/repo>] [--tag <tag>] [--base-url <url>]
+       [--require-signature | --no-verify]
+```
+
+With neither `--tag` nor `--base-url`, the command discovers the highest
+matching stable release in `--repo`. Automatic discovery requires a release
+that advertises both `<name>.pack-release.json` and its detached Ed25519
+signature, then verifies that signature before parsing the index. `--no-verify`
+is the explicit exception; SHA-256 checks remain mandatory.
+
+`--tag` pins one release and `--base-url` selects an asset directory directly.
+Both bypass discovery and never fall back to another release. Explicit sources
+may be unsigned unless `--require-signature` is set, but a present invalid
+signature still fails unless verification was disabled.
+
+The command streams each part to temporary storage, verifies its declared byte
+count and SHA-256, verifies the assembled archive SHA-256, and then streams the
+archive into the atomic pack installer. See the
+[pack release discovery and download reference](../../docs/reference/pack-release-discovery.md)
+for tag formats, deterministic ordering, failure behavior, and transport
+boundaries.
 
 ## Ingestion commands
 

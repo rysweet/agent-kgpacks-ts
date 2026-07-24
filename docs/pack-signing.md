@@ -147,6 +147,7 @@ verify, e.g. `key cve-2025`). To rotate:
 
 ## Related docs
 
+- [Pack release discovery and download reference](reference/pack-release-discovery.md) — source precedence, selection order, integrity checks, and transport boundaries.
 - [docs/pack-versioning.md](pack-versioning.md) — versioned tags & the provenance block the signature protects.
 - [docs/using-the-cve-pack.md](using-the-cve-pack.md) — the end-to-end pull/verify UX.
 - [docs/packages/packs.md](packages/packs.md) — the release index schema & installer security model.
