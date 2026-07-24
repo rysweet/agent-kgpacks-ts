@@ -14,7 +14,7 @@
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { join } from 'node:path';
 import { PassThrough, Readable, Transform, type TransformCallback } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
@@ -357,7 +357,7 @@ function assertIndex(value: unknown, expectedName: string, url: string): PackRel
   return idx as PackReleaseIndex;
 }
 
-async function downloadPart(url: string, dest: string): Promise<{ hash: string; bytes: number }> {
+async function downloadPart(url: string, dest: string): Promise<void> {
   try {
     return await retryHttp(async () => {
       const request = await fetchOnce(url);
@@ -367,27 +367,22 @@ async function downloadPart(url: string, dest: string): Promise<{ hash: string; 
           await res.body?.cancel().catch(() => undefined);
           throw new PackInstallError(`failed to download part ${url} (HTTP ${res.status})`);
         }
-        const partHash = createHash('sha256');
-        let bytes = 0;
-        const verifier = new Transform({
+        const activity = new Transform({
           transform(chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback) {
             request.refreshTimeout();
-            bytes += chunk.length;
-            partHash.update(chunk);
             callback(null, chunk);
           },
         });
         try {
           await pipeline(
             Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]),
-            verifier,
+            activity,
             createWriteStream(dest),
           );
         } catch (error) {
           rmSync(dest, { force: true });
           throw new TransientHttpError(`download stream failed for ${url}: ${errorMessage(error)}`);
         }
-        return { hash: partHash.digest('hex'), bytes };
       } finally {
         request.finish();
       }
@@ -560,51 +555,38 @@ async function pumpVerifiedParts(
 async function verifyInstalledPayloads(packDir: string): Promise<void> {
   const manifest = loadManifestFromDir(packDir);
   if (manifest.schemaVersion !== '2') return;
-  if (!Array.isArray(manifest.files)) {
-    throw new PackInstallError('schema-v2 manifest has no payload file metadata');
-  }
+  const files = manifest.files;
   if (
-    manifest.files.length !== 1 ||
-    !manifest.files[0] ||
-    typeof manifest.files[0] !== 'object' ||
-    manifest.files[0].path !== 'pack.db'
+    !Array.isArray(files) ||
+    files.length !== 1 ||
+    !files[0] ||
+    typeof files[0] !== 'object' ||
+    files[0].path !== 'pack.db'
   ) {
     throw new PackInstallError('schema-v2 manifest must declare exactly pack.db');
   }
-  const root = resolve(packDir);
-  for (const value of manifest.files) {
-    if (
-      !value ||
-      typeof value !== 'object' ||
-      typeof value.path !== 'string' ||
-      typeof value.size !== 'number' ||
-      typeof value.sha256 !== 'string'
-    ) {
-      throw new PackInstallError('schema-v2 manifest has invalid payload file metadata');
-    }
-    const path = resolve(root, value.path);
-    const rel = relative(root, path);
-    if (isAbsolute(value.path) || rel === '..' || rel.startsWith(`..${sep}`)) {
-      throw new PackInstallError(`schema-v2 manifest has invalid payload path ${value.path}`);
-    }
-    let size: number;
-    try {
-      const status = statSync(path);
-      if (!status.isFile()) throw new Error('not a regular file');
-      size = status.size;
-    } catch {
-      throw new PackInstallError(`payload ${value.path} is missing or is not a regular file`);
-    }
-    if (size !== value.size) {
-      throw new PackInstallError(
-        `payload ${value.path} size mismatch: expected ${value.size} bytes, got ${size}`,
-      );
-    }
-    const hash = createHash('sha256');
-    for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer);
-    if (hash.digest('hex') !== value.sha256) {
-      throw new PackInstallError(`payload ${value.path} checksum mismatch`);
-    }
+  const payload = files[0];
+  if (typeof payload.size !== 'number' || typeof payload.sha256 !== 'string') {
+    throw new PackInstallError('schema-v2 manifest has invalid pack.db metadata');
+  }
+  const path = join(packDir, payload.path);
+  let size: number;
+  try {
+    const status = statSync(path);
+    if (!status.isFile()) throw new Error('not a regular file');
+    size = status.size;
+  } catch {
+    throw new PackInstallError('payload pack.db is missing or is not a regular file');
+  }
+  if (size !== payload.size) {
+    throw new PackInstallError(
+      `payload pack.db size mismatch: expected ${payload.size} bytes, got ${size}`,
+    );
+  }
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer);
+  if (hash.digest('hex') !== payload.sha256) {
+    throw new PackInstallError('payload pack.db checksum mismatch');
   }
 }
 
@@ -670,15 +652,7 @@ export async function pullPack(opts: PullPackOptions): Promise<PulledPack> {
     const partPaths: string[] = [];
     for (const part of index.parts) {
       const dest = join(work, part.file);
-      const { hash, bytes } = await downloadPart(`${base}/${part.file}`, dest);
-      if (bytes !== part.bytes) {
-        throw new PackInstallError(
-          `part ${part.file} size mismatch: expected ${part.bytes} bytes, got ${bytes}`,
-        );
-      }
-      if (hash !== part.sha256) {
-        throw new PackInstallError(`part ${part.file} checksum mismatch`);
-      }
+      await downloadPart(`${base}/${part.file}`, dest);
       partPaths.push(dest);
     }
 

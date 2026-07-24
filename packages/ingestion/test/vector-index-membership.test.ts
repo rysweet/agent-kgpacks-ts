@@ -7,15 +7,21 @@ function connectionWithMembership(
   liveIds: string[],
   indexedIds: Array<string | null>,
   embedding: unknown = Array<number>(768).fill(1),
+  visitedIds: string[] = [],
 ): Connection {
   return {
     async run<T>(cypher: string, params?: Record<string, unknown>): Promise<T[]> {
       if (cypher.includes(`MATCH (node:`)) {
         const afterId = String(params?.afterId ?? '');
-        return liveIds
+        const limit = Number(/\bLIMIT (\d+)$/.exec(cypher)?.[1]);
+        if (!Number.isInteger(limit) || limit <= 0)
+          throw new Error(`invalid scan query: ${cypher}`);
+        const rows = liveIds
           .filter((id) => id > afterId)
-          .slice(0, 256)
-          .map((id) => ({ id, embedding })) as T[];
+          .slice(0, limit)
+          .map((id) => ({ id, embedding }));
+        visitedIds.push(...rows.map(({ id }) => id));
+        return rows as T[];
       }
       if (cypher.includes('QUERY_VECTOR_INDEX')) {
         return indexedIds.map((id) => ({ id })) as T[];
@@ -37,6 +43,23 @@ describe.each([
         index,
       ),
     ).resolves.toBeUndefined();
+  });
+
+  it('validates every live row across multiple scan pages', async () => {
+    const liveIds = Array.from(
+      { length: 1100 },
+      (_, index) => `id-${index.toString().padStart(4, '0')}`,
+    );
+    const visitedIds: string[] = [];
+
+    await expect(
+      validateVectorIndexMembership(
+        connectionWithMembership(liveIds, liveIds, undefined, visitedIds),
+        table,
+        index,
+      ),
+    ).resolves.toBeUndefined();
+    expect(visitedIds).toEqual(liveIds);
   });
 
   it.each([

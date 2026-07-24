@@ -650,7 +650,7 @@ Every manifest identity, lineage, provenance, count, record, statistic, and
 file field is checked against durable authority. Changing related fields
 together must not make tampering pass.
 
-Vector validation keyset-scans every live row in pages of 256 and first checks
+Vector validation keyset-scans every live row in pages of 1,024 and first checks
 each embedding's dimensions, structure, and finite values. The resulting live
 IDs are authoritative. Validation then requests the complete index result plus
 one sentinel slot and compares returned IDs as a multiset: cardinality must

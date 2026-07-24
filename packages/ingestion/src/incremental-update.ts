@@ -1768,45 +1768,40 @@ export async function validateVectorIndexMembership(
   table: 'Section' | 'Chunk',
   index: string,
 ): Promise<void> {
+  const batchSize = 1024;
+  const mismatch = `${index} membership does not match live ${table} rows`;
   let afterId = '';
   const expectedIds = new Set<string>();
   let queryVector: number[] | undefined;
   while (true) {
     const rows = await connection.run<{ id: string; embedding: unknown }>(
       `MATCH (node:${table}) WHERE node.id > $afterId ` +
-        'RETURN node.id AS id, node.embedding AS embedding ORDER BY id LIMIT 256',
+        `RETURN node.id AS id, node.embedding AS embedding ORDER BY id LIMIT ${batchSize}`,
       { afterId },
     );
     if (rows.length === 0) break;
     afterId = rows[rows.length - 1].id;
     for (const row of rows) {
-      if (!isFiniteEmbedding(row.embedding)) {
-        throw new Error(`${index} membership does not match live ${table} rows`);
-      }
+      if (!isFiniteEmbedding(row.embedding)) throw new Error(mismatch);
       queryVector ??= asNumberArray(row.embedding);
-      if (expectedIds.has(row.id)) {
-        throw new Error(`${index} membership does not match live ${table} rows`);
-      }
+      if (expectedIds.has(row.id)) throw new Error(mismatch);
       expectedIds.add(row.id);
     }
   }
   queryVector ??= Array<number>(768).fill(0);
+  const expectedCount = expectedIds.size;
   const indexed = await connection.run<{ id: unknown }>(
     `CALL QUERY_VECTOR_INDEX('${table}', '${index}', $queryVector, $requested) ` +
       'RETURN node.id AS id',
-    { queryVector, requested: expectedIds.size + 1 },
+    { queryVector, requested: expectedCount + 1 },
   );
-  if (indexed.length !== expectedIds.size) {
-    throw new Error(`${index} membership does not match live ${table} rows`);
+  const exactMembership =
+    indexed.length === expectedCount &&
+    indexed.every((row) => typeof row.id === 'string' && expectedIds.delete(row.id)) &&
+    expectedIds.size === 0;
+  if (!exactMembership) {
+    throw new Error(mismatch);
   }
-  const remaining = new Set(expectedIds);
-  for (const row of indexed) {
-    if (typeof row.id !== 'string' || !remaining.delete(row.id)) {
-      throw new Error(`${index} membership does not match live ${table} rows`);
-    }
-  }
-  if (remaining.size !== 0)
-    throw new Error(`${index} membership does not match live ${table} rows`);
 }
 
 /** Comprehensively validates an update-capable pack and its generated indexes. */

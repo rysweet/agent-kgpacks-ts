@@ -119,25 +119,29 @@ export function registerPack(parent: Command, ctx: CliContext): void {
       const schemaVersion = Object.hasOwn(manifest, 'schemaVersion')
         ? manifest.schemaVersion
         : undefined;
-      if (schemaVersion === '2') {
-        const { validateKnowledgePack } = await import('@kgpacks/ingestion');
-        const validation = await validateKnowledgePack(dir);
-        printJson(ctx.io, {
-          valid: true,
-          name: manifest.name,
-          version: manifest.version,
-          buildId: manifest.buildId,
-          counts: validation.counts,
-        });
-        return;
+      switch (schemaVersion) {
+        case undefined:
+        case '1':
+          printJson(ctx.io, { valid: true, name: manifest.name, version: manifest.version });
+          return;
+        case '2': {
+          const { validateKnowledgePack } = await import('@kgpacks/ingestion');
+          const validation = await validateKnowledgePack(dir);
+          printJson(ctx.io, {
+            valid: true,
+            name: manifest.name,
+            version: manifest.version,
+            buildId: manifest.buildId,
+            counts: validation.counts,
+          });
+          return;
+        }
+        default:
+          throw new CliError(
+            `unsupported manifest schema ${JSON.stringify(schemaVersion)}`,
+            EXIT_VALIDATION,
+          );
       }
-      if (schemaVersion !== undefined && schemaVersion !== '1') {
-        throw new CliError(
-          `unsupported manifest schema ${JSON.stringify(schemaVersion)}`,
-          EXIT_VALIDATION,
-        );
-      }
-      printJson(ctx.io, { valid: true, name: manifest.name, version: manifest.version });
     });
 
   pack

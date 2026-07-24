@@ -82,11 +82,14 @@ function normalizeUpdateVersion(argv: readonly string[], commandOffset: number):
 }
 
 function commandOffset(from: 'user' | 'node' | 'electron' | undefined): number {
-  if (from === 'user') return 0;
-  if (from === 'electron') {
-    return (process as NodeJS.Process & { defaultApp?: boolean }).defaultApp === true ? 2 : 1;
+  switch (from) {
+    case 'user':
+      return 0;
+    case 'electron':
+      return (process as NodeJS.Process & { defaultApp?: boolean }).defaultApp === true ? 2 : 1;
+    default:
+      return 2;
   }
-  return 2;
 }
 
 function applyExitAndOutput(command: Command, io: Io): void {
@@ -136,15 +139,13 @@ export function buildProgram(options: BuildProgramOptions = {}): Command {
   applyExitAndOutput(program, io);
   const parseAsync = program.parseAsync.bind(program);
   program.parseAsync = (argv, parseOptions) => {
-    if (argv === undefined) {
-      return parseAsync(normalizeUpdateVersion(process.argv, 2), {
-        ...parseOptions,
-        from: 'node',
-      });
-    }
+    const omittedArgv = argv === undefined;
     return parseAsync(
-      normalizeUpdateVersion(argv, commandOffset(parseOptions?.from)),
-      parseOptions,
+      normalizeUpdateVersion(
+        argv ?? process.argv,
+        omittedArgv ? 2 : commandOffset(parseOptions?.from),
+      ),
+      omittedArgv ? { ...parseOptions, from: 'node' } : parseOptions,
     );
   };
   return program;
