@@ -113,6 +113,9 @@ pnpm --filter @kgpacks/frontend dev
 - [docs/reference/incremental-update.md](docs/reference/incremental-update.md) —
   schema-v2 update API, delta grammar, durable metadata, validation, and
   atomic publication contract.
+- [docs/reference/pack-management.md](docs/reference/pack-management.md) —
+  pack pull source resolution, stable release eligibility, integrity
+  checks, manifest schema dispatch, and programmatic API behavior.
 - [docs/cve-corpus.md](docs/cve-corpus.md) — fetching the source CVE corpus from
   the CVEProject/cvelistV5 release service (`pnpm cve:fetch`).
 - [docs/resumable-build.md](docs/resumable-build.md) — resumable + pipelined CVE

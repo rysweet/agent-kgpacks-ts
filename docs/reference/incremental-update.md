@@ -1,7 +1,7 @@
 ---
 title: Incremental knowledge-pack update contract
 description: Reference for the schema-v2 CVE update API, delta grammar, durable metadata, validation, and publication guarantees
-last_updated: 2026-07-23
+last_updated: 2026-07-24
 review_schedule: as-needed
 owner: kgpacks-maintainers
 doc_type: reference
@@ -9,7 +9,9 @@ doc_type: reference
 
 # Incremental knowledge-pack update contract
 
-This reference defines the implemented schema-v2 APIs and CLI semantics.
+This reference defines the schema-v2 APIs and CLI semantics. Unless a section
+is explicitly marked as implementation pending, it describes implemented
+behavior.
 
 ## Contents
 
@@ -630,29 +632,35 @@ summaries, sidecars, or checkpoints. It independently recomputes and verifies:
   orphaned or unsupported nodes and relationships;
 - required table, column, primary-key, relationship, structured lexical, and
   vector-index definitions;
-- exact index membership: every eligible live section/chunk appears once and
-  no stale row appears;
+- exact, independent membership for `Section.embedding_idx` and
+  `Chunk.chunk_embedding_idx`: cardinality equals the corresponding live-row
+  count, every live ID appears exactly once, and no missing, extra, stale,
+  null, or duplicate ID appears;
 - reproduction of every article's derived sections, chunks, entities, and
   relations through the recorded extractor version;
 - listed payload sizes and SHA-256 values, aggregate `contentDigest`, exact
   `payload_bytes`, and directory closure.
 
 For a modified article, validation also proves that obsolete sections, chunks,
-support rows, unsupported relations, unsupported entities, searchable text,
-and vector-index entries are absent. Shared facts must remain while another
-article supports them.
+support rows, unsupported relations, unsupported entities, and searchable text
+are absent. Vector-index membership validation also rejects obsolete entries.
+Shared facts must remain while another article supports them.
 
 Every manifest identity, lineage, provenance, count, record, statistic, and
 file field is checked against durable authority. Changing related fields
 together must not make tampering pass.
 
-Vector validation keyset-scans live rows in pages of 256 and checks every
-embedding's dimensions and finite values. Exact coverage follows from the
-validated native HNSW definition over that complete fixed-width property;
-LadybugDB prevents indexed-property mutation, and updates rebuild the indexes
-after final graph state. A bounded 32-result query additionally rejects
-duplicate or dangling hits without requesting the complete index as one top-k
-result or materializing it in Node memory.
+Vector validation keyset-scans every live row in pages of 256 and first checks
+each embedding's dimensions, structure, and finite values. The resulting live
+IDs are authoritative. Validation then requests the complete index result plus
+one sentinel slot and compares returned IDs as a multiset: cardinality must
+match, every live ID must occur exactly once, and null, duplicate, missing,
+extra, or stale IDs fail validation.
+
+The two indexes are validated independently, so a valid section index cannot
+mask an invalid chunk index or vice versa. Empty `Section` or `Chunk` tables
+still require the corresponding HNSW definition and a query result with zero
+membership.
 
 ## Resume and publication
 

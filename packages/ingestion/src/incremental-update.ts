@@ -1763,14 +1763,13 @@ export async function updateKnowledgePack(
   }
 }
 
-async function validateVectorIndexMembership(
+export async function validateVectorIndexMembership(
   connection: Connection,
   table: 'Section' | 'Chunk',
   index: string,
-  expected: number,
 ): Promise<void> {
   let afterId = '';
-  let validated = 0;
+  const expectedIds = new Set<string>();
   let queryVector: number[] | undefined;
   while (true) {
     const rows = await connection.run<{ id: string; embedding: unknown }>(
@@ -1785,37 +1784,29 @@ async function validateVectorIndexMembership(
         throw new Error(`${index} membership does not match live ${table} rows`);
       }
       queryVector ??= asNumberArray(row.embedding);
-      validated++;
+      if (expectedIds.has(row.id)) {
+        throw new Error(`${index} membership does not match live ${table} rows`);
+      }
+      expectedIds.add(row.id);
     }
   }
-  if (validated !== expected || (expected > 0 && queryVector === undefined)) {
-    throw new Error(`${index} membership does not match live ${table} rows`);
-  }
-  if (expected === 0) return;
-
-  // The index definition covers the complete fixed-width property. Keep the
-  // operability probe bounded after validating every live vector above.
-  const probeSize = Math.min(expected, 32);
-  const probe = await connection.run<{
-    hits: number | bigint;
-    uniqueCount: number | bigint;
-    liveCount: number | bigint;
-  }>(
+  queryVector ??= Array<number>(768).fill(0);
+  const indexed = await connection.run<{ id: unknown }>(
     `CALL QUERY_VECTOR_INDEX('${table}', '${index}', $queryVector, $requested) ` +
-      `OPTIONAL MATCH (live:${table} {id: node.id}) ` +
-      'RETURN count(*) AS hits, count(DISTINCT node.id) AS uniqueCount, ' +
-      'count(live) AS liveCount',
-    { queryVector, requested: probeSize },
+      'RETURN node.id AS id',
+    { queryVector, requested: expectedIds.size + 1 },
   );
-  const hits = Number(probe[0]?.hits ?? 0);
-  if (
-    hits === 0 ||
-    hits > probeSize ||
-    Number(probe[0]?.uniqueCount ?? 0) !== hits ||
-    Number(probe[0]?.liveCount ?? 0) !== hits
-  ) {
+  if (indexed.length !== expectedIds.size) {
     throw new Error(`${index} membership does not match live ${table} rows`);
   }
+  const remaining = new Set(expectedIds);
+  for (const row of indexed) {
+    if (typeof row.id !== 'string' || !remaining.delete(row.id)) {
+      throw new Error(`${index} membership does not match live ${table} rows`);
+    }
+  }
+  if (remaining.size !== 0)
+    throw new Error(`${index} membership does not match live ${table} rows`);
 }
 
 /** Comprehensively validates an update-capable pack and its generated indexes. */
@@ -2313,11 +2304,11 @@ async function validateKnowledgePackInternal(packDir: string): Promise<PackValid
       }
       if (supported.length < relationBatchSize && live.length < relationBatchSize) break;
     }
-    for (const [table, index, expected] of [
-      ['Section', 'embedding_idx', counts.sections],
-      ['Chunk', 'chunk_embedding_idx', counts.chunks],
+    for (const [table, index] of [
+      ['Section', 'embedding_idx'],
+      ['Chunk', 'chunk_embedding_idx'],
     ] as const) {
-      await validateVectorIndexMembership(connection, table, index, expected);
+      await validateVectorIndexMembership(connection, table, index);
     }
     return {
       valid: true,

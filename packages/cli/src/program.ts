@@ -54,8 +54,8 @@ export interface BuildProgramOptions {
   cwd?: string;
 }
 
-function normalizeUpdateVersion(argv: readonly string[]): string[] {
-  let index = 0;
+function normalizeUpdateVersion(argv: readonly string[], commandOffset: number): string[] {
+  let index = commandOffset;
   const skipGlobalOptions = (): void => {
     while (index < argv.length) {
       if (argv[index] === '--packs-dir') index += 2;
@@ -79,6 +79,14 @@ function normalizeUpdateVersion(argv: readonly string[]): string[] {
     if (arg.startsWith('--version=')) return `--target-version=${arg.slice('--version='.length)}`;
     return arg;
   });
+}
+
+function commandOffset(from: 'user' | 'node' | 'electron' | undefined): number {
+  if (from === 'user') return 0;
+  if (from === 'electron') {
+    return (process as NodeJS.Process & { defaultApp?: boolean }).defaultApp === true ? 2 : 1;
+  }
+  return 2;
 }
 
 function applyExitAndOutput(command: Command, io: Io): void {
@@ -127,10 +135,17 @@ export function buildProgram(options: BuildProgramOptions = {}): Command {
 
   applyExitAndOutput(program, io);
   const parseAsync = program.parseAsync.bind(program);
-  program.parseAsync = (argv, parseOptions) =>
-    parseAsync(
-      argv && parseOptions?.from === 'user' ? normalizeUpdateVersion(argv) : argv,
+  program.parseAsync = (argv, parseOptions) => {
+    if (argv === undefined) {
+      return parseAsync(normalizeUpdateVersion(process.argv, 2), {
+        ...parseOptions,
+        from: 'node',
+      });
+    }
+    return parseAsync(
+      normalizeUpdateVersion(argv, commandOffset(parseOptions?.from)),
       parseOptions,
     );
+  };
   return program;
 }

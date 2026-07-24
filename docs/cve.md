@@ -27,18 +27,47 @@ The TypeScript adapter is the sole mapping authority. The historical
 `scripts/cve-source.mjs` entry point contains no mapping logic and delegates to
 the compiled ingestion export.
 
-| Source field                                                 | Graph element                                       |
-| ------------------------------------------------------------ | --------------------------------------------------- |
-| `cveMetadata.cveId`                                          | `Article` (one per CVE) + `vulnerability` entity    |
-| `cna.title` + `cna.descriptions` + affected + CWE + severity | the article's lead `Section` (embedded text)        |
-| `cna/adp.problemTypes[].cweId`                               | `weakness` entity + `CVE -has_weakness-> CWE`       |
-| `cna.affected[].product`                                     | `product` entity + `CVE -affects-> product`         |
-| `cna.affected[].vendor`                                      | `organization` entity + `product -made_by-> vendor` |
-| `cna/adp.metrics[]` (CVSS)                                   | severity label in the embedded text                 |
+| Source field                                                 | Graph element                                        |
+| ------------------------------------------------------------ | ---------------------------------------------------- |
+| `cveMetadata.cveId`                                          | `Article` (one per CVE) + `vulnerability` entity     |
+| `cna.title` + `cna.descriptions` + affected + CWE + severity | the article's lead `Section` (embedded text)         |
+| `cna/adp.problemTypes[].cweId`                               | `weakness` entity + `CVE -has_weakness-> CWE`        |
+| `cna.affected[].product`                                     | preferred `product` + `CVE -affects-> product`       |
+| `cna.affected[].packageName`                                 | fallback product when `product` is not valid         |
+| `cna.affected[].vendor`                                      | organization + effective product `-made_by->` vendor |
+| `cna/adp.metrics[]` (CVSS)                                   | severity label in the embedded text                  |
 
 Entities dedupe by name in the loader, so shared CWEs, vendors and products knit
 the per-CVE articles into one cross-referenced vulnerability graph. Rejected
 records and records with no English description are skipped.
+
+For product selection, a `product` or `packageName` is valid only when it is a
+string whose trimmed value is non-empty and is not the case-insensitive
+sentinel `"n/a"`. The trimmed value becomes the graph name. For each affected
+entry, the graph target is the valid `product`; if that is missing or invalid,
+the valid `packageName` is used. An entry with neither is omitted. A package
+fallback keeps the existing graph vocabulary:
+
+- entity `{ name: packageName, type: "product", description: "CVE-affected product" }`;
+- `CVE -affects-> packageName`;
+- `packageName -made_by-> vendor` when the vendor is valid;
+- the package name in the affected content and `affectedProducts` field.
+
+When a valid `product` exists, `packageName` remains package metadata and does
+not create a second affected entity.
+
+### Text limits
+
+The adapter truncates by Unicode code point, not UTF-16 code unit:
+
+| Field                                                     |             Limit | Suffix                                       |
+| --------------------------------------------------------- | ----------------: | -------------------------------------------- |
+| English-description summary in section content            | 1,500 code points | `...` only when the source exceeds the limit |
+| Vulnerability entity description when the title is absent |   200 code points | none                                         |
+
+Astral characters such as `😀` count as one code point, so truncation never
+splits a surrogate pair. Grapheme clusters are not preserved and text is not
+Unicode-normalized.
 
 ## Get the corpus
 

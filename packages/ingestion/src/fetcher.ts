@@ -38,6 +38,10 @@ const DEFAULT_USER_AGENT = 'kgpacks-ingestion/0.0 (+knowledge-graph-builder)';
 const DEFAULT_MAX_REDIRECTS = 5;
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_BYTES = 25 * 1024 * 1024; // 25 MiB
+const DEFAULT_MAX_RETRIES = 2;
+const DEFAULT_RETRY_BASE_DELAY_MS = 250;
+const MAX_RETRY_DELAY_MS = 30_000;
+const RETRYABLE_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 
 /** Options for {@link createSafeFetcher}. */
 export interface SafeFetcherOptions {
@@ -53,6 +57,10 @@ export interface SafeFetcherOptions {
   timeoutMs?: number;
   /** Maximum response body size in bytes (fail closed when exceeded). Default 25 MiB. */
   maxBytes?: number;
+  /** Retries for transient transport and HTTP failures. Default 2. */
+  maxRetries?: number;
+  /** Initial exponential-backoff delay. Default 250ms. */
+  retryBaseDelayMs?: number;
 }
 
 /** Releases an unconsumed response body (best-effort) so the socket isn't held until GC. */
@@ -308,6 +316,8 @@ export function createSafeFetcher(options: SafeFetcherOptions = {}): Fetcher {
   const userAgent = options.userAgent ?? DEFAULT_USER_AGENT;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
+  const maxRetries = nonNegativeInteger(options.maxRetries, DEFAULT_MAX_RETRIES);
+  const retryBaseDelayMs = nonNegativeNumber(options.retryBaseDelayMs, DEFAULT_RETRY_BASE_DELAY_MS);
 
   if (typeof fetchImpl !== 'function') {
     throw new FetchError('No fetch implementation available', '');
@@ -317,55 +327,85 @@ export function createSafeFetcher(options: SafeFetcherOptions = {}): Fetcher {
     let currentUrl = initialUrl;
 
     for (let hop = 0; hop <= maxRedirects; hop++) {
-      await assertUrlAllowed(currentUrl, lookup);
+      let followedRedirect = false;
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        // Re-resolve and re-validate on every attempt rather than trusting DNS
+        // results from a failed request.
+        await assertUrlAllowed(currentUrl, lookup);
 
-      const controller = new AbortController();
-      // The timer stays armed across the body read (cleared only in finally), so a
-      // slow-drip body is aborted by the timeout, not just the header exchange.
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      try {
-        let response: Awaited<ReturnType<FetchImpl>>;
+        const controller = new AbortController();
+        // The timer stays armed across the body read (cleared only in finally), so a
+        // slow-drip body is aborted by the timeout, not just the header exchange.
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
         try {
+          let response: Awaited<ReturnType<FetchImpl>>;
           const init: FetchInit = {
             redirect: 'manual',
             headers: { 'User-Agent': userAgent, Accept: 'text/html,application/xhtml+xml' },
             signal: controller.signal,
           };
-          response = await fetchImpl(currentUrl, init);
-        } catch (err) {
-          throw new FetchError(
-            `Fetch failed for ${currentUrl}: ${(err as Error).message}`,
-            currentUrl,
-          );
-        }
-
-        const status = response.status;
-        if (status >= 300 && status < 400) {
-          const location = response.headers.get('location');
-          await drainBody(response); // release the connection before the next hop
-          if (location === null || location === '') {
+          try {
+            response = await fetchImpl(currentUrl, init);
+          } catch (err) {
+            if (attempt < maxRetries) {
+              await waitBeforeRetry(attempt, retryBaseDelayMs);
+              continue;
+            }
             throw new FetchError(
-              `Redirect ${status} without a Location header`,
+              `Fetch failed for ${currentUrl}: ${errorMessage(err)}`,
+              currentUrl,
+            );
+          }
+
+          const status = response.status;
+          if (RETRYABLE_STATUSES.has(status) && attempt < maxRetries) {
+            const retryAfter = response.headers.get('retry-after');
+            await drainBody(response);
+            await waitBeforeRetry(attempt, retryBaseDelayMs, retryAfter);
+            continue;
+          }
+          if (status >= 300 && status < 400) {
+            const location = response.headers.get('location');
+            await drainBody(response); // release the connection before the next hop
+            if (location === null || location === '') {
+              throw new FetchError(
+                `Redirect ${status} without a Location header`,
+                currentUrl,
+                status,
+              );
+            }
+            // Resolve relative redirects against the current URL, then re-validate.
+            currentUrl = new URL(location, currentUrl).toString();
+            followedRedirect = true;
+            break;
+          }
+          if (status < 200 || status >= 300) {
+            await drainBody(response);
+            throw new FetchError(
+              `Unexpected HTTP status ${status} for ${currentUrl}`,
               currentUrl,
               status,
             );
           }
-          // Resolve relative redirects against the current URL, then re-validate.
-          currentUrl = new URL(location, currentUrl).toString();
-          continue;
+          try {
+            return await readBodyCapped(response, maxBytes, currentUrl);
+          } catch (err) {
+            if (err instanceof FetchError) throw err;
+            if (attempt < maxRetries) {
+              await waitBeforeRetry(attempt, retryBaseDelayMs);
+              continue;
+            }
+            throw new FetchError(
+              `Cannot read response body for ${currentUrl}: ${errorMessage(err)}`,
+              currentUrl,
+              status,
+            );
+          }
+        } finally {
+          clearTimeout(timer);
         }
-        if (status < 200 || status >= 300) {
-          await drainBody(response);
-          throw new FetchError(
-            `Unexpected HTTP status ${status} for ${currentUrl}`,
-            currentUrl,
-            status,
-          );
-        }
-        return await readBodyCapped(response, maxBytes, currentUrl);
-      } finally {
-        clearTimeout(timer);
       }
+      if (followedRedirect) continue;
     }
 
     throw new FetchError(
@@ -373,4 +413,35 @@ export function createSafeFetcher(options: SafeFetcherOptions = {}): Fetcher {
       initialUrl,
     );
   };
+}
+
+async function waitBeforeRetry(
+  attempt: number,
+  baseDelayMs: number,
+  retryAfter?: string | null,
+): Promise<void> {
+  const serverDelay = parseRetryAfter(retryAfter);
+  const delay = Math.min(MAX_RETRY_DELAY_MS, serverDelay ?? baseDelayMs * 2 ** attempt);
+  if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+}
+
+function parseRetryAfter(value: string | null | undefined): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1_000;
+  const date = Date.parse(value);
+  if (!Number.isFinite(date)) return undefined;
+  return Math.max(0, date - Date.now());
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function nonNegativeNumber(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function nonNegativeInteger(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : fallback;
 }

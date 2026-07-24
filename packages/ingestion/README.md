@@ -41,12 +41,17 @@ structural validation used by that lifecycle. Incremental updates do not reuse
 Every external dependency is an **injectable seam** with a real default, so the
 whole pipeline runs offline in tests:
 
-| Seam                      | Default                                        | Inject for tests                    |
-| ------------------------- | ---------------------------------------------- | ----------------------------------- |
-| `fetcher`                 | `createSafeFetcher()` (HTTPS-only, SSRF-gated) | a `(url) => Promise<string>` fake   |
-| `embedder`                | `BgeEmbedder` (document mode)                  | a deterministic `{ generate }` fake |
-| `extractor` / `transport` | LLM extractor over the Copilot SDK             | a fake `Extractor` or `Transport`   |
-| `connection`              | a fresh `Database(dbPath)`                     | a pre-opened in-memory `Connection` |
+| Seam                      | Default                                                           | Inject for tests                    |
+| ------------------------- | ----------------------------------------------------------------- | ----------------------------------- |
+| `fetcher`                 | `createSafeFetcher()` (HTTPS-only, SSRF-gated, transient retries) | a `(url) => Promise<string>` fake   |
+| `embedder`                | `BgeEmbedder` (document mode)                                     | a deterministic `{ generate }` fake |
+| `extractor` / `transport` | LLM extractor over the Copilot SDK                                | a fake `Extractor` or `Transport`   |
+| `connection`              | a fresh `Database(dbPath)`                                        | a pre-opened in-memory `Connection` |
+
+`createSafeFetcher` applies a 30-second per-attempt timeout and two bounded
+retries for transient transport failures and HTTP `408`/`425`/`429`/`5xx`
+responses. `maxRetries` and `retryBaseDelayMs` are configurable; each attempt
+re-runs DNS and SSRF validation, and `Retry-After` is honored.
 
 ## Modules
 

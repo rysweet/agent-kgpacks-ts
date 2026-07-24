@@ -113,6 +113,107 @@ describe('ApiClient — error model', () => {
       status: null,
     });
   });
+
+  it('retries transient failures for idempotent requests', async () => {
+    let attempts = 0;
+    const { fetch, calls } = makeFetch(() => {
+      attempts++;
+      if (attempts === 1) return textResponse('busy', { status: 503 });
+      return jsonResponse({
+        articles: { total: 0, by_category: {}, by_depth: {} },
+        sections: { total: 0, avg_per_article: 0 },
+        links: { total: 0, avg_per_article: 0 },
+        database: { size_mb: 0, last_updated: null },
+        performance: null,
+      });
+    });
+    const api = new ApiClient({
+      baseUrl: 'http://api.test',
+      fetch,
+      maxRetries: 1,
+      retryBaseDelayMs: 0,
+    });
+
+    await expect(api.stats()).resolves.toMatchObject({ articles: { total: 0 } });
+    expect(calls).toHaveLength(2);
+  });
+
+  it('does not replay a non-idempotent chat request', async () => {
+    let calls = 0;
+    const failingFetch = (async () => {
+      calls++;
+      throw new TypeError('Failed to fetch');
+    }) as unknown as typeof fetch;
+    const api = new ApiClient({
+      baseUrl: 'http://api.test',
+      fetch: failingFetch,
+      maxRetries: 3,
+      retryBaseDelayMs: 0,
+    });
+
+    await expect(api.chat({ question: 'q' })).rejects.toMatchObject({ code: 'NETWORK_ERROR' });
+    expect(calls).toBe(1);
+  });
+
+  it('aborts a timed-out request and reports TIMEOUT', async () => {
+    const hangingFetch = ((_input: RequestInfo | URL, init?: RequestInit) => {
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          'abort',
+          () => reject(new DOMException('aborted', 'AbortError')),
+          { once: true },
+        );
+      });
+    }) as typeof fetch;
+    const api = new ApiClient({
+      baseUrl: 'http://api.test',
+      fetch: hangingFetch,
+      timeoutMs: 1,
+      maxRetries: 0,
+    });
+
+    await expect(api.stats()).rejects.toMatchObject({ code: 'TIMEOUT', status: null });
+  });
+
+  it('keeps the timeout active while reading the response body', async () => {
+    const fetchWithHangingBody = (async (
+      _input: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: () =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener(
+              'abort',
+              () => reject(new DOMException('aborted', 'AbortError')),
+              { once: true },
+            );
+          }),
+      } as Response;
+    }) as typeof fetch;
+    const api = new ApiClient({
+      baseUrl: 'http://api.test',
+      fetch: fetchWithHangingBody,
+      timeoutMs: 1,
+      maxRetries: 0,
+    });
+
+    await expect(api.stats()).rejects.toMatchObject({ code: 'TIMEOUT', status: null });
+  });
+
+  it('normalizes malformed success JSON as an ApiClientError', async () => {
+    const { fetch } = makeFetch(() => textResponse('not json'));
+    const api = new ApiClient({ baseUrl: 'http://api.test', fetch });
+
+    await expect(api.stats()).rejects.toMatchObject({
+      name: 'ApiClientError',
+      code: 'INTERNAL_ERROR',
+      status: 200,
+    });
+  });
 });
 
 describe('ApiClient — supporting endpoints', () => {

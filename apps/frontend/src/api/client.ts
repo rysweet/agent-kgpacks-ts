@@ -29,9 +29,20 @@ export interface ApiClientOptions {
   fetch?: typeof fetch;
   /** Injectable EventSource constructor for streamChat. Defaults to `globalThis.EventSource`. */
   eventSourceFactory?: (url: string) => EventSourceLike;
+  /** Per-attempt timeout for blocking HTTP calls. Default 15000ms. */
+  timeoutMs?: number;
+  /** Retries for transient idempotent HTTP failures. Default 2. */
+  maxRetries?: number;
+  /** Initial exponential-backoff delay. Default 250ms. */
+  retryBaseDelayMs?: number;
 }
 
 const API_PREFIX = '/api/v1';
+const DEFAULT_TIMEOUT_MS = 15_000;
+const DEFAULT_MAX_RETRIES = 2;
+const DEFAULT_RETRY_BASE_DELAY_MS = 250;
+const MAX_RETRY_DELAY_MS = 30_000;
+const RETRYABLE_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 
 function defaultBaseUrl(): string {
   // `import.meta.env` is provided by Vite; guard for non-Vite runtimes.
@@ -46,6 +57,9 @@ export class ApiClient {
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
   private readonly eventSourceFactory: (url: string) => EventSourceLike;
+  private readonly timeoutMs: number;
+  private readonly maxRetries: number;
+  private readonly retryBaseDelayMs: number;
 
   constructor(options: ApiClientOptions = {}) {
     this.baseUrl = options.baseUrl ?? defaultBaseUrl();
@@ -55,6 +69,12 @@ export class ApiClient {
     this.eventSourceFactory =
       options.eventSourceFactory ??
       ((url: string) => new EventSource(url) as unknown as EventSourceLike);
+    this.timeoutMs = positiveNumber(options.timeoutMs, DEFAULT_TIMEOUT_MS);
+    this.maxRetries = nonNegativeInteger(options.maxRetries, DEFAULT_MAX_RETRIES);
+    this.retryBaseDelayMs = nonNegativeNumber(
+      options.retryBaseDelayMs,
+      DEFAULT_RETRY_BASE_DELAY_MS,
+    );
   }
 
   // ─── Chat ──────────────────────────────────────────────────────────────────
@@ -149,28 +169,117 @@ export class ApiClient {
   async health(): Promise<HealthResponse> {
     // `/health` is served UNPREFIXED by the backend (not under /api/v1).
     const url = `${this.baseUrl}/health`;
-    let response: Response;
-    try {
-      response = await this.fetchImpl(url, { credentials: 'omit' });
-    } catch {
-      throw new ApiClientError('NETWORK_ERROR', 'The network request failed.', null);
-    }
-    return (await response.json()) as HealthResponse;
+    return this.fetchJson<HealthResponse>(url, { credentials: 'omit' }, (response) => {
+      return response.ok || response.status === 503;
+    });
   }
 
   // ─── Internal ─────────────────────────────────────────────────────────────────
 
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
     const url = `${this.baseUrl}${API_PREFIX}${path}`;
-    let response: Response;
-    try {
-      response = await this.fetchImpl(url, { credentials: 'omit', ...init });
-    } catch {
-      throw new ApiClientError('NETWORK_ERROR', 'The network request failed.', null);
-    }
-    if (!response.ok) {
-      throw await errorFromResponse(response);
-    }
-    return (await response.json()) as T;
+    return this.fetchJson<T>(url, { credentials: 'omit', ...init });
   }
+
+  private async fetchJson<T>(
+    url: string,
+    init: RequestInit,
+    accepts: (response: Response) => boolean = (response) => response.ok,
+  ): Promise<T> {
+    const method = (init.method ?? 'GET').toUpperCase();
+    const canRetry = method === 'GET' || method === 'HEAD';
+    const retries = canRetry ? this.maxRetries : 0;
+
+    for (let attempt = 0; ; attempt++) {
+      const controller = new AbortController();
+      let timedOut = false;
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, this.timeoutMs);
+      const callerSignal = init.signal;
+      const abortFromCaller = (): void => controller.abort(callerSignal?.reason);
+      if (callerSignal?.aborted) abortFromCaller();
+      else callerSignal?.addEventListener('abort', abortFromCaller, { once: true });
+      const cleanup = (): void => {
+        clearTimeout(timeout);
+        callerSignal?.removeEventListener('abort', abortFromCaller);
+      };
+
+      let response: Response;
+      try {
+        response = await this.fetchImpl(url, { ...init, signal: controller.signal });
+      } catch {
+        cleanup();
+        if (attempt < retries && !callerSignal?.aborted) {
+          await this.waitBeforeRetry(attempt);
+          continue;
+        }
+        if (timedOut) {
+          throw new ApiClientError('TIMEOUT', 'The network request timed out.', null);
+        }
+        throw new ApiClientError('NETWORK_ERROR', 'The network request failed.', null);
+      }
+
+      if (accepts(response)) {
+        try {
+          return (await response.json()) as T;
+        } catch {
+          if (timedOut) {
+            throw new ApiClientError('TIMEOUT', 'The network request timed out.', null);
+          }
+          throw new ApiClientError(
+            'INTERNAL_ERROR',
+            'The service returned an invalid JSON response.',
+            response.status,
+          );
+        } finally {
+          cleanup();
+        }
+      }
+      if (attempt < retries && RETRYABLE_STATUSES.has(response.status)) {
+        await response.body?.cancel().catch(() => undefined);
+        cleanup();
+        await this.waitBeforeRetry(attempt, response.headers.get('retry-after'));
+        continue;
+      }
+      try {
+        const error = await errorFromResponse(response);
+        if (timedOut) {
+          throw new ApiClientError('TIMEOUT', 'The network request timed out.', null);
+        }
+        throw error;
+      } finally {
+        cleanup();
+      }
+    }
+  }
+
+  private async waitBeforeRetry(attempt: number, retryAfter?: string | null): Promise<void> {
+    const serverDelay = parseRetryAfter(retryAfter);
+    const exponential = this.retryBaseDelayMs * 2 ** attempt;
+    const delay = Math.min(MAX_RETRY_DELAY_MS, serverDelay ?? exponential);
+    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+}
+
+function parseRetryAfter(value: string | null | undefined): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1_000;
+  const date = Date.parse(value);
+  if (!Number.isFinite(date)) return undefined;
+  return Math.max(0, date - Date.now());
+}
+
+function positiveNumber(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function nonNegativeNumber(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function nonNegativeInteger(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : fallback;
 }
