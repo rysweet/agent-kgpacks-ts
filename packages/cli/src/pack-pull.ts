@@ -407,8 +407,8 @@ export async function pullPack(opts: PullPackOptions): Promise<PulledPack> {
   try {
     const partPaths: string[] = [];
     const overall = createHash('sha256');
-    for (const part of index.parts) {
-      const dest = join(work, part.file);
+    for (const [partOrdinal, part] of index.parts.entries()) {
+      const dest = join(work, `part-${String(partOrdinal).padStart(6, '0')}`);
       const { hash, bytes } = await downloadPart(`${base}/${part.file}`, dest, overall);
       if (bytes !== part.bytes) {
         throw new PackInstallError(

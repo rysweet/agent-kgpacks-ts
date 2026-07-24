@@ -193,6 +193,46 @@ describe('pack pull (real release artifacts → real streaming install)', () => 
     }
   });
 
+  it('keeps case-variant remote part names distinct on case-insensitive filesystems', async () => {
+    const index = JSON.parse(
+      readFileSync(join(releaseDir, `${PACK_NAME}.pack-release.json`), 'utf8'),
+    );
+    const remoteParts = new Map<string, Buffer>();
+    for (const [partOrdinal, part] of index.parts.entries()) {
+      const sourceFile = part.file;
+      if (partOrdinal === 0) part.file = 'Part.001';
+      if (partOrdinal === 1) part.file = 'part.001';
+      remoteParts.set(part.file, readFileSync(join(releaseDir, sourceFile)));
+    }
+    const aliasServer = createServer((req, res) => {
+      const name = (req.url ?? '/').replace(/^\/+/, '').split('?')[0];
+      if (name === `${PACK_NAME}.pack-release.json`) {
+        res.end(JSON.stringify(index));
+        return;
+      }
+      const bytes = remoteParts.get(name);
+      if (bytes) {
+        res.end(bytes);
+        return;
+      }
+      res.statusCode = 404;
+      res.end();
+    });
+    await new Promise<void>((resolve) => aliasServer.listen(0, '127.0.0.1', resolve));
+    const addr = aliasServer.address();
+    const aliasUrl = addr && typeof addr === 'object' ? `http://127.0.0.1:${addr.port}` : '';
+    try {
+      const result = await pullPack({
+        name: PACK_NAME,
+        packsDir: join(base, 'install-alias'),
+        baseUrl: aliasUrl,
+      });
+      expect(readFileSync(join(result.path, 'pack.db')).equals(dbBytes)).toBe(true);
+    } finally {
+      aliasServer.close();
+    }
+  });
+
   it('throws when the pack index is absent', async () => {
     await expect(
       pullPack({ name: 'does-not-exist', packsDir: join(base, 'x'), baseUrl }),
