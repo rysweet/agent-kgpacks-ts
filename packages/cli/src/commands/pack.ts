@@ -18,15 +18,16 @@ import {
 } from '@kgpacks/packs';
 import { Command } from 'commander';
 
-import { DEFAULT_PACK_REPO, DEFAULT_PACK_TAG } from '../constants.js';
+import { DEFAULT_PACK_REPO } from '../constants.js';
 import type { CliContext } from '../context.js';
 import { CliError } from '../errors.js';
 import { EXIT_PACK_NOT_FOUND, EXIT_USAGE } from '../exit-codes.js';
 import { printJson } from '../io.js';
 import { pullPack } from '../pack-pull.js';
 import { resolveExistingPackDir } from '../pack-dir.js';
-import { registerCreate, registerUpdate } from './build.js';
+import { registerCreate } from './build.js';
 import { registerEval } from './eval.js';
+import { registerUpdate } from './update.js';
 
 /** Registers the `pack` command group on `parent`. */
 export function registerPack(parent: Command, ctx: CliContext): void {
@@ -55,7 +56,7 @@ export function registerPack(parent: Command, ctx: CliContext): void {
     )
     .argument('<name>', 'pack name (matches <name>.pack-release.json in the release)')
     .option('--repo <owner/repo>', 'source repository', DEFAULT_PACK_REPO)
-    .option('--tag <tag>', 'release tag hosting the pack assets', DEFAULT_PACK_TAG)
+    .option('--tag <tag>', 'specific immutable release tag (default: discover latest for pack)')
     .option('--base-url <url>', 'base URL of the index + parts (overrides --repo/--tag)')
     .option('--require-signature', 'hard-fail unless a valid release signature is present')
     .option('--no-verify', 'skip release signature verification (checksums still enforced)')
@@ -107,14 +108,26 @@ export function registerPack(parent: Command, ctx: CliContext): void {
 
   pack
     .command('validate')
-    .description("Validate a pack's manifest.")
+    .description("Validate a pack's manifest, payloads, graph provenance, and indexes.")
     .argument('<pack>', 'pack directory name')
-    .action((name: string, _opts: unknown, command: Command) => {
+    .action(async (name: string, _opts: unknown, command: Command) => {
       const dir = resolveExistingPackDir(packsDirOf(command), name);
       if (!existsSync(join(dir, MANIFEST_FILENAME))) {
         throw new CliError(`pack not found: ${name}`, EXIT_PACK_NOT_FOUND);
       }
       const manifest = loadManifestFromDir(dir);
+      if (manifest.schemaVersion === '2') {
+        const { validateKnowledgePack } = await import('@kgpacks/ingestion');
+        const validation = await validateKnowledgePack(dir);
+        printJson(ctx.io, {
+          valid: true,
+          name: manifest.name,
+          version: manifest.version,
+          buildId: manifest.buildId,
+          counts: validation.counts,
+        });
+        return;
+      }
       printJson(ctx.io, { valid: true, name: manifest.name, version: manifest.version });
     });
 

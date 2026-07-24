@@ -24,11 +24,24 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createGzip } from 'node:zlib';
 import { createHash, createPrivateKey, createPublicKey, sign as edSign } from 'node:crypto';
-import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  createWriteStream,
+  createReadStream,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { basename, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import {
+  INCREMENTAL_SCHEMA_VERSION,
+  validateKnowledgePack,
+} from '../packages/ingestion/dist/index.js';
+import { validateManifest } from '../packages/packs/dist/index.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -40,19 +53,21 @@ const has = (n) => args.includes(n);
 
 const pack = opt('--pack');
 const packsDir = opt('--packs-dir', join(root, 'data', 'packs'));
-const tag = opt('--tag', 'packs');
+const requestedTag = opt('--tag');
 const repo = opt('--repo'); // default: the gh-resolved repo for the cwd
 const notes = opt('--notes');
 const modelArg = opt('--model');
 const corpusCommitArg = opt('--corpus-commit');
 const corpusDateArg = opt('--corpus-date');
+const corpusTagArg = opt('--corpus-tag');
 const dryRun = has('--dry-run');
 
 if (!pack) {
   console.error(
     'usage: release-pack.mjs --pack <name> [--packs-dir dir] [--tag t] [--repo owner/repo]\n' +
       '       [--part-size 1900MiB] [--out-dir dir] [--notes text] [--model id]\n' +
-      '       [--corpus-commit sha] [--corpus-date YYYY-MM-DD] [--sign|--no-sign] [--dry-run]',
+      '       [--corpus-commit sha] [--corpus-date YYYY-MM-DD] [--corpus-tag tag]\n' +
+      '       [--sign|--no-sign] [--dry-run]',
   );
   process.exit(2);
 }
@@ -100,7 +115,25 @@ for (const [label, p] of [
   }
 }
 
-const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+let manifest;
+try {
+  manifest = validateManifest(JSON.parse(readFileSync(manifestPath, 'utf8')));
+} catch (error) {
+  console.error(`invalid manifest: ${error?.message ?? error}`);
+  process.exit(2);
+}
+if (manifest.name !== pack) {
+  console.error(`manifest name ${JSON.stringify(manifest.name)} does not match --pack ${pack}`);
+  process.exit(2);
+}
+const legacyManifest = manifest.schemaVersion == null || manifest.schemaVersion === '1';
+if (!legacyManifest && manifest.schemaVersion !== INCREMENTAL_SCHEMA_VERSION) {
+  console.error(
+    `refusing to release unsupported manifest schema ${JSON.stringify(manifest.schemaVersion)}; ` +
+      `expected ${INCREMENTAL_SCHEMA_VERSION}`,
+  );
+  process.exit(2);
+}
 const model = modelArg ?? manifest.model ?? manifest.synthesis_model;
 
 // A dated release tag (`<name>-YYYY.MM[.N]`) pins an immutable version whose
@@ -109,13 +142,31 @@ const model = modelArg ?? manifest.model ?? manifest.synthesis_model;
 // @kgpacks/packs' packVersionFromReleaseTag (inlined so this script has no build
 // dependency on the compiled package).
 function deriveVersionFromTag(t) {
-  const m = /-(\d{4})\.(\d{2})(?:\.(\d+))?$/.exec(typeof t === 'string' ? t : '');
+  const escapedPack = pack.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const m = new RegExp(`^${escapedPack}-(\\d{4})\\.(\\d{2})(?:\\.(\\d+))?$`).exec(
+    typeof t === 'string' ? t : '',
+  );
   if (!m) return null;
   const month = Number(m[2]);
   if (month < 1 || month > 12) return null;
   return `${Number(m[1])}.${month}.${m[3] !== undefined ? Number(m[3]) : 0}`;
 }
-const version = deriveVersionFromTag(tag) ?? String(manifest.version ?? '0.0.0');
+const version = String(manifest.version ?? '');
+const manifestTag = `${pack}-v${version}`;
+const tag = requestedTag ?? manifestTag;
+const taggedVersion = deriveVersionFromTag(tag);
+if (requestedTag && tag !== manifestTag && taggedVersion === null) {
+  console.error(
+    `release tag ${tag} must equal the manifest-derived tag ${manifestTag} or be a matching dated tag`,
+  );
+  process.exit(2);
+}
+if (taggedVersion && taggedVersion !== version) {
+  console.error(
+    `release tag ${tag} implies version ${taggedVersion}, but manifest declares ${version}`,
+  );
+  process.exit(2);
+}
 
 // Provenance is mirrored from the pack manifest into the release index so the two
 // can be cross-checked; overrides + the release-time build.date fill any gaps.
@@ -125,12 +176,25 @@ function buildProvenance() {
       ? manifest.provenance
       : {};
   const corpus = { ...(base.corpus ?? {}) };
-  if (corpusCommitArg) corpus.commit = corpusCommitArg;
-  if (corpusDateArg) corpus.date = corpusDateArg;
+  if (corpusCommitArg !== undefined && corpusCommitArg !== corpus.commit) {
+    console.error('--corpus-commit must exactly match schema-v2 manifest provenance');
+    process.exit(2);
+  }
+  if (corpusDateArg !== undefined && corpusDateArg !== corpus.date) {
+    console.error('--corpus-date must exactly match schema-v2 manifest provenance');
+    process.exit(2);
+  }
+  if (corpusTagArg !== undefined && corpusTagArg !== corpus.tag) {
+    console.error('--corpus-tag must exactly match schema-v2 manifest provenance');
+    process.exit(2);
+  }
+  if (modelArg !== undefined && modelArg !== base.embedding?.model) {
+    console.error('--model must exactly match schema-v2 manifest provenance');
+    process.exit(2);
+  }
   const embedding = { ...(base.embedding ?? {}) };
   if (model && !embedding.model) embedding.model = model;
   const build = { ...(base.build ?? {}) };
-  if (!build.date) build.date = new Date().toISOString();
   const provenance = {};
   if (Object.keys(corpus).length) provenance.corpus = corpus;
   if (Object.keys(embedding).length) provenance.embedding = embedding;
@@ -146,10 +210,26 @@ const provenance = buildProvenance();
 async function buildParts(outDir) {
   const tar = spawn(
     'tar',
-    ['--format=ustar', '-C', packDir, '-cf', '-', 'manifest.json', 'pack.db'],
+    [
+      '--format=ustar',
+      '--sort=name',
+      '--mtime=@0',
+      '--owner=0',
+      '--group=0',
+      '--numeric-owner',
+      '-C',
+      packDir,
+      '-cf',
+      '-',
+      'manifest.json',
+      'pack.db',
+    ],
     { stdio: ['ignore', 'pipe', 'inherit'] },
   );
   const gzip = createGzip({ level: 6 });
+  const tarCompletion = new Promise((resolve) => {
+    tar.once('close', (code, signal) => resolve({ code, signal }));
+  });
   tar.stdout.pipe(gzip);
   tar.on('error', (err) => gzip.destroy(err));
 
@@ -206,6 +286,12 @@ async function buildParts(outDir) {
       }
     }
   }
+  const tarResult = await tarCompletion;
+  if (tarResult.code !== 0) {
+    throw new Error(
+      `tar failed (${tarResult.signal ? `signal ${tarResult.signal}` : `exit ${tarResult.code}`})`,
+    );
+  }
   await closePart();
   // Drop a trailing empty part if the stream ended exactly on a boundary.
   const finalParts = parts.filter((p) => p.bytes > 0);
@@ -220,7 +306,7 @@ async function buildParts(outDir) {
     format: 'tar.gz-multipart-v1',
     model: model ?? undefined,
     provenance,
-    createdAt: new Date().toISOString(),
+    ...(provenance?.build?.date ? { createdAt: provenance.build.date } : {}),
     sha256: overall.digest('hex'),
     totalBytes,
     partSize,
@@ -238,10 +324,10 @@ function gh(ghArgs) {
   }
 }
 
-// Optional Ed25519 signing of the release index. The private key comes from the
+// Ed25519 signing of the release index. The private key comes from the
 // KGPACKS_SIGNING_KEY env (a base64 PKCS8 DER key, populated from an Actions
-// secret in CI); it is never passed on argv or logged. When absent, the release
-// is published UNSIGNED (integrity-only) unless --sign forces an error.
+// secret in CI); it is never passed on argv or logged. Unsigned artifacts are
+// allowed only for an explicit dry run and can never be published.
 const signFlag = has('--sign');
 const noSignFlag = has('--no-sign');
 function resolveSigning() {
@@ -249,11 +335,15 @@ function resolveSigning() {
     console.error('--sign and --no-sign are mutually exclusive');
     process.exit(2);
   }
+  if (noSignFlag && !dryRun) {
+    console.error('--no-sign is unsafe and is allowed only with --dry-run');
+    process.exit(2);
+  }
   if (noSignFlag) return null;
   const secret = process.env.KGPACKS_SIGNING_KEY;
   if (!secret) {
-    if (signFlag) {
-      console.error('--sign requires a signing key in KGPACKS_SIGNING_KEY');
+    if (signFlag || !dryRun) {
+      console.error('release publication requires a signing key in KGPACKS_SIGNING_KEY');
       process.exit(2);
     }
     return null;
@@ -276,29 +366,154 @@ function releaseExists(t) {
   return spawnSync('gh', a, { stdio: 'ignore' }).status === 0;
 }
 
-/** Create the release tag `t` if it does not exist, then upload `assets` to it. */
-function publishTo(t) {
-  if (!releaseExists(t)) {
-    const createArgs = [
-      'release',
-      'create',
-      t,
-      '--title',
-      t === 'packs' ? 'Knowledge packs' : `Knowledge pack ${pack} ${version}`,
-      '--notes',
-      notes ?? `Knowledge-pack release assets. Install with: wikigr pack pull <name>`,
-    ];
-    if (repo) createArgs.push('--repo', repo);
-    gh(createArgs);
+function releaseIsDraft(t) {
+  const args = ['release', 'view', t, '--json', 'isDraft', '--jq', '.isDraft'];
+  if (repo) args.push('--repo', repo);
+  const result = spawnSync('gh', args, { encoding: 'utf8' });
+  return result.status === 0 && String(result.stdout).trim() === 'true';
+}
+
+function remoteAssets(t) {
+  const args = [
+    'release',
+    'view',
+    t,
+    '--json',
+    'assets',
+    '--jq',
+    '.assets[] | [.name,.size,.digest] | @tsv',
+  ];
+  if (repo) args.push('--repo', repo);
+  const result = spawnSync('gh', args, { encoding: 'utf8' });
+  if (result.status !== 0) return null;
+  return new Map(
+    String(result.stdout ?? '')
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        const [name, size, digest] = line.split('\t');
+        return [name, { size: Number(size), digest }];
+      }),
+  );
+}
+
+async function hashAsset(path) {
+  const hash = createHash('sha256');
+  let size = 0;
+  for await (const chunk of createReadStream(path)) {
+    size += chunk.length;
+    hash.update(chunk);
   }
-  const uploadArgs = ['release', 'upload', t, ...currentAssets, '--clobber'];
+  return { size, digest: `sha256:${hash.digest('hex')}` };
+}
+
+async function localAssets(assets) {
+  const local = new Map();
+  for (const asset of assets) {
+    const { size, digest } = await hashAsset(asset);
+    local.set(basename(asset), {
+      path: asset,
+      size,
+      digest,
+    });
+  }
+  return local;
+}
+
+function matchingRemoteAssets(t, local) {
+  const remote = remoteAssets(t);
+  if (!remote) return null;
+  for (const [name, expected] of remote) {
+    const asset = local.get(name);
+    if (!asset || expected.size !== asset.size || expected.digest !== asset.digest) return null;
+  }
+  return { remote, local };
+}
+
+function exactReleaseExists(t, local) {
+  const matching = matchingRemoteAssets(t, local);
+  // matchingRemoteAssets already proved every remote name/size/digest exists
+  // locally. Equal cardinality therefore proves exact closure without allocating
+  // and scanning a second copy of the local asset entries.
+  return matching !== null && matching.remote.size === matching.local.size;
+}
+
+async function waitForExactReleaseAssets(t, local) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    if (exactReleaseExists(t, local)) return true;
+    if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  return false;
+}
+
+/** Create a draft release and publish it only after immutable assets are uploaded. */
+async function publishTo(t) {
+  const local = await localAssets(currentAssets);
+  if (releaseExists(t)) {
+    if (exactReleaseExists(t, local)) {
+      if (releaseIsDraft(t)) {
+        const publishArgs = ['release', 'edit', t, '--draft=false'];
+        if (repo) publishArgs.push('--repo', repo);
+        gh(publishArgs);
+        return true;
+      }
+      return false;
+    }
+    if (releaseIsDraft(t)) {
+      const matching = matchingRemoteAssets(t, local);
+      if (matching) {
+        const missing = currentAssets.filter((asset) => !matching.remote.has(basename(asset)));
+        if (missing.length > 0) {
+          const uploadArgs = ['release', 'upload', t, ...missing];
+          if (repo) uploadArgs.push('--repo', repo);
+          gh(uploadArgs);
+        }
+        if (!(await waitForExactReleaseAssets(t, local))) {
+          console.error(
+            `release ${t} assets could not be verified; leaving the release as a draft`,
+          );
+          process.exit(1);
+        }
+        const publishArgs = ['release', 'edit', t, '--draft=false'];
+        if (repo) publishArgs.push('--repo', repo);
+        gh(publishArgs);
+        return true;
+      }
+    }
+    console.error(`release ${t} already exists with mismatched assets; refusing to overwrite it`);
+    process.exit(1);
+  }
+  const createArgs = [
+    'release',
+    'create',
+    t,
+    '--draft',
+    '--title',
+    `Knowledge pack ${pack} ${version}`,
+    '--notes',
+    notes ?? `Knowledge-pack release assets. Install with: wikigr pack pull <name>`,
+  ];
+  if (repo) createArgs.push('--repo', repo);
+  gh(createArgs);
+  const uploadArgs = ['release', 'upload', t, ...currentAssets];
   if (repo) uploadArgs.push('--repo', repo);
   gh(uploadArgs);
+  if (!(await waitForExactReleaseAssets(t, local))) {
+    console.error(`release ${t} assets could not be verified; leaving the release as a draft`);
+    process.exit(1);
+  }
+  const publishArgs = ['release', 'edit', t, '--draft=false'];
+  if (repo) publishArgs.push('--repo', repo);
+  gh(publishArgs);
+  return true;
 }
 // Assets to publish — set in main() once built.
 let currentAssets = [];
 
 async function main() {
+  if (!legacyManifest) await validateKnowledgePack(packDir);
+  const signing = resolveSigning();
   const outDir = opt('--out-dir', await mkdtemp(join(tmpdir(), 'kgpacks-release-')));
   mkdirSync(outDir, { recursive: true });
   console.error(`[release] packaging pack=${pack} v${version} → ${outDir}`);
@@ -313,7 +528,6 @@ async function main() {
 
   // Sign the RAW index bytes (Ed25519) and publish the detached signature + public
   // key alongside it, so `wikigr pack pull` can verify authenticity before parsing.
-  const signing = resolveSigning();
   if (signing) {
     const indexBytes = readFileSync(indexPath);
     const sig = edSign(null, indexBytes, signing.key);
@@ -324,9 +538,7 @@ async function main() {
     assets.push(sigPath, pubPath);
     console.error('[release] signed index (Ed25519); wrote .sig + .pubkey');
   } else {
-    console.error(
-      '[release] no signing key (KGPACKS_SIGNING_KEY unset) — publishing UNSIGNED (integrity-only)',
-    );
+    console.error('[release] dry-run artifacts are unsigned (integrity-only)');
   }
   currentAssets = assets;
 
@@ -336,13 +548,11 @@ async function main() {
     return;
   }
 
-  // Publish to the requested tag (immutable when dated), then move the stable
-  // `packs` latest-pointer to the same assets so `wikigr pack pull <name>` (which
-  // defaults to `packs`) keeps working and always resolves the newest version.
-  publishTo(tag);
-  if (tag !== 'packs') publishTo('packs');
+  const published = await publishTo(tag);
   console.error(
-    `[release] uploaded ${assets.length} asset(s) to ${tag}${tag !== 'packs' ? ' (+ packs pointer)' : ''}`,
+    published
+      ? `[release] uploaded and verified ${assets.length} asset(s) on ${tag}`
+      : `[release] ${tag} already contains the exact assets; nothing changed`,
   );
   console.log(JSON.stringify({ tag, repo: repo ?? '(default)', ...index }, null, 2));
 }

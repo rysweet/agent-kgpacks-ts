@@ -1,8 +1,8 @@
 // packages/cli/test/ingestion-commands.test.ts
 //
-// Behaviour + exit-code contract for the Phase-2 INGESTION commands: `create`,
-// `update`, and `research-sources` — plus the dual-surface `pack create` /
-// `pack update` mounts. The heavy write-side stack is never loaded: each command
+// Behaviour + exit-code contract for the Phase-2 INGESTION commands: `create`
+// and `research-sources` — plus the dual-surface `pack create` mount. Incremental
+// update has its own immutable base/delta contract suite. The heavy write-side stack is never loaded: each command
 // delegates to an injected seam (`buildPack` / `discoverSources`) so the suite is
 // fully offline.
 //
@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DB_FILENAME } from '../src/constants.js';
-import { EXIT_OK, EXIT_PACK_NOT_FOUND, EXIT_USAGE } from '../src/exit-codes.js';
+import { EXIT_OK } from '../src/exit-codes.js';
 import { makeMockPacks, type MockPacks } from './helpers/mock-packs.js';
 import {
   BUILD_COUNTS,
@@ -202,48 +202,7 @@ describe('create', () => {
   });
 });
 
-describe('update', () => {
-  it('extends an EXISTING pack via the seam and prints counts (exit 0)', async () => {
-    const buildPack = fakeBuildPack();
-    const dbPath = join(packs.packsDir, 'alpha-pack', DB_FILENAME);
-
-    const result = await runCli(['update', '--pack', 'alpha-pack', '--seeds', SEED_B], {
-      packsDir: packs.packsDir,
-      buildPack,
-    });
-
-    expect(result.code).toBe(EXIT_OK);
-    expect(buildPack).toHaveBeenCalledWith(expect.objectContaining({ seeds: [SEED_B], dbPath }));
-    expect(parseStdout(result)).toEqual(expectedBuildCounts('alpha-pack', dbPath));
-  });
-
-  it('exits 3 for an unknown pack, without calling the seam', async () => {
-    const buildPack = fakeBuildPack();
-
-    const result = await runCli(['update', '--pack', 'ghost-pack', '--seeds', SEED_A], {
-      packsDir: packs.packsDir,
-      buildPack,
-    });
-
-    expect(result.code).toBe(EXIT_PACK_NOT_FOUND);
-    expect(buildPack).not.toHaveBeenCalled();
-  });
-
-  it('exits 2 when no seed source is supplied (pack exists)', async () => {
-    const buildPack = fakeBuildPack();
-
-    const result = await runCli(['update', '--pack', 'alpha-pack'], {
-      packsDir: packs.packsDir,
-      buildPack,
-    });
-
-    expect(result.code).toBe(EXIT_USAGE);
-    expect(buildPack).not.toHaveBeenCalled();
-    expect(result.stdout).toBe('');
-  });
-});
-
-describe('dual surface: pack create / pack update', () => {
+describe('dual surface: pack create', () => {
   it('`pack create` behaves identically to `create`', async () => {
     const buildPack = fakeBuildPack();
     const dbPath = join(packs.packsDir, 'gamma-pack', DB_FILENAME);
@@ -256,27 +215,6 @@ describe('dual surface: pack create / pack update', () => {
     expect(result.code).toBe(EXIT_OK);
     expect(buildPack).toHaveBeenCalledWith(expect.objectContaining({ seeds: [SEED_A], dbPath }));
     expect(parseStdout(result)).toEqual(expectedBuildCounts('gamma-pack', dbPath));
-  });
-
-  it('`pack update` behaves identically to `update`', async () => {
-    const buildPack = fakeBuildPack();
-    const dbPath = join(packs.packsDir, 'alpha-pack', DB_FILENAME);
-
-    const result = await runCli(['pack', 'update', '--pack', 'alpha-pack', '--seeds', SEED_B], {
-      packsDir: packs.packsDir,
-      buildPack,
-    });
-
-    expect(result.code).toBe(EXIT_OK);
-    expect(parseStdout(result)).toEqual(expectedBuildCounts('alpha-pack', dbPath));
-  });
-
-  it('`pack update` exits 3 for an unknown pack', async () => {
-    const result = await runCli(['pack', 'update', '--pack', 'ghost-pack', '--seeds', SEED_A], {
-      packsDir: packs.packsDir,
-      buildPack: fakeBuildPack(),
-    });
-    expect(result.code).toBe(EXIT_PACK_NOT_FOUND);
   });
 });
 

@@ -12,7 +12,7 @@ export { quantizeInt8, dequantizeInt8, QUANT_DIM } from './quantize.js';
 
 // Validated Spike B configuration (cosine = 1.000000 vs the reference oracle).
 // These are locked constants — there is intentionally nothing to configure.
-const MODEL_ID = 'Xenova/bge-base-en-v1.5';
+export const BGE_MODEL_ID = 'Xenova/bge-base-en-v1.5';
 const DIM = 768;
 const QUERY_PREFIX = 'Represent this sentence for searching relevant passages: ';
 
@@ -22,7 +22,7 @@ const QUERY_PREFIX = 'Represent this sentence for searching relevant passages: '
 let pipelinePromise: Promise<FeatureExtractionPipeline> | null = null;
 
 function getPipeline(): Promise<FeatureExtractionPipeline> {
-  pipelinePromise ??= pipeline('feature-extraction', MODEL_ID);
+  pipelinePromise ??= pipeline('feature-extraction', BGE_MODEL_ID);
   return pipelinePromise;
 }
 
@@ -68,6 +68,8 @@ async function embed(texts: string[]): Promise<Float32Array[]> {
  * lazily on first use and shared across all instances (load-once per process).
  */
 export class BgeEmbedder {
+  readonly modelId = BGE_MODEL_ID;
+
   /**
    * Embeds documents / passages. Texts are encoded verbatim — no prefix.
    *

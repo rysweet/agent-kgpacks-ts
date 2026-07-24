@@ -8,8 +8,8 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { EXIT_USAGE } from '../src/exit-codes.js';
-import { runCli } from './helpers/run-cli.js';
+import { EXIT_OK, EXIT_USAGE } from '../src/exit-codes.js';
+import { parseStdout, runCli } from './helpers/run-cli.js';
 
 const SEED = 'https://en.wikipedia.org/wiki/Ada_Lovelace';
 
@@ -27,7 +27,11 @@ describe('Phase-2 usage / parse errors (exit 2)', () => {
       ['create', '--pack', 'ada', '--seeds', SEED, '--max-articles', '0'],
       /max-articles/,
     ],
-    ['update missing --pack', ['update', '--seeds', SEED], /--pack/],
+    [
+      'update missing fresh inputs',
+      ['update', '--base', '/tmp/base'],
+      /--delta.*--output.*--version/s,
+    ],
     ['research-sources missing --seeds', ['research-sources'], /--seeds/],
     ['pack eval missing --pack', ['pack', 'eval'], /--pack/],
   ])('exits 2 with a targeted diagnostic: %s', async (_label, argv, pattern) => {
@@ -35,5 +39,17 @@ describe('Phase-2 usage / parse errors (exit 2)', () => {
     expect(result.code).toBe(EXIT_USAGE);
     expect(result.stdout).toBe('');
     expect(result.stderr).toMatch(pattern as RegExp);
+  });
+
+  it('continues to accept global --packs-dir after a subcommand', async () => {
+    const result = await runCli(['status', '--packs-dir', '/tmp/kgpacks-after-command']);
+    expect(result.code).toBe(EXIT_OK);
+    expect(parseStdout(result)).toMatchObject({ packsDir: '/tmp/kgpacks-after-command' });
+  });
+
+  it('does not rewrite --version when update is an argument to another command', async () => {
+    const result = await runCli(['query', 'update', 'question', '--version']);
+    expect(result.code).toBe(EXIT_OK);
+    expect(result.stderr).not.toContain('target-version');
   });
 });

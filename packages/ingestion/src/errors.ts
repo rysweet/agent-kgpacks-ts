@@ -40,3 +40,14 @@ export class FetchError extends IngestionError {
 
 /** The extractor produced output that could not be coerced into the contract. */
 export class ExtractionError extends IngestionError {}
+
+/** An expected failure while preparing, resuming, or publishing an immutable update. */
+export class KnowledgePackUpdateError extends IngestionError {}
+
+/** A comprehensive pack-integrity or authoritative-projection validation failure. */
+export class KnowledgePackValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = new.target.name;
+  }
+}

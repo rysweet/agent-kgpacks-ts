@@ -45,6 +45,14 @@ export function parseVersion(v: string): ParsedVersion {
 
 const isNumericId = (id: string): boolean => /^\d+$/.test(id);
 
+function compareNumericIds(a: string, b: string): -1 | 0 | 1 {
+  if (a.length < b.length) return -1;
+  if (a.length > b.length) return 1;
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
+}
+
 function comparePrerelease(a: string[], b: string[]): -1 | 0 | 1 {
   const len = Math.max(a.length, b.length);
   for (let i = 0; i < len; i++) {
@@ -55,10 +63,8 @@ function comparePrerelease(a: string[], b: string[]): -1 | 0 | 1 {
     const xn = isNumericId(x);
     const yn = isNumericId(y);
     if (xn && yn) {
-      const nx = Number(x);
-      const ny = Number(y);
-      if (nx < ny) return -1;
-      if (nx > ny) return 1;
+      const comparison = compareNumericIds(x, y);
+      if (comparison !== 0) return comparison;
     } else if (xn && !yn) {
       return -1; // numeric identifiers have lower precedence than alphanumeric
     } else if (!xn && yn) {
@@ -72,18 +78,20 @@ function comparePrerelease(a: string[], b: string[]): -1 | 0 | 1 {
 }
 
 export function compareVersions(a: string, b: string): -1 | 0 | 1 {
-  const pa = parseVersion(a);
-  const pb = parseVersion(b);
-  for (const key of ['major', 'minor', 'patch'] as const) {
-    if (pa[key] < pb[key]) return -1;
-    if (pa[key] > pb[key]) return 1;
+  const aMatch = SEMVER_RE.exec(a);
+  const bMatch = SEMVER_RE.exec(b);
+  if (!aMatch) parseVersion(a);
+  if (!bMatch) parseVersion(b);
+  for (let index = 1; index <= 3; index++) {
+    const comparison = compareNumericIds(aMatch![index], bMatch![index]);
+    if (comparison !== 0) return comparison;
   }
-  const aPre = pa.prerelease.length > 0;
-  const bPre = pb.prerelease.length > 0;
-  if (!aPre && !bPre) return 0;
-  if (!aPre) return 1; // a is a release, b is a prerelease → a is higher
-  if (!bPre) return -1;
-  return comparePrerelease(pa.prerelease, pb.prerelease);
+  const aPrerelease = aMatch![4] ? aMatch![4].split('.') : [];
+  const bPrerelease = bMatch![4] ? bMatch![4].split('.') : [];
+  if (aPrerelease.length === 0 && bPrerelease.length === 0) return 0;
+  if (aPrerelease.length === 0) return 1; // a is a release, b is a prerelease → a is higher
+  if (bPrerelease.length === 0) return -1;
+  return comparePrerelease(aPrerelease, bPrerelease);
 }
 
 export function sortVersions(versions: string[]): string[] {
@@ -93,8 +101,12 @@ export function sortVersions(versions: string[]): string[] {
 
 export function latestVersion(versions: string[]): string | undefined {
   if (versions.length === 0) return undefined;
-  const sorted = sortVersions(versions);
-  return sorted[sorted.length - 1];
+  for (const version of versions) parseVersion(version);
+  let latest = versions[0];
+  for (let index = 1; index < versions.length; index++) {
+    if (compareVersions(versions[index], latest) >= 0) latest = versions[index];
+  }
+  return latest;
 }
 
 // A dated release tag: `<name>-YYYY.MM[.N]`. The month is zero-padded in the tag

@@ -11,18 +11,23 @@
 // and commits with a single atomic rename. Any integrity or download failure
 // raises `PackInstallError` (CLI exit code 5) and installs nothing.
 
-import { createHash } from 'node:crypto';
+import { createHash, type Hash } from 'node:crypto';
 import { createReadStream, createWriteStream, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Readable } from 'node:stream';
+import { Readable, Transform, type TransformCallback } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
-import { PackInstallError, installPackFromStream } from '@kgpacks/packs';
+import {
+  PackInstallError,
+  compareVersions,
+  installPackFromStream,
+  isValidSemver,
+  packVersionFromReleaseTag,
+} from '@kgpacks/packs';
 
 import {
   DEFAULT_PACK_REPO,
-  DEFAULT_PACK_TAG,
   PACK_RELEASE_INDEX_SUFFIX,
   PACK_RELEASE_SIGNATURE_SUFFIX,
 } from './constants.js';
@@ -86,6 +91,7 @@ export interface PulledPack {
 }
 
 const PART_FILE_RE = /^[A-Za-z0-9._-]+$/;
+const DATED_RELEASE_VERSION_RE = /^\d{4}\.\d{2}(?:\.\d+)?$/;
 
 /** Resolves the base URL (directory) that hosts the index and part assets. */
 export function resolvePackBaseUrl(
@@ -93,8 +99,137 @@ export function resolvePackBaseUrl(
 ): string {
   if (opts.baseUrl) return opts.baseUrl.replace(/\/+$/, '');
   const repo = opts.repo ?? DEFAULT_PACK_REPO;
-  const tag = opts.tag ?? DEFAULT_PACK_TAG;
+  if (!opts.tag) {
+    throw new PackInstallError('a release tag is required when resolving a static pack URL');
+  }
+  const tag = opts.tag;
   return `https://github.com/${repo}/releases/download/${tag}`;
+}
+
+export async function discoverLatestPackBaseUrl(
+  name: string,
+  repo: string,
+  requireSignature = true,
+): Promise<string> {
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) {
+    throw new PackInstallError(`invalid pack repository: ${repo}`);
+  }
+  const expectedAsset = `${name}${PACK_RELEASE_INDEX_SUFFIX}`;
+  const expectedSignature = `${expectedAsset}${PACK_RELEASE_SIGNATURE_SUFFIX}`;
+  let latest: { tag: string; version: string } | undefined;
+  for (let page = 1; ; page++) {
+    const apiUrl = `https://api.github.com/repos/${repo}/releases?per_page=100&page=${page}`;
+    let response: Response;
+    try {
+      response = await fetch(apiUrl, {
+        headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'wikigr-pack-pull' },
+      });
+    } catch (error) {
+      throw new PackInstallError(
+        `cannot discover pack releases from ${repo}: ${(error as Error).message}`,
+      );
+    }
+    if (!response.ok) {
+      throw new PackInstallError(
+        `cannot discover pack releases from ${repo} (HTTP ${response.status})`,
+      );
+    }
+    let releases: unknown;
+    try {
+      releases = await response.json();
+    } catch (error) {
+      throw new PackInstallError(
+        `invalid release discovery response from ${repo}: ${(error as Error).message}`,
+      );
+    }
+    if (!Array.isArray(releases)) {
+      throw new PackInstallError(`invalid release discovery response from ${repo}`);
+    }
+    for (const value of releases) {
+      if (!value || typeof value !== 'object') continue;
+      const release = value as {
+        tag_name?: unknown;
+        draft?: unknown;
+        prerelease?: unknown;
+        assets?: unknown;
+      };
+      const tag = typeof release.tag_name === 'string' ? release.tag_name : '';
+      const version = versionFromImmutableTag(name, tag);
+      if (
+        release.draft !== false ||
+        release.prerelease !== false ||
+        version === null ||
+        hasPrerelease(version) ||
+        !Array.isArray(release.assets)
+      ) {
+        continue;
+      }
+      let hasIndex = false;
+      let hasSignature = !requireSignature;
+      for (const asset of release.assets) {
+        if (asset === null || typeof asset !== 'object') continue;
+        const assetName = (asset as { name?: unknown }).name;
+        if (assetName === expectedAsset) hasIndex = true;
+        else if (assetName === expectedSignature) hasSignature = true;
+        if (hasIndex && hasSignature) break;
+      }
+      if (hasIndex && hasSignature) {
+        const candidate = { tag, version };
+        if (!latest) {
+          latest = candidate;
+        } else {
+          const precedence = compareVersions(candidate.version, latest.version);
+          const versionOrder = compareBytewise(candidate.version, latest.version);
+          if (
+            precedence > 0 ||
+            (precedence === 0 &&
+              (versionOrder > 0 ||
+                (versionOrder === 0 && compareBytewise(candidate.tag, latest.tag) > 0)))
+          ) {
+            latest = candidate;
+          }
+        }
+      }
+    }
+    if (releases.length < 100) break;
+  }
+  if (latest) return `https://github.com/${repo}/releases/download/${latest.tag}`;
+  throw new PackInstallError(
+    `no immutable release containing ${expectedAsset}${
+      requireSignature ? ` and ${expectedSignature}` : ''
+    } was found in ${repo}`,
+  );
+}
+
+function compareBytewise(left: string, right: string): -1 | 0 | 1 {
+  // Valid SemVer and immutable release-tag suffixes are ASCII. Tags compared
+  // here also share the exact pack-name prefix, so UTF-16 and UTF-8 ordering
+  // are identical without allocating two temporary Buffers per comparison.
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function hasPrerelease(version: string): boolean {
+  // versionFromImmutableTag has already performed strict SemVer validation.
+  // A '-' before build metadata therefore unambiguously starts a prerelease.
+  const prerelease = version.indexOf('-');
+  const build = version.indexOf('+');
+  return prerelease !== -1 && (build === -1 || prerelease < build);
+}
+
+function versionFromImmutableTag(name: string, tag: string): string | null {
+  const versionPrefix = `${name}-v`;
+  if (tag.startsWith(versionPrefix)) {
+    const version = tag.slice(versionPrefix.length);
+    return isValidSemver(version) ? version : null;
+  }
+  const datedPrefix = `${name}-`;
+  if (!tag.startsWith(datedPrefix)) return null;
+  if (!DATED_RELEASE_VERSION_RE.test(tag.slice(datedPrefix.length))) return null;
+  try {
+    return packVersionFromReleaseTag(tag);
+  } catch {
+    return null;
+  }
 }
 
 async function fetchIndexBytes(url: string): Promise<Buffer> {
@@ -176,17 +311,11 @@ function assertIndex(value: unknown, expectedName: string, url: string): PackRel
   return idx as PackReleaseIndex;
 }
 
-async function sha256File(path: string): Promise<{ hash: string; bytes: number }> {
-  const hash = createHash('sha256');
-  let bytes = 0;
-  for await (const chunk of createReadStream(path)) {
-    bytes += (chunk as Buffer).length;
-    hash.update(chunk);
-  }
-  return { hash: hash.digest('hex'), bytes };
-}
-
-async function downloadPart(url: string, dest: string): Promise<void> {
+async function downloadPart(
+  url: string,
+  dest: string,
+  overallHash: Hash,
+): Promise<{ hash: string; bytes: number }> {
   let res: Response;
   try {
     res = await fetch(url);
@@ -196,10 +325,22 @@ async function downloadPart(url: string, dest: string): Promise<void> {
   if (!res.ok || !res.body) {
     throw new PackInstallError(`failed to download part ${url} (HTTP ${res.status})`);
   }
+  const partHash = createHash('sha256');
+  let bytes = 0;
+  const verifier = new Transform({
+    transform(chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback) {
+      bytes += chunk.length;
+      partHash.update(chunk);
+      overallHash.update(chunk);
+      callback(null, chunk);
+    },
+  });
   await pipeline(
     Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]),
+    verifier,
     createWriteStream(dest),
   );
+  return { hash: partHash.digest('hex'), bytes };
 }
 
 /** Async generator concatenating part files in order into one byte stream. */
@@ -216,7 +357,11 @@ async function* concatParts(paths: string[]): AsyncGenerator<Buffer> {
  * `PackInstallError` on any download or integrity failure (installing nothing).
  */
 export async function pullPack(opts: PullPackOptions): Promise<PulledPack> {
-  const base = resolvePackBaseUrl(opts);
+  const automaticDiscovery = !opts.baseUrl && !opts.tag;
+  const noVerify = opts.noVerify ?? false;
+  const base = !automaticDiscovery
+    ? resolvePackBaseUrl(opts)
+    : await discoverLatestPackBaseUrl(opts.name, opts.repo ?? DEFAULT_PACK_REPO, !noVerify);
   const indexUrl = `${base}/${opts.name}${PACK_RELEASE_INDEX_SUFFIX}`;
   const log = opts.log ?? ((message: string) => process.stderr.write(`${message}\n`));
 
@@ -232,8 +377,8 @@ export async function pullPack(opts: PullPackOptions): Promise<PulledPack> {
   const action = signaturePlan({
     present,
     valid: signedBy !== null,
-    requireSignature: opts.requireSignature ?? false,
-    noVerify: opts.noVerify ?? false,
+    requireSignature: automaticDiscovery && !noVerify ? true : (opts.requireSignature ?? false),
+    noVerify,
   });
   if (action === 'fail') {
     throw new PackInstallError(
@@ -256,10 +401,10 @@ export async function pullPack(opts: PullPackOptions): Promise<PulledPack> {
   const work = mkdtempSync(join(opts.tmpRoot ?? tmpdir(), 'kgpacks-pull-'));
   try {
     const partPaths: string[] = [];
+    const overall = createHash('sha256');
     for (const part of index.parts) {
       const dest = join(work, part.file);
-      await downloadPart(`${base}/${part.file}`, dest);
-      const { hash, bytes } = await sha256File(dest);
+      const { hash, bytes } = await downloadPart(`${base}/${part.file}`, dest, overall);
       if (bytes !== part.bytes) {
         throw new PackInstallError(
           `part ${part.file} size mismatch: expected ${part.bytes} bytes, got ${bytes}`,
@@ -272,9 +417,8 @@ export async function pullPack(opts: PullPackOptions): Promise<PulledPack> {
     }
 
     // Verify the overall archive checksum over the concatenated parts before
-    // touching the install root.
-    const overall = createHash('sha256');
-    for await (const chunk of concatParts(partPaths)) overall.update(chunk);
+    // touching the install root. The digest was accumulated in part order while
+    // streaming each download to disk, avoiding another full archive read.
     if (overall.digest('hex') !== index.sha256) {
       throw new PackInstallError(`assembled archive for ${opts.name} failed overall checksum`);
     }

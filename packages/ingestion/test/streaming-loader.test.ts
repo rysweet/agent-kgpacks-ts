@@ -43,7 +43,10 @@ describe('createPackWriter — streaming round-trip', () => {
           { name: 'Photosynthesis', type: 'concept' },
           { name: 'Plant', type: 'concept' },
         ],
-        relationships: [{ source: 'Plant', target: 'Photosynthesis', relation: 'uses' }],
+        relationships: [
+          { source: 'Plant', target: 'Photosynthesis', relation: 'uses' },
+          { source: 'Plant', target: 'Basketball', relation: 'anticipates' },
+        ],
         keyFacts: [],
       }),
     ]);
@@ -76,7 +79,7 @@ describe('createPackWriter — streaming round-trip', () => {
       sections: 2,
       chunks: 2,
       entities: 3, // Photosynthesis, Plant, Basketball — Plant deduped across batches
-      relationships: 2, // Plant->Photosynthesis and Basketball->Plant (cross-batch)
+      relationships: 3, // includes Plant->Basketball before Basketball is declared
       links: 1,
     });
   });
@@ -121,6 +124,12 @@ describe('createPackWriter — streaming round-trip', () => {
     );
     expect(rels).toHaveLength(1);
     expect(rels[0].rel).toBe('unrelated_to');
+
+    const forward = await conn.run<{ rel: string }>(
+      `MATCH (:Entity {entity_id: 'Plant'})-[r:ENTITY_RELATION]->(:Entity {entity_id: 'Basketball'})
+       RETURN r.relation AS rel`,
+    );
+    expect(forward).toEqual([{ rel: 'anticipates' }]);
   });
 
   it('persists Article.expansion_depth (default 0) like loadPack, so /stats by_depth works', async () => {

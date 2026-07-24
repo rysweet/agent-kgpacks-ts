@@ -20,6 +20,8 @@ import {
   clearCheckpoint,
   paramsHash,
   checkpointMatches,
+  deriveResumeProgress,
+  assertExactSourceClosure,
 } from '../scripts/build-checkpoint.mjs';
 
 let dir: string;
@@ -41,6 +43,9 @@ const PARAMS = {
   batch: 96,
   model: 'Xenova/bge-base-en-v1.5',
   withEntityRelations: false,
+  corpusCommit: '0123456789abcdef0123456789abcdef01234567',
+  corpusDate: '2026-07-03',
+  corpusTag: 'cve_2026-07-03_0000Z',
 };
 
 describe('checkpointPath', () => {
@@ -87,9 +92,12 @@ describe('clearCheckpoint', () => {
 describe('paramsHash / checkpointMatches', () => {
   it('is stable for identical params regardless of key order', () => {
     const reordered = {
+      corpusTag: 'cve_2026-07-03_0000Z',
       withEntityRelations: false,
+      corpusDate: '2026-07-03',
       batch: 96,
       model: 'Xenova/bge-base-en-v1.5',
+      corpusCommit: '0123456789abcdef0123456789abcdef01234567',
       limit: 0,
       year: '2025',
       src: '/data/cve',
@@ -97,11 +105,70 @@ describe('paramsHash / checkpointMatches', () => {
     expect(paramsHash(reordered)).toBe(paramsHash(PARAMS));
   });
 
+  describe('database-authoritative resume progress', () => {
+    const inventory = [
+      { sourceOffset: 1, title: 'CVE-2025-0001', hash: 'a' },
+      { sourceOffset: 3, title: 'CVE-2025-0002', hash: 'b' },
+      { sourceOffset: 4, title: 'CVE-2025-0003', hash: 'c' },
+    ];
+
+    it('derives progress from durable sources instead of sidecar fields', () => {
+      expect(
+        deriveResumeProgress(inventory, [
+          { title: 'CVE-2025-0002', hash: 'b' },
+          { title: 'CVE-2025-0001', hash: 'a' },
+        ]),
+      ).toEqual({ loadedRecords: 2, sourceOffset: 3 });
+    });
+
+    it('rejects forward, non-prefix, and hash-tampered durable progress', () => {
+      expect(() =>
+        deriveResumeProgress(inventory, [
+          { title: 'CVE-2025-0001', hash: 'a' },
+          { title: 'CVE-2025-0003', hash: 'c' },
+        ]),
+      ).toThrow(/exact prefix/i);
+      expect(() =>
+        deriveResumeProgress(inventory, [{ title: 'CVE-2025-0001', hash: 'tampered' }]),
+      ).toThrow(/exact prefix/i);
+      expect(() =>
+        deriveResumeProgress(inventory, [...inventory, { title: 'extra', hash: 'd' }]),
+      ).toThrow(/more sources/i);
+    });
+
+    it('requires exact source closure before publication', () => {
+      expect(() => assertExactSourceClosure(inventory, inventory)).not.toThrow();
+      expect(() => assertExactSourceClosure(inventory, inventory.slice(0, 2))).toThrow(
+        /source closure/i,
+      );
+    });
+
+    it('derives large resume prefixes without sorting or mutating either input', () => {
+      const largeInventory = Array.from({ length: 20_000 }, (_, index) => ({
+        sourceOffset: index * 2 + 1,
+        title: `CVE-2025-${String(index).padStart(5, '0')}`,
+        hash: `hash-${index}`,
+      }));
+      const durable = largeInventory
+        .slice(0, 15_000)
+        .map(({ title, hash }) => ({ title, hash }))
+        .reverse();
+      const firstDurable = durable[0];
+
+      expect(deriveResumeProgress(largeInventory, durable)).toEqual({
+        loadedRecords: 15_000,
+        sourceOffset: 29_999,
+      });
+      expect(durable[0]).toBe(firstDurable);
+    });
+  });
+
   it('changes when any output-affecting input changes', () => {
     const base = paramsHash(PARAMS);
     expect(paramsHash({ ...PARAMS, year: '2024' })).not.toBe(base);
     expect(paramsHash({ ...PARAMS, batch: 128 })).not.toBe(base);
     expect(paramsHash({ ...PARAMS, withEntityRelations: true })).not.toBe(base);
+    expect(paramsHash({ ...PARAMS, corpusCommit: 'f'.repeat(40) })).not.toBe(base);
   });
 
   it('accepts a matching checkpoint and refuses a mismatched one', () => {

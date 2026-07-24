@@ -21,10 +21,10 @@ FROM base AS build
 # node_modules, build output, tests, secrets, and local tooling state.
 COPY . .
 
-# Reproducible install from the committed lockfile. @ladybugdb/core's install
-# step (allow-listed in .npmrc) selects and links the prebuilt linux-x64 binding;
-# nothing is compiled from source.
-RUN pnpm install --frozen-lockfile
+# Reproducible install from the committed lockfile. This backend image does not
+# ship the root wikigr CLI, so its renameat2 helper is omitted rather than
+# introducing a compiler. @ladybugdb/core selects a prebuilt linux-x64 binding.
+RUN WIKIGR_SKIP_NATIVE_HELPER=1 pnpm install --frozen-lockfile
 
 # Build every workspace package (tsc -b) so each package's dist/ exists before
 # the prune below copies it into the deployment closure.
@@ -32,7 +32,7 @@ RUN pnpm -r build
 
 # Prune to a self-contained production closure for the backend only: workspace
 # dependencies are inlined and devDependencies are dropped.
-RUN pnpm deploy --filter=@kgpacks/backend --prod /app/deploy
+RUN WIKIGR_SKIP_NATIVE_HELPER=1 pnpm deploy --filter=@kgpacks/backend --prod /app/deploy
 
 # Fail the build early if the prebuilt native binding did not survive the prune.
 # @ladybugdb/core is a direct dependency of @kgpacks/db, so resolve it from that

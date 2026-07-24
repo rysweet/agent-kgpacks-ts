@@ -33,6 +33,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 const guard = join(repoRoot, 'scripts', 'setup-husky.mjs');
 
+function isolatedGitEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (key.startsWith('GIT_')) delete env[key];
+  }
+  return env;
+}
+
 // Run the guard from a chosen cwd with a controlled environment. The guard
 // resolves `husky` relative to its own file location (import.meta.url), so it
 // always finds the repo's husky regardless of cwd — meaning we can point cwd at
@@ -44,7 +52,7 @@ function runGuard(opts: { cwd?: string; env?: Record<string, string | undefined>
 } {
   // Start from a clean env so an ambient CI=... from the test runner doesn't
   // leak into cases that must exercise the git-work-tree branch.
-  const baseEnv = { ...process.env };
+  const baseEnv = isolatedGitEnv();
   delete baseEnv.CI;
   delete baseEnv.HUSKY;
   const res = spawnSync('node', [guard], {
@@ -57,10 +65,11 @@ function runGuard(opts: { cwd?: string; env?: Record<string, string | undefined>
 
 function makeGitRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), 'husky-git-'));
-  const init = spawnSync('git', ['init', '-q'], { cwd: dir, encoding: 'utf8' });
+  const env = isolatedGitEnv();
+  const init = spawnSync('git', ['init', '-q'], { cwd: dir, encoding: 'utf8', env });
   expect(init.status).toBe(0);
-  spawnSync('git', ['config', 'user.email', 't@t.t'], { cwd: dir });
-  spawnSync('git', ['config', 'user.name', 't'], { cwd: dir });
+  spawnSync('git', ['config', 'user.email', 't@t.t'], { cwd: dir, env });
+  spawnSync('git', ['config', 'user.name', 't'], { cwd: dir, env });
   return dir;
 }
 
@@ -120,6 +129,7 @@ describe('husky guard — installs hooks in a dev git work tree', () => {
     const hooksPath = spawnSync('git', ['config', 'core.hooksPath'], {
       cwd: dir,
       encoding: 'utf8',
+      env: isolatedGitEnv(),
     });
     expect((hooksPath.stdout ?? '').trim()).toBe('.husky/_');
   });
@@ -131,11 +141,13 @@ describe('husky guard — installs hooks in a dev git work tree', () => {
     const before = spawnSync('git', ['config', 'core.hooksPath'], {
       cwd: repoRoot,
       encoding: 'utf8',
+      env: isolatedGitEnv(),
     });
     runGuard({ cwd: dir });
     const after = spawnSync('git', ['config', 'core.hooksPath'], {
       cwd: repoRoot,
       encoding: 'utf8',
+      env: isolatedGitEnv(),
     });
     expect((after.stdout ?? '').trim()).toBe((before.stdout ?? '').trim());
   });
