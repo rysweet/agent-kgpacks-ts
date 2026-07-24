@@ -6,6 +6,8 @@ import { discoverLatestPackBaseUrl, pullPack, resolvePackBaseUrl } from '../src/
 const REPO = 'owner/repo';
 const INDEX = 'cve.pack-release.json';
 const SIGNATURE = `${INDEX}.sig`;
+const PART = 'cve.tar.gz.000';
+const SHA256 = '0'.repeat(64);
 
 function asset(tag: string, name: string, repo = REPO, size?: number) {
   return {
@@ -31,12 +33,44 @@ function release(
     draft: options.draft ?? false,
     prerelease: options.prerelease ?? false,
     published_at: options.publishedAt ?? '2026-01-01T00:00:00Z',
-    assets: options.assets ?? [asset(tag, INDEX), asset(tag, SIGNATURE)],
+    assets: options.assets ?? [asset(tag, INDEX), asset(tag, SIGNATURE), asset(tag, PART, REPO, 1)],
   };
 }
 
 function json(value: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(value), { status: 200, ...init });
+}
+
+function packIndex(version: string) {
+  return {
+    name: 'cve',
+    version,
+    format: 'tar.gz-multipart-v1',
+    sha256: SHA256,
+    totalBytes: 1,
+    parts: [{ file: PART, bytes: 1, sha256: SHA256 }],
+  };
+}
+
+function versionFromTag(tag: string): string {
+  if (tag.startsWith('cve-v')) return tag.slice('cve-v'.length);
+  const match = /^cve-(\d{4})\.(\d{2})(?:\.(\d+))?$/.exec(tag);
+  if (!match) throw new Error(`unsupported test tag: ${tag}`);
+  return `${Number(match[1])}.${Number(match[2])}.${Number(match[3] ?? 0)}`;
+}
+
+function indexResponse(input: string | URL | Request): Response {
+  const url = new URL(String(input));
+  const segments = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+  const tag = segments[segments.indexOf('download') + 1];
+  return json(packIndex(versionFromTag(tag)));
+}
+
+function discoveryFetch(releases: unknown[]) {
+  return vi.fn().mockImplementation((input: string | URL | Request) => {
+    const url = String(input);
+    return Promise.resolve(url.includes('api.github.com') ? json(releases) : indexResponse(input));
+  });
 }
 
 describe('strict GitHub pack release discovery', () => {
@@ -59,29 +93,34 @@ describe('strict GitHub pack release discovery', () => {
     const firstPage = Array.from({ length: 100 }, (_, index) =>
       release(`other-v1.0.${index}`, { id: index + 1, assets: [] }),
     );
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(json(firstPage))
-      .mockResolvedValueOnce(json([release('cve-2026.07', { id: 101 })]));
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (!url.includes('api.github.com')) return Promise.resolve(indexResponse(input));
+      return Promise.resolve(
+        new URL(url).searchParams.get('page') === '1'
+          ? json(firstPage)
+          : json([release('cve-2026.07', { id: 101 })]),
+      );
+    });
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(discoverLatestPackBaseUrl('cve', REPO)).resolves.toBe(
       'https://github.com/owner/repo/releases/download/cve-2026.07',
     );
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it('orders by version, publication time, raw ASCII tag, then release ID', async () => {
+  it('orders by semantic version then raw ASCII tag bytes only', async () => {
     const candidates = [
       release('cve-v2.0.0+build.a', {
         id: 8,
-        publishedAt: '2026-03-01T00:00:00Z',
+        publishedAt: '2026-04-01T00:00:00Z',
       }),
       release('cve-v2.0.0+build.z', {
         id: 7,
-        publishedAt: '2026-03-01T00:00:00Z',
+        publishedAt: '2026-01-01T00:00:00Z',
       }),
-      release('cve-v2.0.0+old', {
+      release('cve-v2.0.0+build.0', {
         id: 99,
         publishedAt: '2026-02-01T00:00:00Z',
       }),
@@ -92,7 +131,7 @@ describe('strict GitHub pack release discovery', () => {
     ];
 
     for (const ordered of [candidates, [...candidates].reverse()]) {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(json(ordered)));
+      vi.stubGlobal('fetch', discoveryFetch(ordered));
       await expect(discoverLatestPackBaseUrl('cve', REPO)).resolves.toBe(
         'https://github.com/owner/repo/releases/download/cve-v2.0.0+build.z',
       );
@@ -100,24 +139,76 @@ describe('strict GitHub pack release discovery', () => {
     }
 
     const duplicateTag = [release('cve-v2.0.0', { id: 9 }), release('cve-v2.0.0', { id: 10 })];
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(json(duplicateTag)));
+    vi.stubGlobal('fetch', discoveryFetch(duplicateTag));
     await expect(discoverLatestPackBaseUrl('cve', REPO)).resolves.toContain('cve-v2.0.0');
+  });
+
+  it('uses ordinal ASCII bytes rather than locale ordering for equal versions', async () => {
+    vi.stubGlobal('fetch', discoveryFetch([release('cve-v2.0.0+Z'), release('cve-v2.0.0+a')]));
+
+    await expect(discoverLatestPackBaseUrl('cve', REPO)).resolves.toContain('cve-v2.0.0+a');
+  });
+
+  it('filters incomplete release assets before ranking automatic candidates', async () => {
+    const incompleteTag = 'cve-v3.0.0';
+    const completeTag = 'cve-v2.0.0';
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('api.github.com')) {
+        return Promise.resolve(
+          json([
+            release(incompleteTag, {
+              assets: [asset(incompleteTag, INDEX), asset(incompleteTag, SIGNATURE)],
+            }),
+            release(completeTag, {
+              assets: [
+                asset(completeTag, INDEX),
+                asset(completeTag, SIGNATURE),
+                asset(completeTag, PART, REPO, 1),
+              ],
+            }),
+          ]),
+        );
+      }
+      if (url.includes(incompleteTag)) return Promise.resolve(json(packIndex('3.0.0')));
+      if (url.includes(completeTag)) return Promise.resolve(json(packIndex('2.0.0')));
+      throw new Error(`unexpected URL: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(discoverLatestPackBaseUrl('cve', REPO)).resolves.toContain(completeTag);
+  });
+
+  it('skips an oversized candidate index before ranking', async () => {
+    const oversizedTag = 'cve-v3.0.0';
+    const completeTag = 'cve-v2.0.0';
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('api.github.com')) {
+        return Promise.resolve(json([release(oversizedTag), release(completeTag)]));
+      }
+      if (url.includes(oversizedTag)) {
+        return Promise.resolve(new Response('x'.repeat(1024), { status: 200 }));
+      }
+      return Promise.resolve(json(packIndex('2.0.0')));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      discoverLatestPackBaseUrl('cve', REPO, true, { limits: { indexBytes: 512 } }),
+    ).resolves.toContain(completeTag);
   });
 
   it('excludes drafts, prereleases, missing stability metadata, and SemVer prereleases', async () => {
     vi.stubGlobal(
       'fetch',
-      vi
-        .fn()
-        .mockResolvedValueOnce(
-          json([
-            release('cve-v9.0.0', { draft: true }),
-            release('cve-v8.0.0', { prerelease: true }),
-            { ...release('cve-v7.0.0'), draft: undefined },
-            release('cve-v6.0.0-rc.1'),
-            release('cve-v2.0.0'),
-          ]),
-        ),
+      discoveryFetch([
+        release('cve-v9.0.0', { draft: true }),
+        release('cve-v8.0.0', { prerelease: true }),
+        { ...release('cve-v7.0.0'), draft: undefined },
+        release('cve-v6.0.0-rc.1'),
+        release('cve-v2.0.0'),
+      ]),
     );
 
     await expect(discoverLatestPackBaseUrl('cve', REPO)).resolves.toContain('cve-v2.0.0');
@@ -190,12 +281,9 @@ describe('strict GitHub pack release discovery', () => {
 
   it('requires exactly one signature unless verification is explicitly disabled', async () => {
     const unsigned = release('cve-v3.0.0', {
-      assets: [asset('cve-v3.0.0', INDEX)],
+      assets: [asset('cve-v3.0.0', INDEX), asset('cve-v3.0.0', PART, REPO, 1)],
     });
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockImplementation(() => Promise.resolve(json([unsigned]))),
-    );
+    vi.stubGlobal('fetch', discoveryFetch([unsigned]));
 
     await expect(discoverLatestPackBaseUrl('cve', REPO)).rejects.toMatchObject({
       code: 'not-found',
@@ -221,7 +309,8 @@ describe('strict GitHub pack release discovery', () => {
       .fn()
       .mockResolvedValueOnce(new Response('', { status: 503 }))
       .mockResolvedValueOnce(new Response('', { status: 429, headers: { 'Retry-After': '999' } }))
-      .mockResolvedValueOnce(json([release('cve-v2.0.0')]));
+      .mockResolvedValueOnce(json([release('cve-v2.0.0')]))
+      .mockImplementation((input: string | URL | Request) => Promise.resolve(indexResponse(input)));
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(
@@ -229,7 +318,7 @@ describe('strict GitHub pack release discovery', () => {
         limits: { retryBaseDelayMs: 0, maxRetryAfterMs: 0 },
       }),
     ).resolves.toContain('cve-v2.0.0');
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
 
     const permanent = vi.fn().mockResolvedValue(new Response('', { status: 401 }));
     vi.stubGlobal('fetch', permanent);
@@ -264,7 +353,7 @@ describe('strict GitHub pack release discovery', () => {
       if (url.endsWith('.sig')) {
         return Promise.resolve(new Response(Buffer.alloc(64).toString('base64'), { status: 200 }));
       }
-      return Promise.resolve(new Response('not-json', { status: 200 }));
+      return Promise.resolve(json(packIndex('3.0.0')));
     });
     vi.stubGlobal('fetch', fetchMock);
 

@@ -125,10 +125,10 @@ interface GithubAsset {
 interface ReleaseCandidate {
   tag: string;
   version: string;
-  publishedAt: number;
-  releaseId: string;
   baseUrl: string;
   assets: ReadonlyMap<string, readonly GithubAsset[]>;
+  index: PackReleaseIndex;
+  indexBytes: Buffer;
 }
 
 /** Resolves the base URL (directory) that hosts the index and part assets. */
@@ -197,11 +197,9 @@ async function discoverLatestPackRelease(
     for (const value of releases) {
       if (!value || typeof value !== 'object') continue;
       const release = value as {
-        id?: unknown;
         tag_name?: unknown;
         draft?: unknown;
         prerelease?: unknown;
-        published_at?: unknown;
         assets?: unknown;
       };
       const tag = typeof release.tag_name === 'string' ? release.tag_name : '';
@@ -216,11 +214,6 @@ async function discoverLatestPackRelease(
       ) {
         continue;
       }
-      const publishedAt =
-        typeof release.published_at === 'string' ? Date.parse(release.published_at) : Number.NaN;
-      const releaseId = normalizeReleaseId(release.id);
-      if (!Number.isFinite(publishedAt) || releaseId === null) continue;
-
       const assets = new Map<string, GithubAsset[]>();
       for (const asset of release.assets) {
         if (asset === null || typeof asset !== 'object') continue;
@@ -240,19 +233,23 @@ async function discoverLatestPackRelease(
       }
       if (indexes.length !== 1 || (requireSignature && signatures.length !== 1)) continue;
 
-      const candidate: ReleaseCandidate = {
-        tag,
-        version,
-        publishedAt,
-        releaseId,
-        baseUrl: `https://github.com/${repo}/releases/download/${tag}`,
-        assets,
-      };
+      const candidate = await completeReleaseCandidate(
+        {
+          tag,
+          version,
+          baseUrl: `https://github.com/${repo}/releases/download/${tag}`,
+          assets,
+        },
+        name,
+        context,
+      );
+      if (!candidate) continue;
       if (!latest) {
         latest = candidate;
       } else {
         const order = compareCandidates(candidate, latest);
         if (order === 0) {
+          if (sameReleaseCandidate(candidate, latest, expectedSignature)) continue;
           throw new ExternalServiceError(
             'ambiguous',
             'GitHub release discovery returned indistinguishable candidates',
@@ -276,6 +273,78 @@ async function discoverLatestPackRelease(
       requireSignature ? ` and ${expectedSignature}` : ''
     } was found in ${repo}`,
   );
+}
+
+async function completeReleaseCandidate(
+  candidate: Omit<ReleaseCandidate, 'index' | 'indexBytes'>,
+  name: string,
+  context: ExternalContext,
+): Promise<ReleaseCandidate | null> {
+  const indexName = `${name}${PACK_RELEASE_INDEX_SUFFIX}`;
+  const indexAsset = candidate.assets.get(indexName)?.[0];
+  if (!indexAsset) return null;
+  let indexBytes: Buffer | null;
+  try {
+    indexBytes = (await fetchBoundedBytes(
+      context,
+      indexAsset.url,
+      { allowedOrigins: GITHUB_ASSET_ORIGINS },
+      context.limits.indexBytes,
+      'pack discovery index download',
+      { optional404: true },
+    )) as Buffer | null;
+  } catch (error) {
+    if (error instanceof ExternalServiceError && error.code === 'response-too-large') return null;
+    throw error;
+  }
+  if (!indexBytes) return null;
+
+  let index: PackReleaseIndex;
+  try {
+    index = assertIndex(parseIndexJson(indexBytes), name, context.limits);
+  } catch (error) {
+    if (
+      error instanceof ExternalServiceError &&
+      ['integrity', 'invalid-response', 'response-too-large', 'trust'].includes(error.code)
+    ) {
+      return null;
+    }
+    throw error;
+  }
+  if (index.version !== candidate.version) return null;
+  for (const part of index.parts) {
+    const matches = candidate.assets.get(part.file) ?? [];
+    if (matches.length !== 1 || (matches[0].size !== undefined && matches[0].size !== part.bytes)) {
+      return null;
+    }
+  }
+  return { ...candidate, index, indexBytes };
+}
+
+function sameReleaseCandidate(
+  left: ReleaseCandidate,
+  right: ReleaseCandidate,
+  signatureName: string,
+): boolean {
+  if (!left.indexBytes.equals(right.indexBytes)) return false;
+  const requiredNames = [
+    `${left.index.name}${PACK_RELEASE_INDEX_SUFFIX}`,
+    signatureName,
+    ...left.index.parts.map((part) => part.file),
+  ];
+  return requiredNames.every((name) => {
+    const leftAssets = left.assets.get(name) ?? [];
+    const rightAssets = right.assets.get(name) ?? [];
+    return (
+      leftAssets.length === rightAssets.length &&
+      leftAssets.every(
+        (asset, position) =>
+          asset.name === rightAssets[position]?.name &&
+          asset.url === rightAssets[position]?.url &&
+          asset.size === rightAssets[position]?.size,
+      )
+    );
+  });
 }
 
 function parseGithubAsset(value: object, repo: string, tag: string): GithubAsset | null {
@@ -336,28 +405,10 @@ function assertGithubAssetBinding(
   }
 }
 
-function normalizeReleaseId(value: unknown): string | null {
-  if (typeof value === 'number') {
-    return Number.isSafeInteger(value) && value >= 0 ? String(value) : null;
-  }
-  if (typeof value === 'string' && /^(?:0|[1-9]\d*)$/.test(value)) return value;
-  return null;
-}
-
 function compareCandidates(left: ReleaseCandidate, right: ReleaseCandidate): -1 | 0 | 1 {
   const version = compareVersions(left.version, right.version);
   if (version !== 0) return version;
-  if (left.publishedAt !== right.publishedAt) {
-    return left.publishedAt < right.publishedAt ? -1 : 1;
-  }
-  const tag = compareAscii(left.tag, right.tag);
-  if (tag !== 0) return tag;
-  return compareDecimalIds(left.releaseId, right.releaseId);
-}
-
-function compareDecimalIds(left: string, right: string): -1 | 0 | 1 {
-  if (left.length !== right.length) return left.length < right.length ? -1 : 1;
-  return compareAscii(left, right);
+  return compareAscii(left.tag, right.tag);
 }
 
 function isAscii(value: string): boolean {
@@ -557,13 +608,15 @@ export async function pullPack(opts: PullPackOptions): Promise<PulledPack> {
 
   // Fetch the RAW index bytes and verify authenticity BEFORE parsing the JSON, so
   // a tampered index cannot influence the client before its signature is checked.
-  const indexBytes = (await fetchBoundedBytes(
-    transport,
-    indexUrl,
-    policy,
-    transport.limits.indexBytes,
-    'pack index download',
-  )) as Buffer;
+  const indexBytes =
+    discovery?.indexBytes ??
+    ((await fetchBoundedBytes(
+      transport,
+      indexUrl,
+      policy,
+      transport.limits.indexBytes,
+      'pack index download',
+    )) as Buffer);
   const signatureName = `${indexName}${PACK_RELEASE_SIGNATURE_SUFFIX}`;
   const signatureUrl = discovery
     ? (discovery.assets.get(signatureName)?.[0]?.url ?? `${base}/${signatureName}`)
