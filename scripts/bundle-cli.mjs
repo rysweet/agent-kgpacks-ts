@@ -8,11 +8,29 @@
 // are declared in this package's `dependencies`, so the consumer's package manager
 // installs them normally. Runs from `prepare`, so a git/tarball install builds it.
 import { build } from 'esbuild';
-import { readdirSync } from 'node:fs';
+import { chmodSync, mkdirSync, readdirSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const dist = join(root, 'dist');
+
+mkdirSync(dist, { recursive: true });
+if (process.platform === 'linux' && process.env.WIKIGR_SKIP_NATIVE_HELPER !== '1') {
+  const helper = join(dist, 'rename-noreplace');
+  const compiled = spawnSync(
+    process.env.CC ?? 'cc',
+    ['-O2', '-s', '-std=c11', '-o', helper, join(root, 'native', 'rename-noreplace.c')],
+    { encoding: 'utf8' },
+  );
+  if (compiled.error || compiled.status !== 0) {
+    throw new Error(
+      `failed to build native renameat2 helper: ${compiled.error?.message ?? compiled.stderr.trim()}`,
+    );
+  }
+  chmodSync(helper, 0o755);
+}
 
 // Alias every workspace package (@kgpacks/<dir>) to its source entry so esbuild
 // bundles it inline rather than treating it as an unresolved bare import.
@@ -36,7 +54,7 @@ const externalizeRealDeps = {
 
 await build({
   entryPoints: [join(root, 'packages', 'cli', 'src', 'bin.ts')],
-  outfile: join(root, 'dist', 'wikigr.mjs'),
+  outfile: join(dist, 'wikigr.mjs'),
   bundle: true,
   platform: 'node',
   format: 'esm',

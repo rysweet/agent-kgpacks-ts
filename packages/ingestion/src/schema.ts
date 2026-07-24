@@ -73,6 +73,50 @@ export const NODE_TABLE_DDL: readonly string[] = [
      description STRING,
      PRIMARY KEY(entity_id)
    )`,
+  `CREATE NODE TABLE PackMetadata(
+     id STRING,
+     pack_id STRING,
+     version STRING,
+     schema_version STRING,
+     adapter_version STRING,
+     extractor_version STRING,
+     tool_version STRING,
+     build_id STRING,
+     provenance STRING,
+     base_pack_id STRING,
+     base_version STRING,
+     base_build_id STRING,
+     base_content_digest STRING,
+     delta_id STRING,
+     delta_file_sha256 STRING,
+     PRIMARY KEY(id)
+   )`,
+  `CREATE NODE TABLE ArticleSource(
+     title STRING,
+     payload STRING,
+     payload_sha256 STRING,
+     extractor_version STRING,
+     PRIMARY KEY(title)
+   )`,
+  `CREATE NODE TABLE RelationSupport(
+     support_id STRING,
+     article_title STRING,
+     signature STRING,
+     source_entity_id STRING,
+     target_entity_id STRING,
+     relation STRING,
+     context STRING,
+     extractor_version STRING,
+     PRIMARY KEY(support_id)
+   )`,
+  `CREATE NODE TABLE UpdateApplication(
+     article_title STRING,
+     operation STRING,
+     base_payload_sha256 STRING,
+     result_payload_sha256 STRING,
+     classification STRING,
+     PRIMARY KEY(article_title)
+   )`,
 ];
 
 /** Relationship-table DDL (created after all node tables exist). */

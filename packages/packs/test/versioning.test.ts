@@ -121,6 +121,11 @@ describe('@kgpacks/packs — sortVersions', () => {
     expect(sortVersions(shuffled)).toEqual(chain);
   });
 
+  it('compares arbitrarily large numeric identifiers without precision loss', () => {
+    expect(compareVersions('9007199254740992.0.0', '9007199254740993.0.0')).toBe(-1);
+    expect(compareVersions('1.0.0-9007199254740992', '1.0.0-9007199254740993')).toBe(-1);
+  });
+
   it('throws ManifestValidationError if any element is not valid SemVer', () => {
     expect(() => sortVersions(['1.0.0', 'nope'])).toThrow(ManifestValidationError);
   });
@@ -130,6 +135,10 @@ describe('@kgpacks/packs — latestVersion', () => {
   it('returns the highest-precedence version', () => {
     expect(latestVersion(['1.0.0', '1.2.0', '1.1.0'])).toBe('1.2.0');
     expect(latestVersion(['1.0.0', '1.0.0-rc.1'])).toBe('1.0.0');
+  });
+
+  it('preserves the last input when versions have equal precedence', () => {
+    expect(latestVersion(['1.0.0+build.1', '1.0.0+build.2'])).toBe('1.0.0+build.2');
   });
 
   it('returns undefined for an empty list', () => {

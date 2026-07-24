@@ -1,10 +1,10 @@
 # `@kgpacks/packs`
 
-The knowledge-pack **metadata and filesystem layer** of the agent-kgpacks
-TypeScript port. It reads and writes pack **manifests**, validates them against
-the (unchanged) on-disk schema, **installs** `.tar.gz` packs into a local install
-root with full **security parity**, and exposes a small **registry** (list / info
-/ remove) plus **SemVer 2.0** versioning helpers.
+The knowledge-pack **metadata, validation, and filesystem lifecycle layer** of the agent-kgpacks
+TypeScript port. It reads and writes pack **manifests**, performs structural
+manifest validation, **installs** `.tar.gz` packs into a local install root with
+full **security parity**, and exposes a small **registry** (list / info / remove)
+plus **SemVer 2.0** versioning helpers.
 
 This package ports the upstream Python `wikigr/packs` modules — `manifest.py`
 (manifest model **and** validation), `installer.py`, `registry.py`, and
@@ -13,8 +13,9 @@ Validation is **not** a separate module here: it lives in `manifest.ts` as
 `validateManifest`, the single schema gate the rest of the package calls. Two
 external contracts are preserved verbatim:
 
-- The **pack on-disk format and manifest schema are unchanged**; existing
-  Python-built packs keep working byte-for-byte (see
+- The legacy pack on-disk format remains supported; existing Python-built packs
+  keep working byte-for-byte. The schema-v2 format adds immutable update
+  metadata without changing legacy loading (see
   [docs/PLAN.md](../PLAN.md) → _External Contracts_).
 - The **security checks are ported deliberately and tested adversarially**:
   `PACK_NAME_RE` is carried over exactly, and archive extraction rejects
@@ -22,10 +23,12 @@ external contracts are preserved verbatim:
   every entry **before** any write (see [docs/PLAN.md](../PLAN.md) → _Security
   Parity_).
 
-- **Runtime dependencies:** **none.** The installer uses `node:zlib.gunzipSync`
+- **Current runtime dependencies:** **none.** The installer uses `node:zlib.gunzipSync`
   plus a hand-written `ustar` tar parser; versioning is a hand-rolled SemVer 2.0
   implementation. The package adds nothing to `package.json` and does not depend
-  on `@kgpacks/db` — these are pure metadata / filesystem operations.
+  on `@kgpacks/db`. The schema-v2 lifecycle lives in `@kgpacks/ingestion`, which
+  combines this package's manifest API with `@kgpacks/db`; manifest and installer
+  imports remain lightweight.
 - **Module system:** native ESM (NodeNext). Import named exports directly; types
   are re-exported with `export type`.
 - **Error model:** synchronous, **throw-on-invalid** — every validation failure
@@ -38,11 +41,7 @@ external contracts are preserved verbatim:
 > allow-listing) is also out of Phase-1 scope — `installPack` takes a **local
 > archive path** only.
 
-> **Status — intended Phase-1 surface.** This document is the design spec for the
-> package: it describes the **target** API and behavior, pinned down by the test
-> suite ([Testing](#testing)) as the modules land. Treat the signatures, error
-> types, and messages below as the contract to implement against, not yet a record
-> of shipped code.
+This document describes the implemented package surface.
 
 ## Installation
 
@@ -86,7 +85,7 @@ for (const pack of listPacks(installRoot)) {
 
 // 3. Inspect one pack by name.
 const info = packInfo(installRoot, 'world-history');
-console.log(info.manifest.graph_stats); // { node_count: 12000, edge_count: 48000 }
+console.log(info.manifest.graph_stats); // { articles: 12000, entities: 48000 }
 
 // 4. Read a manifest directly off disk.
 const manifest = loadManifestFromDir('./packs/world-history');
@@ -111,17 +110,35 @@ packs/
     └── ...                   # any additional pack files (skills, assets, etc.)
 ```
 
-This package treats everything except `manifest.json` as **opaque pack payload**:
-it copies/extracts those files faithfully but never parses them. Reading the
-graph database itself is the job of [`@kgpacks/db`](./db.md).
+A completed schema-v2 pack has a closed layout. Versioned parent directories
+can retain immutable versions while the leaf remains the stable pack ID:
+
+```text
+releases/
+└── 2026.07/
+    └── cve/
+        ├── manifest.json
+        └── pack.db
+```
+
+Unlike a legacy pack, it permits no additional payload, WAL, journal,
+checkpoint, staging, lock, or temporary files.
+
+Legacy install and registry operations treat everything except `manifest.json`
+as **opaque pack payload** and copy/extract it faithfully. The complete
+schema-v2 validator and updater in
+[`@kgpacks/ingestion`](../../packages/ingestion/README.md) open `pack.db`
+through [`@kgpacks/db`](./db.md); structural `validateManifest` remains
+lightweight.
 
 ### The manifest file
 
 `MANIFEST_FILENAME` is the constant `'manifest.json'`. It lives at the pack root.
-Keys are **snake_case**, mirroring the upstream Python dataclass fields verbatim,
-so packs written by the Python tooling load unchanged. `load → save` is
-**lossless**: unknown keys are preserved across a round-trip, so this package
-never strips fields it does not model.
+Legacy manifest keys are **snake_case**, mirroring the upstream Python dataclass
+fields verbatim, so packs written by the Python tooling load unchanged.
+Schema-v2 extensions use the exported camelCase field names. `load → save`
+preserves unknown keys, except dangerous top-level keys and dangerous keys
+nested inside `provenance`, which are removed.
 
 ## Manifest API
 
@@ -129,9 +146,11 @@ never strips fields it does not model.
 
 ```ts
 interface GraphStats {
-  node_count: number; // non-negative integer
-  edge_count: number; // non-negative integer
-  [extra: string]: number; // additional numeric graph metrics are preserved
+  articles?: number;
+  entities?: number;
+  relationships?: number;
+  size_mb?: number;
+  [extra: string]: number | undefined;
 }
 
 interface EvalScores {
@@ -140,7 +159,7 @@ interface EvalScores {
 
 interface PackManifest {
   name: string; // required — must match PACK_NAME_RE
-  version: string; // required — must be valid SemVer 2.0
+  version: string; // required — see version validation below
   description?: string;
   graph_stats?: GraphStats;
   eval_scores?: EvalScores;
@@ -152,9 +171,9 @@ interface PackManifest {
 | Field          | Required | Validated when present                                                                                                                                                                  |
 | -------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `name`         | yes      | matches [`PACK_NAME_RE`](#pack_name_re)                                                                                                                                                 |
-| `version`      | yes      | valid SemVer 2.0 (see [`isValidSemver`](#isvalidsemverv-string-boolean))                                                                                                                |
+| `version`      | yes      | valid SemVer 2.0 for every manifest schema                                                                                                                                              |
 | `description`  | no       | string                                                                                                                                                                                  |
-| `graph_stats`  | no       | `node_count` / `edge_count` are non-negative integers; extras numeric                                                                                                                   |
+| `graph_stats`  | no       | every declared value is a non-negative finite number                                                                                                                                    |
 | `eval_scores`  | no       | every value is a finite number                                                                                                                                                          |
 | `provenance`   | no       | section string fields (`corpus`/`embedding`/`build`) are strings; `embedding.dimensions` numeric; nested dangerous keys stripped (see [docs/pack-versioning.md](../pack-versioning.md)) |
 | _(other keys)_ | no       | passed through untouched (lossless round-trip)                                                                                                                                          |
@@ -186,9 +205,9 @@ typed `PackManifest`. **Throws** [`ManifestValidationError`](#class-manifestvali
 with a descriptive message on any violation:
 
 - missing or non-string `name`, or `name` not matching `PACK_NAME_RE`;
-- missing or non-string `version`, or `version` not valid SemVer;
-- `graph_stats` present but malformed (`node_count` / `edge_count` missing,
-  non-integer, or negative);
+- missing or non-string `version`, or a version outside the accepted grammar;
+- `graph_stats` present but not an object, or containing a negative, non-finite,
+  or non-numeric value;
 - `eval_scores` present but containing a non-finite or non-numeric value.
 
 Dangerous JSON keys (`__proto__`, `constructor`, `prototype`) are never copied
@@ -200,13 +219,55 @@ import { validateManifest } from '@kgpacks/packs';
 const m = validateManifest({
   name: 'world-history',
   version: '1.2.0',
-  graph_stats: { node_count: 12000, edge_count: 48000 },
+  graph_stats: { articles: 12000, entities: 48000 },
 });
 // m is typed PackManifest
 
 validateManifest({ name: '../evil', version: '1.0.0' });
 // throws ManifestValidationError: invalid pack name "../evil" (must match PACK_NAME_RE)
 ```
+
+#### Validation boundary
+
+`validateManifest` is deliberately structural. It validates JSON types, naming
+and version syntax, numeric ranges, and dangerous keys. It does not open
+LadybugDB, hash payloads, recompute graph statistics, or prove identity,
+lineage, provenance, or update classifications. It preserves schema-v2
+extension fields but does not validate their complete shape or semantics.
+
+The schema-v2 complete validator is
+`@kgpacks/ingestion` `validateKnowledgePack(packDir)`. The CLI dispatches
+`wikigr pack validate` to it when `schemaVersion` is `"2"`. It independently
+recomputes durable database and filesystem facts and compares every manifest
+projection. See the
+[incremental update validation contract](../reference/incremental-update.md#validation-boundaries).
+
+### Schema-v2 manifest API
+
+`@kgpacks/packs` owns and exports the compile-time schema-v2 types:
+
+```ts
+interface PackManifestV2 extends PackManifest {
+  packId: string;
+  schemaVersion: '2';
+  adapterVersion: string;
+  extractorVersion: string;
+  toolVersion: string;
+  buildId: Sha256;
+  lineage: PackLineageV2;
+  update: PackUpdateV2;
+  files: PackFileMetadataV2[];
+  contentDigest: Sha256;
+}
+```
+
+It also exports `PackLineageV2`, `PackUpdateV2`, `PackUpdateRecordV2`,
+`PackFileMetadataV2`, `UpdateOperation`, `UpdateClassification`, and `Sha256`.
+`validateKnowledgePack` in `@kgpacks/ingestion` performs the complete runtime
+schema-v2 validation. The lifecycle functions, configuration/result types, and
+update/validation errors are also exported by `@kgpacks/ingestion`. The complete
+field-level contract is the
+[incremental update reference](../reference/incremental-update.md#public-typescript-api).
 
 ### `loadManifest(manifestPath: string): PackManifest`
 

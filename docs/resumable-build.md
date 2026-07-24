@@ -12,13 +12,18 @@ changing the resulting pack**:
 Both apply to `scripts/build-cve-pack.mjs` (the `pnpm cve:build` entry point). The
 output `pack.db` is **identical** whether or not a build was resumed or pipelined.
 
+This full-build checkpoint is not an incremental content update. The
+`wikigr update --resume` workflow has separate state and authority; see
+[Incremental-update resume](#incremental-update-resume).
+
 ## Resumable builds
 
 ### The checkpoint sidecar
 
 As it makes durable progress, the builder writes a `<out>.build-checkpoint.json`
 sidecar next to the output pack (e.g. `data/packs/cve/pack.db.build-checkpoint.json`).
-It records exactly what has been durably loaded:
+It records where the staged database lives plus an observational snapshot of
+progress:
 
 ```jsonc
 {
@@ -32,12 +37,16 @@ It records exactly what has been durably loaded:
 }
 ```
 
-Each batch is loaded in its own atomic `BEGIN…COMMIT` transaction (so a crash
+The database, not these mutable progress fields, is authoritative. Each batch is
+loaded in its own atomic `BEGIN…COMMIT` transaction (so a crash
 mid-batch rolls back cleanly), and every `--checkpoint-every` batches (default 50)
 the builder forces a durable **`CHECKPOINT`** (flushing the WAL into the main DB)
-**before** writing the sidecar. So the sidecar never claims progress that would not
-survive losing the WAL — a crash costs at most one checkpoint interval of re-work,
-never the whole build. On a clean finish the sidecar is removed.
+**before** writing the sidecar. On resume, the builder derives the accepted source
+prefix from durable `ArticleSource(title, payload_sha256)` rows and rejects any
+database that is not an exact prefix of the current source inventory. Forging
+`sourceOffset`, counts, or batch index cannot skip records. A crash costs at most one
+checkpoint interval of re-work, never the whole build. On a clean finish the
+sidecar is removed.
 
 ### Resuming
 
@@ -67,11 +76,9 @@ On resume the builder:
 
 1. **Validates the parameters hash.** The checkpoint records a hash of the inputs
    that affect output (source path, `--year`, `--limit`, `--batch`, embedding
-   model, `--with-entity-relations`). If the current parameters do not match, the
+   model). If the current parameters do not match, the
    builder **refuses to resume** and tells you to `--no-resume` — a checkpoint from
-   a different build can never corrupt a new one. (Resume is also refused for a
-   `--with-entity-relations` build: those Entity→Entity edges are materialized in a
-   single final pass and cannot be reconstructed from a mid-build checkpoint.)
+   a different build can never corrupt a new one.
 2. **Discards the temp DB's WAL.** An abrupt crash can leave a torn trailing WAL
    record that LadybugDB refuses to replay. The checkpointed **main** DB (all
    batches up to the last sidecar) is intact, so the build reopens the recorded
@@ -84,9 +91,14 @@ On resume the builder:
    `entity_id` and articles by title; on resume the loader repopulates its "already
    seen" sets from the DB, so cross-batch dedup stays correct — and re-loading an
    already-present article is an idempotent no-op.
-5. **Restarts at the checkpointed `sourceOffset`** against the **deterministic**
-   record scan (sorted, stable ordering), re-embedding and loading only the records
-   after the last durable checkpoint.
+5. **Derives the restart offset from durable sources.** The builder matches
+   `ArticleSource` title/hash rows to an ordered inventory of accepted corpus
+   records, then resumes after that exact prefix. Sidecar progress values are never
+   trusted.
+6. **Verifies final source closure.** Before publication, every accepted corpus
+   title and canonical payload hash must exactly match the completed
+   `ArticleSource` set; omitted, extra, duplicated, or changed sources abort the
+   build.
 
 Because each batch is loaded in a **single atomic transaction** and the sidecar is
 written only **after** a durable `CHECKPOINT`, a crash mid-batch rolls back cleanly
@@ -94,6 +106,39 @@ written only **after** a durable `CHECKPOINT`, a crash mid-batch rolls back clea
 nodes with `CREATE` (not idempotent on its own), so correctness relies on the
 all-or-nothing batch boundary plus the article-title dedup skip — not on replaying a
 half-committed batch.
+
+## Incremental-update resume
+
+`wikigr update` uses `<output>.work/update-state.json` plus
+`<output>.work/staging/`, not `<out>.build-checkpoint.json`. Only `staging/` is
+promoted to the output. Fresh update mode refuses existing work and requires
+explicit recovery:
+
+```bash
+wikigr update --resume data/releases/2026.07/cve.work
+```
+
+Incremental durable authority is the staged LadybugDB database:
+
+- `PackMetadata` records update identity, lineage, versions, and source hashes.
+- `UpdateApplication` records each committed key, upsert operation, nullable
+  base hash, result payload hash, and `added | modified | unchanged`
+  classification.
+- Source and support records establish the final graph state.
+
+The sidecar records paths, input fingerprints, phase, and per-record recovery
+positions. It is a recovery index, not evidence that application work
+committed. On resume, the engine reopens staging and reconciles a lagging
+sidecar against durable `UpdateApplication` rows before continuing. A sidecar
+that claims progress absent from LadybugDB is rejected.
+
+Resume also verifies the complete base snapshot, raw and semantic delta hashes,
+target version, and schema/adapter/extractor/tool versions. Changed inputs fail.
+After staging is closed and completely validated, publication uses an atomic
+no-replace promotion; an existing destination is never overwritten.
+
+See the [incremental update contract](reference/incremental-update.md) for the
+phase, validation, and publication guarantees.
 
 ## Pipelined build
 
@@ -132,5 +177,7 @@ the run continued from a checkpoint.
 ## Related docs
 
 - [docs/cve.md](cve.md) — the CVE build pipeline, corpus, and mapping.
-- [docs/entity-graph.md](entity-graph.md) — scalable `--with-entity-relations` loads.
+- [docs/entity-graph.md](entity-graph.md) — entity graph loading and traversal.
 - [docs/pack-versioning.md](pack-versioning.md) — provenance stamped at build time.
+- [Incremental CVE update](howto/incremental-cve-update.md) — immutable update and
+  resume workflow.

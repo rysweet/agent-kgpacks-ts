@@ -39,6 +39,7 @@ export async function run(argv: string[], options: RunOptions = {}): Promise<num
     if (err instanceof CommanderError) {
       return err.exitCode === 0 ? EXIT_OK : EXIT_USAGE;
     }
+
     const message = err instanceof Error ? err.message : String(err);
     io.err(`${PROGRAM_NAME}: ${message}\n`);
     return exitCodeFor(err);

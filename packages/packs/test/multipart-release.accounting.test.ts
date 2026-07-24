@@ -11,21 +11,19 @@
 // concatenated parts (with each per-part sha256 matching its bytes).
 
 import { execFileSync } from 'node:child_process';
-import { createHash, randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { buildValidCvePack } from '../../../test/helpers/valid-cve-pack.js';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const releaseScript = join(repoRoot, 'scripts', 'release-pack.mjs');
 const PACK = 'syn';
 const PART_SIZE = 1024;
-// Incompressible random bytes so a 1 KiB --part-size yields many genuine parts
-// (compressible content would gzip down to a single part).
-const DB_BYTES = randomBytes(8192);
 
 interface Part {
   file: string;
@@ -45,16 +43,11 @@ let fixtures: string;
 let releaseDir: string;
 let index: ReleaseIndex;
 
-beforeAll(() => {
+beforeAll(async () => {
   fixtures = mkdtempSync(join(tmpdir(), 'kgpacks-accounting-'));
   const packsDir = join(fixtures, 'packs');
   const packDir = join(packsDir, PACK);
-  mkdirSync(packDir, { recursive: true });
-  writeFileSync(
-    join(packDir, 'manifest.json'),
-    JSON.stringify({ name: PACK, version: '1.0.0' }, null, 2) + '\n',
-  );
-  writeFileSync(join(packDir, 'pack.db'), DB_BYTES);
+  await buildValidCvePack(packDir, PACK, '1.0.0');
 
   releaseDir = join(fixtures, 'release');
   mkdirSync(releaseDir, { recursive: true });
@@ -75,7 +68,7 @@ beforeAll(() => {
     { stdio: 'ignore' },
   );
   index = JSON.parse(readFileSync(join(releaseDir, `${PACK}.pack-release.json`), 'utf8'));
-});
+}, 60_000);
 
 afterAll(() => {
   rmSync(fixtures, { recursive: true, force: true });

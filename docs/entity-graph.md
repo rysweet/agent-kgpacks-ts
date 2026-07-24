@@ -27,20 +27,18 @@ seed entity, plus the articles that connect them.
 
 ### Two traversal modes
 
-Because the CVE builder **skips `ENTITY_RELATION` edges by default** (they are
-expensive to build and, historically, unused — see [docs/cve.md](cve.md)),
-`entityGraph()` supports two modes and **auto-selects**:
+`entityGraph()` supports two modes and **auto-selects**, so current schema-v2
+packs use explicit relations while legacy packs retain a compatible fallback:
 
-| Mode            | Uses                                                                   | When                                                            |
-| --------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `relation`      | Direct `ENTITY_RELATION` edges.                                        | The pack was built `--with-entity-relations` (edges exist).     |
-| `co-occurrence` | Two entities are linked if some article `HAS_ENTITY` **both** of them. | The pack has no `ENTITY_RELATION` edges (the CVE-pack default). |
+| Mode            | Uses                                                                   | When                                          |
+| --------------- | ---------------------------------------------------------------------- | --------------------------------------------- |
+| `relation`      | Direct `ENTITY_RELATION` edges.                                        | Current schema-v2 CVE packs.                  |
+| `co-occurrence` | Two entities are linked if some article `HAS_ENTITY` **both** of them. | Legacy packs without `ENTITY_RELATION` edges. |
 
 With `mode: 'auto'` (the default), the core probes for `ENTITY_RELATION` edges once
 and picks `relation` if any exist, otherwise `co-occurrence`. This means the
-feature works on the **stock** CVE pack (co-occurrence over shared CVEs — e.g. two
-products both affected by the same vulnerability) and gets richer, typed edges for
-free on packs built with relations.
+feature works on legacy CVE packs through co-occurrence and uses richer, typed
+edges on current packs.
 
 ## `@kgpacks/query` — `entityGraph()`
 
@@ -170,16 +168,9 @@ bulk path**:
   same ~linear technique PR #69 used for `HAS_ENTITY`/`HAS_SECTION`), never the
   comma two-pattern `MATCH` that regressed to O(N²).
 
-Enable relation edges at build time (still off by default, because co-occurrence
-traversal already works without them):
-
-```bash
-pnpm cve:build --src .scratch/cve/cves --with-entity-relations
-```
-
-`--with-entity-relations` now scales to the full corpus (linear finalize) instead
-of being a multi-hour super-linear step. The default build remains fast and its
-packs still support the entity graph via co-occurrence.
+Schema-v2 CVE builds always materialize relation edges because incremental
+validation requires exact agreement between live edges and durable support
+records. The bounded, PK-indexed loader keeps finalization linear.
 
 > **Compatibility.** Adding the entity-graph read path does **not** change existing
 > retrieval: vector/hybrid `query`, the article graph, search, and chat return

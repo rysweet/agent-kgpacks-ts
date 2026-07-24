@@ -52,7 +52,7 @@ export function makeMockPacks(): MockPacks {
   const alphaDir = join(packsDir, 'alpha-pack');
   mkdirSync(alphaDir, { recursive: true });
   writeJson(join(alphaDir, 'manifest.json'), ALPHA_MANIFEST);
-  writeFileSync(join(alphaDir, 'pack.db'), 'placeholder db');
+  writeFileSync(join(alphaDir, 'pack.db'), '');
 
   const betaDir = join(packsDir, 'beta-pack');
   mkdirSync(betaDir, { recursive: true });

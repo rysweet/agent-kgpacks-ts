@@ -44,7 +44,13 @@ export interface EvalScores {
  */
 export interface PackProvenance {
   /** Source corpus the records were built from (e.g. cvelistV5 @ a commit). */
-  corpus?: { name?: string; commit?: string | null; date?: string | null; [k: string]: unknown };
+  corpus?: {
+    name?: string;
+    commit?: string | null;
+    date?: string | null;
+    tag?: string | null;
+    [k: string]: unknown;
+  };
   /** Embedding model used to embed every record (deterministic). */
   embedding?: { model?: string; dimensions?: number; [k: string]: unknown };
   /** Builder identity + when the pack was produced (UTC ISO-8601). */
@@ -60,6 +66,56 @@ export interface PackManifest {
   eval_scores?: EvalScores;
   provenance?: PackProvenance;
   [extra: string]: unknown;
+}
+
+export type Sha256 = string;
+export type UpdateOperation = 'upsert';
+export type UpdateClassification = 'added' | 'modified' | 'unchanged';
+
+export interface PackUpdateRecordV2 {
+  key: string;
+  operation: UpdateOperation;
+  basePayloadSha256: Sha256 | null;
+  resultPayloadSha256: Sha256;
+  classification: UpdateClassification;
+}
+
+export interface PackUpdateV2 {
+  added: number;
+  modified: number;
+  unchanged: number;
+  records: PackUpdateRecordV2[];
+}
+
+export type PackLineageV2 =
+  | { base: null; delta: null }
+  | {
+      base: {
+        packId: string;
+        version: string;
+        buildId: Sha256;
+        contentDigest: Sha256;
+      };
+      delta: { deltaId: Sha256; fileSha256: Sha256 };
+    };
+
+export interface PackFileMetadataV2 {
+  path: string;
+  size: number;
+  sha256: Sha256;
+}
+
+export interface PackManifestV2 extends PackManifest {
+  packId: string;
+  schemaVersion: '2';
+  adapterVersion: string;
+  extractorVersion: string;
+  toolVersion: string;
+  buildId: Sha256;
+  lineage: PackLineageV2;
+  update: PackUpdateV2;
+  files: PackFileMetadataV2[];
+  contentDigest: Sha256;
 }
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
@@ -82,7 +138,7 @@ function deepSanitize(value: unknown): unknown {
 // Declared string fields per provenance section. Present values must be strings
 // (or null/absent for undeterminable ones); anything else is a hard error.
 const PROVENANCE_STRING_FIELDS: Record<string, readonly string[]> = {
-  corpus: ['name', 'commit', 'date'],
+  corpus: ['name', 'commit', 'date', 'tag'],
   embedding: ['model'],
   build: ['date', 'tool_version'],
 };
@@ -155,7 +211,7 @@ export function validateManifest(value: unknown): PackManifest {
   }
   if (typeof version !== 'string' || !isValidSemver(version)) {
     throw new ManifestValidationError(
-      `invalid version ${JSON.stringify(version)} (must be valid SemVer 2.0)`,
+      `invalid version ${JSON.stringify(version)} (must be SemVer 2.0)`,
     );
   }
   if ('description' in value && typeof value.description !== 'string') {
