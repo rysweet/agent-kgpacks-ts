@@ -4,7 +4,6 @@ import {
   accessSync,
   closeSync,
   constants,
-  copyFileSync,
   createReadStream,
   existsSync,
   fsyncSync,
@@ -1440,33 +1439,6 @@ async function resetGeneratedStructures(connection: Connection): Promise<void> {
   }
 }
 
-async function resetDatabaseForDeterministicRebuild(connection: Connection): Promise<void> {
-  await connection.loadExtension('vector');
-  const indexes = await connection.run<{ tableName: string; indexName: string }>(
-    'CALL SHOW_INDEXES() RETURN table_name AS tableName, index_name AS indexName',
-  );
-  for (const { tableName, indexName } of indexes) {
-    await connection.run(`CALL DROP_VECTOR_INDEX('${tableName}', '${indexName}')`);
-  }
-  for (const table of [
-    'ENTITY_RELATION',
-    'HAS_ENTITY',
-    'LINKS_TO',
-    'HAS_CHUNK',
-    'HAS_SECTION',
-    'UpdateApplication',
-    'RelationSupport',
-    'ArticleSource',
-    'PackMetadata',
-    'Entity',
-    'Chunk',
-    'Section',
-    'Article',
-  ]) {
-    await connection.run(`DROP TABLE ${table}`);
-  }
-}
-
 async function executeUpdate(
   state: UpdateState,
   parsed: ParsedDelta,
@@ -1490,7 +1462,6 @@ async function executeUpdate(
     }
     rmSync(staging, { recursive: true, force: true });
     mkdirSync(staging, { recursive: true });
-    copyFileSync(join(state.base, 'pack.db'), stagingDatabase);
   } else {
     rmSync(`${stagingDatabase}.wal`, { force: true });
   }
@@ -1498,7 +1469,6 @@ async function executeUpdate(
   const outputConnection = outputDatabase.connect();
   try {
     if (resumingStaging) await resetGeneratedStructures(outputConnection);
-    else await resetDatabaseForDeterministicRebuild(outputConnection);
     const loadedTitles = new Set<string>();
     const checkpoints = new Map(state.records.map((record) => [record.key, record]));
     if (resumingStaging) {

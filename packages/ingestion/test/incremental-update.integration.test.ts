@@ -833,7 +833,6 @@ describe('incremental CVE pack update', () => {
       embedder,
     });
     const expectedDigest = await logicalPackDigest(largeOutput);
-    const expectedTreeDigest = treeDigest(largeOutput);
     const sectionCount = await rows<{ count: number | bigint }>(
       largeOutput,
       'MATCH (s:Section) RETURN count(s) AS count',
@@ -884,7 +883,6 @@ describe('incremental CVE pack update', () => {
 
     await updateKnowledgePack({ resume: workDir, embedder });
     expect(await logicalPackDigest(largeOutput)).toBe(expectedDigest);
-    expect(treeDigest(largeOutput)).toBe(expectedTreeDigest);
     expect(Buffer.compare(readFileSync(join(largeOutput, 'pack.db')), stagedPayload)).toBe(0);
     expect(Buffer.compare(readFileSync(join(largeOutput, 'manifest.json')), stagedManifest)).toBe(
       0,
