@@ -236,10 +236,19 @@ lineage, provenance, or update classifications. It preserves schema-v2
 extension fields but does not validate their complete shape or semantics.
 
 The schema-v2 complete validator is
-`@kgpacks/ingestion` `validateKnowledgePack(packDir)`. The CLI dispatches
-`wikigr pack validate` to it when `schemaVersion` is `"2"`. It independently
-recomputes durable database and filesystem facts and compares every manifest
-projection. See the
+`@kgpacks/ingestion` `validateKnowledgePack(packDir)`. Schema-aware consumers,
+including `wikigr pack validate` and the release generator, use the following
+closed dispatch:
+
+| `schemaVersion` | Validation contract                                |
+| --------------- | -------------------------------------------------- |
+| absent or `"1"` | Legacy `validateManifest` contract                 |
+| `"2"`           | Complete `validateKnowledgePack(packDir)` contract |
+| any other value | Explicit unsupported-schema failure                |
+
+The schema-v2 validator independently recomputes durable database and filesystem
+facts and compares every manifest projection. A malformed v2 manifest fails v2
+validation rather than falling back to the legacy contract. See the
 [incremental update validation contract](../reference/incremental-update.md#validation-boundaries).
 
 ### Schema-v2 manifest API

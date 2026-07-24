@@ -143,6 +143,7 @@ describe('incremental CVE pack update', () => {
   it('publishes exact schema-v2 corpus provenance and rejects substitutions', () => {
     const releaseScript = resolve(import.meta.dirname, '../../../scripts/release-pack.mjs');
     const releaseDir = join(temp, 'release-provenance');
+    const manifest = JSON.parse(readFileSync(join(base, 'manifest.json'), 'utf8'));
     execFileSync(
       'node',
       [
@@ -153,6 +154,14 @@ describe('incremental CVE pack update', () => {
         temp,
         '--out-dir',
         releaseDir,
+        '--corpus-commit',
+        manifest.provenance.corpus.commit,
+        '--corpus-date',
+        manifest.provenance.corpus.date,
+        '--corpus-tag',
+        manifest.provenance.corpus.tag,
+        '--model',
+        manifest.provenance.embedding.model,
         '--dry-run',
       ],
       { stdio: 'ignore' },
@@ -160,9 +169,7 @@ describe('incremental CVE pack update', () => {
     const index = JSON.parse(
       readFileSync(join(releaseDir, 'cve-fixture.pack-release.json'), 'utf8'),
     );
-    expect(index.provenance).toEqual(
-      JSON.parse(readFileSync(join(base, 'manifest.json'), 'utf8')).provenance,
-    );
+    expect(index.provenance).toEqual(manifest.provenance);
 
     const mismatch = spawnSync(
       'node',

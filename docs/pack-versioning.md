@@ -201,9 +201,62 @@ version pin its explicit release tag.
 `scripts/build-cve-pack.mjs` stamps the exact corpus commit and date into the
 database and manifest. Incremental updates preserve those values without
 normalization. The release script mirrors the same values into the release
-index. For schema-v2 packs, command-line provenance values must exactly match
-the manifest; only legacy packs without durable provenance may fill missing
-release-index values from command-line flags:
+index.
+
+The release generator treats an absent `schemaVersion` and `"1"` as legacy,
+runs complete pack validation for `"2"`, and rejects every other schema version.
+It never treats an unknown version as legacy.
+
+### Legacy fill behavior
+
+For a legacy manifest, release flags fill only missing release-index provenance
+fields. Existing manifest values are authoritative and are never replaced:
+
+- each existing `provenance.corpus.commit`, `.date`, and `.tag` value wins over
+  its corresponding `--corpus-*` flag;
+- the embedding model is selected from existing manifest data in this order:
+  `provenance.embedding.model`, `model`, then `synthesis_model`;
+- `--model` is used only when none of those manifest fields supplies an
+  embedding model.
+
+This permits a partially populated legacy manifest to fill one missing field
+without changing the others. For example, given a legacy manifest that already
+declares a corpus commit and embedding model but omits its corpus date and tag,
+the command below fills only the missing values:
+
+```bash
+node scripts/release-pack.mjs \
+  --pack cve \
+  --corpus-date 2025-06-14 \
+  --corpus-tag cve_2025-06-14_0000Z \
+  --dry-run \
+  --out-dir /tmp/cve-rel
+```
+
+### Schema-v2 assertion behavior
+
+For a schema-v2 manifest, provenance flags are optional exact-match assertions,
+not overrides or defaults. A supplied `--corpus-commit`, `--corpus-date`,
+`--corpus-tag`, or `--model` must equal the corresponding manifest provenance
+string exactly under the normal case-sensitive comparison. Complete schema-v2
+pack validation runs before these assertions are evaluated, so an invalid pack
+cannot be masked by either matching or mismatching flags. An assertion mismatch
+stops generation before release parts are created. Omitting the flags leaves
+the validated manifest values unchanged.
+
+```bash
+# Succeeds only when every supplied value exactly matches manifest.json.
+node scripts/release-pack.mjs \
+  --pack cve \
+  --corpus-commit a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0 \
+  --corpus-date 2025-06-14 \
+  --corpus-tag cve_2025-06-14_0000Z \
+  --model Xenova/bge-base-en-v1.5 \
+  --dry-run \
+  --out-dir /tmp/cve-rel
+```
+
+Common publishing commands:
 
 ```bash
 # Publish using the default manifest-derived tag
@@ -217,13 +270,13 @@ node scripts/release-pack.mjs --pack cve --tag cve-2025.06 --dry-run --out-dir /
 cat /tmp/cve-rel/cve.pack-release.json | jq .provenance
 ```
 
-| Flag              | Default                      | Meaning                                                                                          |
-| ----------------- | ---------------------------- | ------------------------------------------------------------------------------------------------ |
-| `--tag`           | `<name>-v<manifest.version>` | Immutable release tag; dated tags must imply the exact manifest version.                         |
-| `--corpus-commit` | manifest provenance          | Exact-match assertion for schema v2; fills a missing legacy release-index value.                 |
-| `--corpus-date`   | manifest provenance          | Exact-match assertion for schema v2; fills a missing legacy release-index value.                 |
-| `--corpus-tag`    | manifest provenance          | Exact-match assertion for the separately preserved source release tag.                           |
-| `--model`         | manifest model               | Exact-match assertion for schema v2; supplies the legacy release-index embedding model when set. |
+| Flag              | Default                      | Meaning                                                                                                        |
+| ----------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `--tag`           | `<name>-v<manifest.version>` | Immutable release tag; dated tags must imply the exact manifest version.                                       |
+| `--corpus-commit` | manifest provenance          | Schema-v2 exact-match assertion; otherwise fills only a missing legacy corpus commit.                          |
+| `--corpus-date`   | manifest provenance          | Schema-v2 exact-match assertion; otherwise fills only a missing legacy corpus date.                            |
+| `--corpus-tag`    | manifest provenance          | Schema-v2 exact-match assertion; otherwise fills only a missing legacy source release tag.                     |
+| `--model`         | manifest model               | Schema-v2 exact-match assertion; otherwise fills a legacy embedding model only when the manifest has no model. |
 
 See [docs/cve.md](cve.md#publish-a-pack-as-a-release-artifact) for the full
 publishing flow and the remaining `release-pack.mjs` flags, and

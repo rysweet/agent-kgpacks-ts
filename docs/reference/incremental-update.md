@@ -822,10 +822,12 @@ Publication follows this order:
    `renameat2(RENAME_NOREPLACE)`;
 9. fsync the output parent directory.
 
-The packaged native helper probes the target filesystem with the Linux
-`renameat2(RENAME_NOREPLACE)` syscall, verifying both a preserved collision and
-a successful promotion. It does not use Node.js `rename()` followed by a
-pre-check or permit a copy fallback. If the platform or filesystem
+The package includes separate Linux x64 and arm64 helpers and selects the helper
+for `process.arch`; installation does not compile native code. The selected
+helper probes the target filesystem with the Linux `renameat2(RENAME_NOREPLACE)`
+syscall, verifying both a preserved collision and a successful promotion. It
+does not use Node.js `rename()` followed by a pre-check or permit a copy fallback.
+If the platform or filesystem
 cannot guarantee `RENAME_NOREPLACE`, the update fails before work starts. A
 destination that appears during promotion is never replaced. After `RENAME_NOREPLACE` reports the collision, the engine completely validates
 that destination and proves equivalence across request identity, lineage,

@@ -2,6 +2,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync,
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -168,17 +169,173 @@ describe('immutable pack release artifacts', () => {
       },
     });
 
+    for (const [label, schemaVersion] of [
+      ['null', null],
+      ['numeric-v2', 2],
+      ['unknown-string', '999'],
+    ] as const) {
+      writeFileSync(
+        manifestPath,
+        `${JSON.stringify({ name: 'cve', version: '1.2.3', schemaVersion }, null, 2)}\n`,
+      );
+      const outDir = join(temp, `unsupported-${label}`);
+      const unknown = spawnSync(
+        'node',
+        [releaseScript, '--pack', 'cve', '--packs-dir', packsDir, '--out-dir', outDir, '--dry-run'],
+        { encoding: 'utf8' },
+      );
+      expect(unknown.status).toBe(2);
+      expect(unknown.stderr).toMatch(/unsupported manifest schema/i);
+      expect(existsSync(outDir)).toBe(false);
+    }
+  });
+
+  it('fills only missing legacy provenance and model fields from release flags', () => {
+    const manifestPath = join(packsDir, 'cve', 'manifest.json');
+    for (const [label, schemaVersion] of [
+      ['absent', undefined],
+      ['v1', '1'],
+    ] as const) {
+      writeFileSync(
+        manifestPath,
+        `${JSON.stringify(
+          {
+            name: 'cve',
+            version: '1.2.3',
+            ...(schemaVersion === undefined ? {} : { schemaVersion }),
+            model: 'manifest-top-level-model',
+            synthesis_model: 'manifest-synthesis-model',
+            provenance: {
+              corpus: { commit: 'manifest-commit', tag: 'manifest-tag' },
+              embedding: { model: 'manifest-embedding-model' },
+            },
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      const outDir = join(temp, `legacy-preserve-${label}`);
+      const result = spawnSync(
+        'node',
+        [
+          releaseScript,
+          '--pack',
+          'cve',
+          '--packs-dir',
+          packsDir,
+          '--out-dir',
+          outDir,
+          '--corpus-commit',
+          'flag-commit',
+          '--corpus-date',
+          '2026-07-24',
+          '--corpus-tag',
+          'flag-tag',
+          '--model',
+          'flag-model',
+          '--dry-run',
+        ],
+        { encoding: 'utf8' },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      const index = JSON.parse(readFileSync(join(outDir, 'cve.pack-release.json'), 'utf8'));
+      expect(index).toMatchObject({
+        model: 'manifest-embedding-model',
+        provenance: {
+          corpus: {
+            commit: 'manifest-commit',
+            date: '2026-07-24',
+            tag: 'manifest-tag',
+          },
+          embedding: { model: 'manifest-embedding-model' },
+        },
+      });
+    }
+  });
+
+  it('fully validates schema-v2 before evaluating release flag assertions', () => {
     writeFileSync(
-      manifestPath,
-      `${JSON.stringify({ name: 'cve', version: '1.2.3', schemaVersion: '999' }, null, 2)}\n`,
+      join(packsDir, 'cve', 'manifest.json'),
+      `${JSON.stringify({ name: 'cve', version: '1.2.3', schemaVersion: '2' }, null, 2)}\n`,
     );
-    const unknown = spawnSync(
+    const outDir = join(temp, 'invalid-v2-with-flag');
+    const result = spawnSync(
       'node',
-      [releaseScript, '--pack', 'cve', '--packs-dir', packsDir, '--dry-run'],
+      [
+        releaseScript,
+        '--pack',
+        'cve',
+        '--packs-dir',
+        packsDir,
+        '--out-dir',
+        outDir,
+        '--corpus-commit',
+        'flag-commit',
+        '--dry-run',
+      ],
       { encoding: 'utf8' },
     );
-    expect(unknown.status).toBe(2);
-    expect(unknown.stderr).toMatch(/unsupported manifest schema/i);
+    expect(result.status).toBe(1);
+    expect(result.stderr).not.toMatch(/must exactly match schema-v2 manifest provenance/i);
+    expect(existsSync(outDir)).toBe(false);
+  });
+
+  it('accepts schema-v2 release flags only when every value exactly matches the manifest', () => {
+    const manifest = JSON.parse(readFileSync(join(packsDir, 'cve', 'manifest.json'), 'utf8'));
+    const outDir = join(temp, 'matching-v2-flags');
+    const result = spawnSync(
+      'node',
+      [
+        releaseScript,
+        '--pack',
+        'cve',
+        '--packs-dir',
+        packsDir,
+        '--out-dir',
+        outDir,
+        '--corpus-commit',
+        manifest.provenance.corpus.commit,
+        '--corpus-date',
+        manifest.provenance.corpus.date,
+        '--corpus-tag',
+        manifest.provenance.corpus.tag,
+        '--model',
+        manifest.provenance.embedding.model,
+        '--dry-run',
+      ],
+      { encoding: 'utf8' },
+    );
+    expect(result.status, result.stderr).toBe(0);
+    const index = JSON.parse(readFileSync(join(outDir, 'cve.pack-release.json'), 'utf8'));
+    expect(index.provenance).toEqual(manifest.provenance);
+  });
+
+  it.each([
+    ['--corpus-commit', 'different-commit'],
+    ['--corpus-date', '1900-01-01'],
+    ['--corpus-tag', 'different-tag'],
+    ['--model', 'different-model'],
+  ])('rejects a schema-v2 %s value that differs from the manifest', (flag, value) => {
+    const outDir = join(temp, `mismatched-v2-${flag.slice(2)}`);
+    const result = spawnSync(
+      'node',
+      [
+        releaseScript,
+        '--pack',
+        'cve',
+        '--packs-dir',
+        packsDir,
+        '--out-dir',
+        outDir,
+        flag,
+        value,
+        '--dry-run',
+      ],
+      { encoding: 'utf8' },
+    );
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain(`${flag} must exactly match schema-v2 manifest provenance`);
+    expect(existsSync(outDir)).toBe(false);
   });
 
   it('validates database contents even during a dry run', () => {

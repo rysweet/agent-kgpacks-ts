@@ -237,6 +237,7 @@ export { loadPack, createSchema, loadExtensions, buildVectorIndexes } from './lo
 export type { LoadableArticle, LoadPackInput, LoadPackStats } from './loader.js';
 export { createPackWriter } from './streaming-loader.js';
 export type { PackWriter, PackWriterOptions, PackWriterStats } from './streaming-loader.js';
+export { canonicalJson } from './canonical-json.js';
 export { CVE_ADAPTER_VERSION, CVE_ID_RE, cveToGraph } from './cve-adapter.js';
 export {
   INCREMENTAL_SCHEMA_VERSION,

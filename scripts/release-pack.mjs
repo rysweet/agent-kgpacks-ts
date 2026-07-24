@@ -126,7 +126,7 @@ if (manifest.name !== pack) {
   console.error(`manifest name ${JSON.stringify(manifest.name)} does not match --pack ${pack}`);
   process.exit(2);
 }
-const legacyManifest = manifest.schemaVersion == null || manifest.schemaVersion === '1';
+const legacyManifest = manifest.schemaVersion === undefined || manifest.schemaVersion === '1';
 if (!legacyManifest && manifest.schemaVersion !== INCREMENTAL_SCHEMA_VERSION) {
   console.error(
     `refusing to release unsupported manifest schema ${JSON.stringify(manifest.schemaVersion)}; ` +
@@ -134,7 +134,7 @@ if (!legacyManifest && manifest.schemaVersion !== INCREMENTAL_SCHEMA_VERSION) {
   );
   process.exit(2);
 }
-const model = modelArg ?? manifest.model ?? manifest.synthesis_model;
+const declaredModel = manifest.model ?? manifest.synthesis_model;
 
 // A dated release tag (`<name>-YYYY.MM[.N]`) pins an immutable version whose
 // SemVer form is derived UNPADDED (SemVer forbids leading zeros); the `packs`
@@ -169,7 +169,7 @@ if (taggedVersion && taggedVersion !== version) {
 }
 
 // Provenance is mirrored from the pack manifest into the release index so the two
-// can be cross-checked; overrides + the release-time build.date fill any gaps.
+// can be cross-checked; legacy-only flags fill missing corpus and model values.
 function buildProvenance() {
   const base =
     manifest && typeof manifest.provenance === 'object' && manifest.provenance
@@ -181,6 +181,7 @@ function buildProvenance() {
     if (corpus.commit == null && corpusCommitArg !== undefined) corpus.commit = corpusCommitArg;
     if (corpus.date == null && corpusDateArg !== undefined) corpus.date = corpusDateArg;
     if (corpus.tag == null && corpusTagArg !== undefined) corpus.tag = corpusTagArg;
+    if (embedding.model == null && declaredModel != null) embedding.model = declaredModel;
     if (embedding.model == null && modelArg !== undefined) embedding.model = modelArg;
   } else {
     if (corpusCommitArg !== undefined && corpusCommitArg !== corpus.commit) {
@@ -199,8 +200,8 @@ function buildProvenance() {
       console.error('--model must exactly match schema-v2 manifest provenance');
       process.exit(2);
     }
+    if (embedding.model == null && declaredModel != null) embedding.model = declaredModel;
   }
-  if (model && !embedding.model) embedding.model = model;
   const build = { ...(base.build ?? {}) };
   const provenance = {};
   if (Object.keys(corpus).length) provenance.corpus = corpus;
@@ -208,7 +209,8 @@ function buildProvenance() {
   if (Object.keys(build).length) provenance.build = build;
   return Object.keys(provenance).length ? provenance : undefined;
 }
-const provenance = buildProvenance();
+let provenance;
+let model;
 
 /**
  * Stream `tar --format=ustar manifest.json pack.db` → gzip → fixed-size parts on
@@ -520,6 +522,8 @@ let currentAssets = [];
 
 async function main() {
   if (!legacyManifest) await validateKnowledgePack(packDir);
+  provenance = buildProvenance();
+  model = provenance?.embedding?.model ?? declaredModel;
   const signing = resolveSigning();
   const outDir = opt('--out-dir', await mkdtemp(join(tmpdir(), 'kgpacks-release-')));
   mkdirSync(outDir, { recursive: true });

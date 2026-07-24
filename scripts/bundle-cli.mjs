@@ -8,8 +8,7 @@
 // are declared in this package's `dependencies`, so the consumer's package manager
 // installs them normally. Runs from `prepare`, so a git/tarball install builds it.
 import { build } from 'esbuild';
-import { chmodSync, mkdirSync, readdirSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { chmodSync, copyFileSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -17,18 +16,11 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = join(root, 'dist');
 
 mkdirSync(dist, { recursive: true });
-if (process.platform === 'linux' && process.env.WIKIGR_SKIP_NATIVE_HELPER !== '1') {
-  const helper = join(dist, 'rename-noreplace');
-  const compiled = spawnSync(
-    process.env.CC ?? 'cc',
-    ['-O2', '-s', '-std=c11', '-o', helper, join(root, 'native', 'rename-noreplace.c')],
-    { encoding: 'utf8' },
-  );
-  if (compiled.error || compiled.status !== 0) {
-    throw new Error(
-      `failed to build native renameat2 helper: ${compiled.error?.message ?? compiled.stderr.trim()}`,
-    );
-  }
+rmSync(join(dist, 'rename-noreplace'), { force: true });
+for (const architecture of ['x64', 'arm64']) {
+  const helperName = `rename-noreplace-linux-${architecture}`;
+  const helper = join(dist, helperName);
+  copyFileSync(join(root, 'native', 'prebuilds', helperName), helper);
   chmodSync(helper, 0o755);
 }
 

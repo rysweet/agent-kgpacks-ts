@@ -93,20 +93,34 @@ describe('pack validate', () => {
     expect(parseStdout(result)).toEqual({ valid: true, name: 'alpha-pack', version: '1.2.0' });
   });
 
+  it('fully validates an explicit schema-v1 manifest as legacy', async () => {
+    writeFileSync(
+      join(packs.packsDir, 'alpha-pack', 'manifest.json'),
+      `${JSON.stringify({ ...ALPHA_MANIFEST, schemaVersion: '1' }, null, 2)}\n`,
+    );
+    const result = await cli(['pack', 'validate', 'alpha-pack']);
+    expect(result.code).toBe(EXIT_OK);
+    expect(parseStdout(result)).toEqual({ valid: true, name: 'alpha-pack', version: '1.2.0' });
+  });
+
   it('exits 4 for a manifest that fails validation', async () => {
     const result = await cli(['pack', 'validate', 'broken-pack']);
     expect(result.code).toBe(EXIT_VALIDATION);
     expect(result.stderr).toContain('invalid version');
   });
 
-  it('exits 4 for an unsupported manifest schema', async () => {
+  it.each([
+    ['null', null],
+    ['numeric v2', 2],
+    ['unknown string', '999'],
+  ])('exits 4 for an unsupported %s manifest schema', async (_label, schemaVersion) => {
     writeFileSync(
       join(packs.packsDir, 'alpha-pack', 'manifest.json'),
-      `${JSON.stringify({ ...ALPHA_MANIFEST, schemaVersion: '999' }, null, 2)}\n`,
+      `${JSON.stringify({ ...ALPHA_MANIFEST, schemaVersion }, null, 2)}\n`,
     );
     const result = await cli(['pack', 'validate', 'alpha-pack']);
     expect(result.code).toBe(EXIT_VALIDATION);
-    expect(result.stderr).toContain('unsupported manifest schema "999"');
+    expect(result.stderr).toContain(`unsupported manifest schema ${JSON.stringify(schemaVersion)}`);
   });
 
   it('exits 3 for a missing pack', async () => {

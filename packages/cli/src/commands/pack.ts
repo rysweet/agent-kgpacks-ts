@@ -128,7 +128,7 @@ export function registerPack(parent: Command, ctx: CliContext): void {
         });
         return;
       }
-      if (manifest.schemaVersion != null && manifest.schemaVersion !== '1') {
+      if (manifest.schemaVersion !== undefined && manifest.schemaVersion !== '1') {
         throw new CliError(
           `unsupported manifest schema ${JSON.stringify(manifest.schemaVersion)}`,
           EXIT_VALIDATION,

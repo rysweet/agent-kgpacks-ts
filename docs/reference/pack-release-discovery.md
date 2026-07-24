@@ -78,7 +78,7 @@ GET https://api.github.com/repos/<owner>/<repo>/releases?per_page=100&page=<n>
 
 It continues until GitHub returns fewer than 100 releases. A candidate must:
 
-- be a non-draft, non-prerelease GitHub release;
+- declare both `draft: false` and `prerelease: false` in the GitHub API response;
 - have a raw ASCII tag in a supported immutable form for the requested pack;
 - resolve to a supported, strict, stable SemVer version with no prerelease
   component;
@@ -93,11 +93,11 @@ Supported tags are:
 - `<name>-YYYY.MM[.N]`, such as `cve-2026.07` or `cve-2026.07.1`.
 
 Dated tags are normalized to SemVer for comparison. For example,
-`cve-2026.07` becomes `2026.7.0`. Drafts, releases marked `prerelease` by
-GitHub, unsupported or malformed versions, version strings with a SemVer
-prerelease component, non-ASCII tags, and releases missing a required index or
-signature asset are filtered out before ranking. They cannot win selection and
-then cause fallback behavior.
+`cve-2026.07` becomes `2026.7.0`. Drafts, releases whose GitHub `prerelease`
+field is true or absent, unsupported or malformed versions, version strings with
+a SemVer prerelease component, non-ASCII tags, and releases missing a required
+index or signature asset are filtered out before the index is fetched or the
+candidate is ranked. They cannot win selection and then cause fallback behavior.
 
 ### Selection order
 
@@ -126,8 +126,8 @@ command; it does not try an older release.
 
 These filtering and ranking rules apply only when neither `--tag` nor
 `--base-url` is supplied. An explicit source remains pinned exactly as requested,
-bypasses discovery filtering and ranking, and never falls back to another
-release.
+including an explicitly selected prerelease. It bypasses discovery filtering and
+ranking and never falls back to another release.
 
 ## Signature policy
 
@@ -159,7 +159,7 @@ After signature policy succeeds, the CLI parses the release index and requires:
 - lowercase 64-character hexadecimal part and overall SHA-256 values;
 - a positive, safe-integer `totalBytes` no larger than 32 GiB;
 - between 1 and 10,000 parts;
-- exact, unique, sequential filenames such as `cve.tar.gz.000`,
+- exact, unique, sequential `part.file` values such as `cve.tar.gz.000`,
   `cve.tar.gz.001`, and `cve.tar.gz.002`;
 - a positive, safe-integer byte count for every part; and
 - a `totalBytes` value exactly equal to the sum of the declared part sizes.
@@ -168,11 +168,15 @@ For an automatically discovered release, the signed index version must equal
 the version derived from the selected tag. `totalBytes` limits the compressed
 download and is copied to the success output.
 
-Parts are downloaded sequentially to a temporary directory. Each download is
-streamed to a distinct file while its byte count and SHA-256 are calculated.
-After all parts match, the CLI rereads the ordered files and calculates the
-assembled archive SHA-256. Installation starts only after every part and the
-assembled archive match the signed index.
+The complete index is validated before the download workspace is created. A
+duplicate `part.file` value therefore fails the pull before any corpus-part
+request, temporary part write, installer call, or pack-registry change.
+
+After the index passes, parts are downloaded sequentially to a temporary
+directory. Each download is streamed to a distinct file while its byte count and
+SHA-256 are calculated. After all parts match, the CLI rereads the ordered files
+and calculates the assembled archive SHA-256. Installation starts only after
+every part and the assembled archive match the signed index.
 
 The verified part files are concatenated as a stream into the pack installer.
 The installer validates the archive and commits the completed pack atomically.
@@ -255,7 +259,7 @@ causes include:
 - a GitHub API error or a non-array release response;
 - no matching immutable release;
 - a missing, malformed, or untrusted required signature;
-- a missing or malformed release index;
+- a missing or malformed release index, including duplicate `part.file` values;
 - a failed part request; or
 - a size or checksum mismatch.
 

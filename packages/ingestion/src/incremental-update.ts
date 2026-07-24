@@ -31,6 +31,7 @@ import {
   type PackManifest,
 } from '@kgpacks/packs';
 
+import { canonicalJson as canonical } from './canonical-json.js';
 import { chunkArticle } from './chunking.js';
 import { CVE_ADAPTER_VERSION, CVE_ID_RE, cveToGraph } from './cve-adapter.js';
 import { KnowledgePackUpdateError, KnowledgePackValidationError } from './errors.js';
@@ -210,33 +211,6 @@ interface ExpectedUpdate {
 
 function sha256(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex');
-}
-
-function compareUnicodeScalars(left: string, right: string): number {
-  let leftIndex = 0;
-  let rightIndex = 0;
-  while (leftIndex < left.length && rightIndex < right.length) {
-    const leftPoint = left.codePointAt(leftIndex) ?? 0;
-    const rightPoint = right.codePointAt(rightIndex) ?? 0;
-    if (leftPoint !== rightPoint) return leftPoint - rightPoint;
-    leftIndex += leftPoint > 0xffff ? 2 : 1;
-    rightIndex += rightPoint > 0xffff ? 2 : 1;
-  }
-  if (leftIndex < left.length) return 1;
-  if (rightIndex < right.length) return -1;
-  return 0;
-}
-
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
-  if (value && typeof value === 'object') {
-    return `{${Object.keys(value as Record<string, unknown>)
-      .sort(compareUnicodeScalars)
-      .map((key) => `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`)
-      .join(',')}}`;
-  }
-
-  return JSON.stringify(value);
 }
 
 function embedderModelId(embedder: Embedder): string {
@@ -721,7 +695,7 @@ function fsyncFile(path: string): void {
   }
 }
 
-export function nativeRenameHelper(): string {
+export function nativeRenameHelper(architecture = process.arch): string {
   const moduleDir = dirname(fileURLToPath(import.meta.url));
   const configuredHelper = process.env.WIKIGR_RENAME_NOREPLACE_HELPER;
   if (configuredHelper !== undefined) {
@@ -735,9 +709,14 @@ export function nativeRenameHelper(): string {
     }
   }
 
+  if (architecture !== 'x64' && architecture !== 'arm64') {
+    throw new Error(`native renameat2(RENAME_NOREPLACE) helper does not support ${architecture}`);
+  }
+  const helperName = `rename-noreplace-linux-${architecture}`;
   const candidates = [
-    join(moduleDir, 'rename-noreplace'),
-    resolve(moduleDir, '../../../dist/rename-noreplace'),
+    join(moduleDir, helperName),
+    resolve(moduleDir, '../../../dist', helperName),
+    resolve(moduleDir, '../../../native/prebuilds', helperName),
   ];
   for (const candidate of candidates) {
     try {

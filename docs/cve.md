@@ -228,12 +228,12 @@ without replacing assets or moving a tag. Immutable publication does not update
 the legacy mutable `packs` release. See
 [immutable update release publication](pack-versioning.md#immutable-update-release-publication).
 
-The builder (`build-cve-pack.mjs`) stamps **provenance** (corpus commit/date/tag,
-embedding model, build date) into `manifest.json`; the release script mirrors it
-into `cve.pack-release.json` and fills `build.date`. Supply the required full SHA
-and real UTC date with `--corpus-commit` / `--corpus-date`, plus `--corpus-tag`
-when building from a release. `pnpm cve:fetch` prints these pre-filled from the
-source release (see [cve-corpus.md](cve-corpus.md)). See
+The builder (`build-cve-pack.mjs`) stamps **provenance** (corpus commit/date/tag
+and embedding model) into `manifest.json`; the release script mirrors it into
+`cve.pack-release.json` without adding wall-clock metadata. Supply the required
+full SHA and real UTC date with `--corpus-commit` / `--corpus-date`, plus
+`--corpus-tag` when building from a release. `pnpm cve:fetch` prints these
+pre-filled from the source release (see [cve-corpus.md](cve-corpus.md)). See
 [docs/pack-versioning.md](pack-versioning.md) for the tag scheme and the full
 provenance field reference.
 

@@ -83,15 +83,17 @@ wikigr [--packs-dir <dir>] pack pull <name>
 ```
 
 With neither `--tag` nor `--base-url`, the command discovers the highest
-matching stable release in `--repo`. Automatic discovery requires a release
-that advertises both `<name>.pack-release.json` and its detached Ed25519
-signature, then verifies that signature before parsing the index. `--no-verify`
-is the explicit exception; SHA-256 checks remain mandatory.
+matching stable release in `--repo`. Draft releases and every GitHub release
+whose `prerelease` field is not exactly `false` are excluded before their index
+is fetched. Automatic discovery requires a remaining release that advertises
+both `<name>.pack-release.json` and its detached Ed25519 signature, then verifies
+that signature before parsing the index. `--no-verify` is the explicit
+exception; SHA-256 checks remain mandatory.
 
 `--tag` pins one release and `--base-url` selects an asset directory directly.
 Both bypass discovery and never fall back to another release. Explicit sources
-may be unsigned unless `--require-signature` is set, but a present invalid
-signature still fails unless verification was disabled.
+may select a prerelease and may be unsigned unless `--require-signature` is set,
+but a present invalid signature still fails unless verification was disabled.
 
 The command streams each part to temporary storage, verifies its declared byte
 count and SHA-256, verifies the assembled archive SHA-256, and then streams the
@@ -99,6 +101,28 @@ archive into the atomic pack installer. See the
 [pack release discovery and download reference](../../docs/reference/pack-release-discovery.md)
 for tag formats, deterministic ordering, failure behavior, and transport
 safety limits.
+
+The signed index is completely validated before any part is downloaded or the
+installer is called. In particular, every `parts[].file` must be unique and must
+equal the filename implied by its zero-based position.
+
+### `pack validate` — schema dispatch
+
+```text
+wikigr [--packs-dir <dir>] pack validate <pack>
+```
+
+Validation selects one of two supported manifest contracts:
+
+| `schemaVersion` | Contract                                                                                 |
+| --------------- | ---------------------------------------------------------------------------------------- |
+| absent or `"1"` | Legacy structural manifest validation                                                    |
+| `"2"`           | Complete schema-v2 filesystem, database, provenance, count, digest, and index validation |
+| any other value | Rejected as an unsupported manifest schema (exit `4`)                                    |
+
+Schema-v2 validation succeeds only after `validateKnowledgePack` recomputes and
+checks the complete pack. It is never downgraded to legacy validation when a v2
+field is missing or invalid.
 
 ## Ingestion commands
 

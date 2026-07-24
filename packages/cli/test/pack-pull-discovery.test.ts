@@ -214,6 +214,19 @@ describe('strict GitHub pack release discovery', () => {
     await expect(discoverLatestPackBaseUrl('cve', REPO)).resolves.toContain('cve-v2.0.0');
   });
 
+  it('ignores every release marked as a GitHub prerelease before fetching its index', async () => {
+    const fetchMock = discoveryFetch([
+      release('cve-v9.0.0', { prerelease: true }),
+      release('cve-v8.0.0', { prerelease: true }),
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(discoverLatestPackBaseUrl('cve', REPO)).rejects.toMatchObject({
+      code: 'not-found',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('fails closed for duplicate corpora and repository/tag-mismatched assets', async () => {
     const tag = 'cve-v2.0.0';
     vi.stubGlobal(
