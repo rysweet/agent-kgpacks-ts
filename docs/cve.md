@@ -98,6 +98,16 @@ Flags (`scripts/build-cve-pack.mjs`):
 | `--batch`                  | `96`                     | Embedding batch size.                                                                    |
 | `--resume` / `--no-resume` | auto                     | Resume from / ignore a build checkpoint ([docs/resumable-build.md](resumable-build.md)). |
 | `--checkpoint-every`       | `50`                     | Batches between durable checkpoints (bounds crash re-work).                              |
+| `--corpus-commit`          | sidecar                  | Full lowercase 40-character source commit; required without a sidecar.                   |
+| `--corpus-date`            | sidecar                  | Real UTC source date in `YYYY-MM-DD` form; required without a sidecar.                   |
+| `--corpus-tag`             | sidecar                  | Non-empty upstream release tag; required without a sidecar.                              |
+
+`pnpm cve:fetch` writes `corpus-provenance.json` above the extracted source
+tree. When present, this complete sidecar is authoritative: matching
+`--corpus-*` flags are assertions, while conflicts, malformed fields, extra or
+missing fields, and supplied/sidecar value mismatches fail before staging is
+created or resumed. A manual source without the sidecar requires all three
+flags. See the [canonical provenance contract](cve-corpus.md#provenance).
 
 The build is **resumable and pipelined**: it checkpoints progress so an interrupted
 run continues from the last checkpoint (`--resume`), and it overlaps embedding with
@@ -147,7 +157,10 @@ wikigr update \
 
 Canonical adapter payload bytes determine `added`, `modified`, and `unchanged`.
 Omitted records remain present. Empty deltas are valid. Delete operations and
-`REJECTED` CVEs reject the entire delta.
+`REJECTED` CVEs reject the entire delta. The updater accepts no replacement
+provenance flags: it completely validates the base corpus identity and preserves
+that exact identity in the output. Resume rechecks the base, staging database,
+and saved provenance digest before continuing.
 
 See [the incremental CVE update how-to](howto/incremental-cve-update.md) for the
 operational workflow and the

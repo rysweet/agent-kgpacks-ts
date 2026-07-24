@@ -142,14 +142,31 @@ describe('immutable pack release artifacts', () => {
         packsDir,
         '--out-dir',
         legacyOut,
+        '--corpus-commit',
+        '0123456789abcdef0123456789abcdef01234567',
+        '--corpus-date',
+        '2026-07-03',
+        '--corpus-tag',
+        'cve_2026-07-03_0000Z',
+        '--model',
+        'legacy-embedding-model',
         '--dry-run',
       ],
       { encoding: 'utf8' },
     );
     expect(legacy.status, legacy.stderr).toBe(0);
-    expect(readFileSync(join(legacyOut, 'cve.pack-release.json'), 'utf8')).toContain(
-      '"version": "1.2.3"',
-    );
+    const legacyIndex = JSON.parse(readFileSync(join(legacyOut, 'cve.pack-release.json'), 'utf8'));
+    expect(legacyIndex).toMatchObject({
+      version: '1.2.3',
+      provenance: {
+        corpus: {
+          commit: '0123456789abcdef0123456789abcdef01234567',
+          date: '2026-07-03',
+          tag: 'cve_2026-07-03_0000Z',
+        },
+        embedding: { model: 'legacy-embedding-model' },
+      },
+    });
 
     writeFileSync(
       manifestPath,

@@ -11,12 +11,11 @@
 // and commits with a single atomic rename. Any integrity or download failure
 // raises `PackInstallError` (CLI exit code 5) and installs nothing.
 
-import { createHash, type Hash } from 'node:crypto';
-import { createReadStream, createWriteStream, mkdtempSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { createReadStream, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Readable, Transform, type TransformCallback } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
+import { Readable } from 'node:stream';
 
 import {
   PackInstallError,
@@ -31,6 +30,19 @@ import {
   PACK_RELEASE_INDEX_SUFFIX,
   PACK_RELEASE_SIGNATURE_SUFFIX,
 } from './constants.js';
+import {
+  DEFAULT_EXTERNAL_LIMITS,
+  ExternalServiceError,
+  GITHUB_ASSET_ORIGINS,
+  createExternalContext,
+  downloadBoundedFile,
+  exactOriginPolicy,
+  fetchBoundedBytes,
+  type ExternalContext,
+  type ExternalServiceLimits,
+  type ExternalTransportOptions,
+  type TransportPolicy,
+} from './external-transport.js';
 import { signaturePlan, verifyAgainstTrustedKeys } from './pack-signing.js';
 import type { TrustedSigningKey } from './signing-key.js';
 
@@ -78,6 +90,12 @@ export interface PullPackOptions {
   trustedKeys?: readonly TrustedSigningKey[];
   /** Sink for human-readable signature status (defaults to stderr). */
   log?: (message: string) => void;
+  /** Cancels discovery, retry waits, downloads, verification, and installation. */
+  signal?: AbortSignal;
+  /** Injectable bounded transport settings for tests and constrained environments. */
+  externalLimits?: Partial<ExternalServiceLimits>;
+  /** Injectable fetch implementation for tests. */
+  fetch?: ExternalTransportOptions['fetch'];
 }
 
 export interface PulledPack {
@@ -92,6 +110,26 @@ export interface PulledPack {
 
 const PART_FILE_RE = /^[A-Za-z0-9._-]+$/;
 const DATED_RELEASE_VERSION_RE = /^\d{4}\.\d{2}(?:\.\d+)?$/;
+const GITHUB_REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const SHA256_RE = /^[0-9a-f]{64}$/;
+const GITHUB_API_POLICY: TransportPolicy = {
+  allowedOrigins: new Set(['https://api.github.com']),
+};
+
+interface GithubAsset {
+  name: string;
+  url: string;
+  size?: number;
+}
+
+interface ReleaseCandidate {
+  tag: string;
+  version: string;
+  publishedAt: number;
+  releaseId: string;
+  baseUrl: string;
+  assets: ReadonlyMap<string, readonly GithubAsset[]>;
+}
 
 /** Resolves the base URL (directory) that hosts the index and part assets. */
 export function resolvePackBaseUrl(
@@ -110,47 +148,60 @@ export async function discoverLatestPackBaseUrl(
   name: string,
   repo: string,
   requireSignature = true,
+  options: ExternalTransportOptions = {},
 ): Promise<string> {
-  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) {
-    throw new PackInstallError(`invalid pack repository: ${repo}`);
+  const timeout = options.limits?.discoveryTimeoutMs ?? DEFAULT_EXTERNAL_LIMITS.discoveryTimeoutMs;
+  const context = createExternalContext(options, timeout);
+  return (await discoverLatestPackRelease(name, repo, requireSignature, context)).baseUrl;
+}
+
+async function discoverLatestPackRelease(
+  name: string,
+  repo: string,
+  requireSignature: boolean,
+  context: ExternalContext,
+): Promise<ReleaseCandidate> {
+  if (!GITHUB_REPO_RE.test(repo)) {
+    throw new ExternalServiceError('trust', 'pack repository is not an approved owner/repository');
   }
   const expectedAsset = `${name}${PACK_RELEASE_INDEX_SUFFIX}`;
   const expectedSignature = `${expectedAsset}${PACK_RELEASE_SIGNATURE_SUFFIX}`;
-  let latest: { tag: string; version: string } | undefined;
-  for (let page = 1; ; page++) {
+  let latest: ReleaseCandidate | undefined;
+  for (let page = 1; page <= context.limits.discoveryMaxPages; page++) {
     const apiUrl = `https://api.github.com/repos/${repo}/releases?per_page=100&page=${page}`;
-    let response: Response;
-    try {
-      response = await fetch(apiUrl, {
+    const bytes = await fetchBoundedBytes(
+      context,
+      apiUrl,
+      GITHUB_API_POLICY,
+      context.limits.discoveryPageBytes,
+      'GitHub release discovery',
+      {
         headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'wikigr-pack-pull' },
-      });
-    } catch (error) {
-      throw new PackInstallError(
-        `cannot discover pack releases from ${repo}: ${(error as Error).message}`,
-      );
-    }
-    if (!response.ok) {
-      throw new PackInstallError(
-        `cannot discover pack releases from ${repo} (HTTP ${response.status})`,
-      );
-    }
+      },
+    );
     let releases: unknown;
     try {
-      releases = await response.json();
-    } catch (error) {
-      throw new PackInstallError(
-        `invalid release discovery response from ${repo}: ${(error as Error).message}`,
+      releases = JSON.parse((bytes as Buffer).toString('utf8')) as unknown;
+    } catch {
+      throw new ExternalServiceError(
+        'invalid-response',
+        'GitHub release discovery returned invalid JSON',
       );
     }
     if (!Array.isArray(releases)) {
-      throw new PackInstallError(`invalid release discovery response from ${repo}`);
+      throw new ExternalServiceError(
+        'invalid-response',
+        'GitHub release discovery returned an invalid release list',
+      );
     }
     for (const value of releases) {
       if (!value || typeof value !== 'object') continue;
       const release = value as {
+        id?: unknown;
         tag_name?: unknown;
         draft?: unknown;
         prerelease?: unknown;
+        published_at?: unknown;
         assets?: unknown;
       };
       const tag = typeof release.tag_name === 'string' ? release.tag_name : '';
@@ -158,54 +209,171 @@ export async function discoverLatestPackBaseUrl(
       if (
         release.draft !== false ||
         release.prerelease !== false ||
+        !isAscii(tag) ||
         version === null ||
         hasPrerelease(version) ||
         !Array.isArray(release.assets)
       ) {
         continue;
       }
-      let hasIndex = false;
-      let hasSignature = !requireSignature;
+      const publishedAt =
+        typeof release.published_at === 'string' ? Date.parse(release.published_at) : Number.NaN;
+      const releaseId = normalizeReleaseId(release.id);
+      if (!Number.isFinite(publishedAt) || releaseId === null) continue;
+
+      const assets = new Map<string, GithubAsset[]>();
       for (const asset of release.assets) {
         if (asset === null || typeof asset !== 'object') continue;
-        const assetName = (asset as { name?: unknown }).name;
-        if (assetName === expectedAsset) hasIndex = true;
-        else if (assetName === expectedSignature) hasSignature = true;
-        if (hasIndex && hasSignature) break;
+        const parsed = parseGithubAsset(asset, repo, tag);
+        if (!parsed) continue;
+        const matches = assets.get(parsed.name) ?? [];
+        matches.push(parsed);
+        assets.set(parsed.name, matches);
       }
-      if (hasIndex && hasSignature) {
-        const candidate = { tag, version };
-        if (!latest) {
-          latest = candidate;
-        } else {
-          const precedence = compareVersions(candidate.version, latest.version);
-          const versionOrder = compareBytewise(candidate.version, latest.version);
-          if (
-            precedence > 0 ||
-            (precedence === 0 &&
-              (versionOrder > 0 ||
-                (versionOrder === 0 && compareBytewise(candidate.tag, latest.tag) > 0)))
-          ) {
-            latest = candidate;
-          }
+      const indexes = assets.get(expectedAsset) ?? [];
+      const signatures = assets.get(expectedSignature) ?? [];
+      if (indexes.length > 1 || signatures.length > 1) {
+        throw new ExternalServiceError(
+          'ambiguous',
+          'GitHub release contains ambiguous pack corpus assets',
+        );
+      }
+      if (indexes.length !== 1 || (requireSignature && signatures.length !== 1)) continue;
+
+      const candidate: ReleaseCandidate = {
+        tag,
+        version,
+        publishedAt,
+        releaseId,
+        baseUrl: `https://github.com/${repo}/releases/download/${tag}`,
+        assets,
+      };
+      if (!latest) {
+        latest = candidate;
+      } else {
+        const order = compareCandidates(candidate, latest);
+        if (order === 0) {
+          throw new ExternalServiceError(
+            'ambiguous',
+            'GitHub release discovery returned indistinguishable candidates',
+          );
         }
+        if (order > 0) latest = candidate;
       }
     }
     if (releases.length < 100) break;
+    if (page === context.limits.discoveryMaxPages) {
+      throw new ExternalServiceError(
+        'response-too-large',
+        'GitHub release discovery exceeded its pagination limit',
+      );
+    }
   }
-  if (latest) return `https://github.com/${repo}/releases/download/${latest.tag}`;
-  throw new PackInstallError(
-    `no immutable release containing ${expectedAsset}${
+  if (latest) return latest;
+  throw new ExternalServiceError(
+    'not-found',
+    `no stable immutable release containing ${expectedAsset}${
       requireSignature ? ` and ${expectedSignature}` : ''
     } was found in ${repo}`,
   );
 }
 
-function compareBytewise(left: string, right: string): -1 | 0 | 1 {
-  // Valid SemVer and immutable release-tag suffixes are ASCII. Tags compared
-  // here also share the exact pack-name prefix, so UTF-16 and UTF-8 ordering
-  // are identical without allocating two temporary Buffers per comparison.
-  return left < right ? -1 : left > right ? 1 : 0;
+function parseGithubAsset(value: object, repo: string, tag: string): GithubAsset | null {
+  const raw = value as {
+    name?: unknown;
+    browser_download_url?: unknown;
+    size?: unknown;
+  };
+  if (typeof raw.name !== 'string' || typeof raw.browser_download_url !== 'string') return null;
+  assertGithubAssetBinding(raw.browser_download_url, repo, tag, raw.name);
+  const size =
+    typeof raw.size === 'number' && Number.isSafeInteger(raw.size) && raw.size >= 0
+      ? raw.size
+      : undefined;
+  return { name: raw.name, url: raw.browser_download_url, size };
+}
+
+function assertGithubAssetBinding(
+  urlValue: string,
+  repo: string,
+  tag: string,
+  asset: string,
+): void {
+  let url: URL;
+  try {
+    url = new URL(urlValue);
+  } catch {
+    throw new ExternalServiceError('trust', 'GitHub release asset URL is invalid');
+  }
+  if (
+    url.origin !== 'https://github.com' ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash
+  ) {
+    throw new ExternalServiceError(
+      'trust',
+      'GitHub release asset is not bound to an approved origin',
+    );
+  }
+  let segments: string[];
+  try {
+    segments = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+  } catch {
+    throw new ExternalServiceError('trust', 'GitHub release asset path is invalid');
+  }
+  const [owner, repository] = repo.split('/');
+  const expected = [owner, repository, 'releases', 'download', tag, asset];
+  if (
+    segments.length !== expected.length ||
+    segments.some((segment, index) => segment !== expected[index])
+  ) {
+    throw new ExternalServiceError(
+      'trust',
+      'GitHub release asset does not match the requested repository and tag',
+    );
+  }
+}
+
+function normalizeReleaseId(value: unknown): string | null {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value >= 0 ? String(value) : null;
+  }
+  if (typeof value === 'string' && /^(?:0|[1-9]\d*)$/.test(value)) return value;
+  return null;
+}
+
+function compareCandidates(left: ReleaseCandidate, right: ReleaseCandidate): -1 | 0 | 1 {
+  const version = compareVersions(left.version, right.version);
+  if (version !== 0) return version;
+  if (left.publishedAt !== right.publishedAt) {
+    return left.publishedAt < right.publishedAt ? -1 : 1;
+  }
+  const tag = compareAscii(left.tag, right.tag);
+  if (tag !== 0) return tag;
+  return compareDecimalIds(left.releaseId, right.releaseId);
+}
+
+function compareDecimalIds(left: string, right: string): -1 | 0 | 1 {
+  if (left.length !== right.length) return left.length < right.length ? -1 : 1;
+  return compareAscii(left, right);
+}
+
+function isAscii(value: string): boolean {
+  for (let index = 0; index < value.length; index++) {
+    if (value.charCodeAt(index) > 0x7f) return false;
+  }
+  return true;
+}
+
+function compareAscii(left: string, right: string): -1 | 0 | 1 {
+  const length = Math.min(left.length, right.length);
+  for (let index = 0; index < length; index++) {
+    const difference = left.charCodeAt(index) - right.charCodeAt(index);
+    if (difference !== 0) return difference < 0 ? -1 : 1;
+  }
+  return left.length < right.length ? -1 : left.length > right.length ? 1 : 0;
 }
 
 function hasPrerelease(version: string): boolean {
@@ -232,115 +400,92 @@ function versionFromImmutableTag(name: string, tag: string): string | null {
   }
 }
 
-async function fetchIndexBytes(url: string): Promise<Buffer> {
-  let res: Response;
-  try {
-    res = await fetch(url);
-  } catch (err) {
-    throw new PackInstallError(`cannot reach pack index at ${url}: ${(err as Error).message}`);
-  }
-  if (!res.ok) {
-    throw new PackInstallError(`pack index not found at ${url} (HTTP ${res.status})`);
-  }
-  try {
-    return Buffer.from(await res.arrayBuffer());
-  } catch (err) {
-    throw new PackInstallError(`cannot read pack index at ${url}: ${(err as Error).message}`);
-  }
-}
-
-/** Fetches an optional sibling asset (e.g. the `.sig`); returns null if absent. */
-async function fetchOptionalText(url: string): Promise<string | null> {
-  let res: Response;
-  try {
-    res = await fetch(url);
-  } catch {
-    return null;
-  }
-  if (!res.ok) return null;
-  try {
-    return await res.text();
-  } catch {
-    return null;
-  }
-}
-
 /** Decodes a base64 detached-signature file to raw bytes, or null if malformed. */
 function decodeSignature(text: string): Buffer | null {
   const trimmed = text.trim();
-  if (!trimmed) return null;
-  try {
-    return Buffer.from(trimmed, 'base64');
-  } catch {
+  if (
+    !trimmed ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(trimmed)
+  ) {
     return null;
   }
+  const decoded = Buffer.from(trimmed, 'base64');
+  return decoded.toString('base64') === trimmed ? decoded : null;
 }
 
-function parseIndexJson(bytes: Buffer, url: string): unknown {
+function parseIndexJson(bytes: Buffer): unknown {
   try {
     return JSON.parse(bytes.toString('utf8')) as unknown;
-  } catch (err) {
-    throw new PackInstallError(`pack index at ${url} is not valid JSON: ${(err as Error).message}`);
+  } catch {
+    throw new ExternalServiceError('invalid-response', 'pack release index is not valid JSON');
   }
 }
 
-function assertIndex(value: unknown, expectedName: string, url: string): PackReleaseIndex {
+function assertIndex(
+  value: unknown,
+  expectedName: string,
+  limits: ExternalServiceLimits,
+): PackReleaseIndex {
   const idx = value as Partial<PackReleaseIndex> | null;
   if (!idx || typeof idx !== 'object') {
-    throw new PackInstallError(`pack index at ${url} is malformed`);
+    throw new ExternalServiceError('invalid-response', 'pack release index is malformed');
   }
   if (idx.name !== expectedName) {
-    throw new PackInstallError(
+    throw new ExternalServiceError(
+      'trust',
       `pack index name mismatch: requested ${JSON.stringify(expectedName)}, index declares ${JSON.stringify(idx.name)}`,
     );
   }
-  if (typeof idx.sha256 !== 'string' || !Array.isArray(idx.parts) || idx.parts.length === 0) {
-    throw new PackInstallError(`pack index at ${url} has no parts or overall checksum`);
+  if (
+    idx.format !== 'tar.gz-multipart-v1' ||
+    typeof idx.version !== 'string' ||
+    !isValidSemver(idx.version) ||
+    typeof idx.sha256 !== 'string' ||
+    !SHA256_RE.test(idx.sha256) ||
+    !Number.isSafeInteger(idx.totalBytes) ||
+    (idx.totalBytes as number) <= 0 ||
+    (idx.totalBytes as number) > limits.corpusBytes ||
+    !Array.isArray(idx.parts) ||
+    idx.parts.length === 0 ||
+    idx.parts.length > limits.maxParts
+  ) {
+    throw new ExternalServiceError('invalid-response', 'pack release index metadata is invalid');
   }
-  for (const part of idx.parts) {
+  const files = new Set<string>();
+  let totalBytes = 0;
+  for (let position = 0; position < idx.parts.length; position++) {
+    const part = idx.parts[position];
+    const expectedFile = `${expectedName}.tar.gz.${String(position).padStart(3, '0')}`;
     if (
       !part ||
       typeof part.file !== 'string' ||
+      part.file !== expectedFile ||
+      files.has(part.file) ||
       typeof part.sha256 !== 'string' ||
+      !SHA256_RE.test(part.sha256) ||
       typeof part.bytes !== 'number' ||
+      !Number.isSafeInteger(part.bytes) ||
+      part.bytes <= 0 ||
       !PART_FILE_RE.test(part.file)
     ) {
-      throw new PackInstallError(`pack index at ${url} has an invalid part entry`);
+      throw new ExternalServiceError('invalid-response', 'pack release index has an invalid part');
+    }
+    files.add(part.file);
+    totalBytes += part.bytes;
+    if (!Number.isSafeInteger(totalBytes) || totalBytes > limits.corpusBytes) {
+      throw new ExternalServiceError(
+        'response-too-large',
+        'pack release exceeds the corpus size limit',
+      );
     }
   }
+  if (totalBytes !== idx.totalBytes) {
+    throw new ExternalServiceError(
+      'integrity',
+      'pack release index total does not match its declared parts',
+    );
+  }
   return idx as PackReleaseIndex;
-}
-
-async function downloadPart(
-  url: string,
-  dest: string,
-  overallHash: Hash,
-): Promise<{ hash: string; bytes: number }> {
-  let res: Response;
-  try {
-    res = await fetch(url);
-  } catch (err) {
-    throw new PackInstallError(`cannot download part ${url}: ${(err as Error).message}`);
-  }
-  if (!res.ok || !res.body) {
-    throw new PackInstallError(`failed to download part ${url} (HTTP ${res.status})`);
-  }
-  const partHash = createHash('sha256');
-  let bytes = 0;
-  const verifier = new Transform({
-    transform(chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback) {
-      bytes += chunk.length;
-      partHash.update(chunk);
-      overallHash.update(chunk);
-      callback(null, chunk);
-    },
-  });
-  await pipeline(
-    Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]),
-    verifier,
-    createWriteStream(dest),
-  );
-  return { hash: partHash.digest('hex'), bytes };
 }
 
 /** Async generator concatenating part files in order into one byte stream. */
@@ -352,6 +497,30 @@ async function* concatParts(paths: string[]): AsyncGenerator<Buffer> {
   }
 }
 
+async function hashParts(paths: string[], signal?: AbortSignal): Promise<string> {
+  const hash = createHash('sha256');
+  for await (const chunk of concatParts(paths)) {
+    if (signal?.aborted) {
+      throw new ExternalServiceError('cancelled', 'pack verification was cancelled');
+    }
+    hash.update(chunk);
+  }
+  return hash.digest('hex');
+}
+
+function oneAsset(candidate: ReleaseCandidate, name: string): GithubAsset {
+  const matches = candidate.assets.get(name) ?? [];
+  if (matches.length !== 1) {
+    throw new ExternalServiceError(
+      matches.length === 0 ? 'trust' : 'ambiguous',
+      matches.length === 0
+        ? 'selected GitHub release does not contain every indexed corpus asset'
+        : 'selected GitHub release contains duplicate corpus assets',
+    );
+  }
+  return matches[0];
+}
+
 /**
  * Downloads, verifies, and installs a multi-part pack release. Throws
  * `PackInstallError` on any download or integrity failure (installing nothing).
@@ -359,16 +528,55 @@ async function* concatParts(paths: string[]): AsyncGenerator<Buffer> {
 export async function pullPack(opts: PullPackOptions): Promise<PulledPack> {
   const automaticDiscovery = !opts.baseUrl && !opts.tag;
   const noVerify = opts.noVerify ?? false;
-  const base = !automaticDiscovery
-    ? resolvePackBaseUrl(opts)
-    : await discoverLatestPackBaseUrl(opts.name, opts.repo ?? DEFAULT_PACK_REPO, !noVerify);
-  const indexUrl = `${base}/${opts.name}${PACK_RELEASE_INDEX_SUFFIX}`;
+  const transportOptions: ExternalTransportOptions = {
+    signal: opts.signal,
+    limits: opts.externalLimits,
+    fetch: opts.fetch,
+  };
+  const discovery = automaticDiscovery
+    ? await discoverLatestPackRelease(
+        opts.name,
+        opts.repo ?? DEFAULT_PACK_REPO,
+        !noVerify,
+        createExternalContext(
+          transportOptions,
+          opts.externalLimits?.discoveryTimeoutMs ?? DEFAULT_EXTERNAL_LIMITS.discoveryTimeoutMs,
+        ),
+      )
+    : undefined;
+  const base = discovery?.baseUrl ?? resolvePackBaseUrl(opts);
+  const transport = createExternalContext(
+    transportOptions,
+    opts.externalLimits?.pullTimeoutMs ?? DEFAULT_EXTERNAL_LIMITS.pullTimeoutMs,
+  );
+  const policy =
+    discovery || opts.tag ? { allowedOrigins: GITHUB_ASSET_ORIGINS } : exactOriginPolicy(base);
+  const indexName = `${opts.name}${PACK_RELEASE_INDEX_SUFFIX}`;
+  const indexUrl = discovery ? oneAsset(discovery, indexName).url : `${base}/${indexName}`;
   const log = opts.log ?? ((message: string) => process.stderr.write(`${message}\n`));
 
   // Fetch the RAW index bytes and verify authenticity BEFORE parsing the JSON, so
   // a tampered index cannot influence the client before its signature is checked.
-  const indexBytes = await fetchIndexBytes(indexUrl);
-  const sigText = await fetchOptionalText(`${indexUrl}${PACK_RELEASE_SIGNATURE_SUFFIX}`);
+  const indexBytes = (await fetchBoundedBytes(
+    transport,
+    indexUrl,
+    policy,
+    transport.limits.indexBytes,
+    'pack index download',
+  )) as Buffer;
+  const signatureName = `${indexName}${PACK_RELEASE_SIGNATURE_SUFFIX}`;
+  const signatureUrl = discovery
+    ? (discovery.assets.get(signatureName)?.[0]?.url ?? `${base}/${signatureName}`)
+    : `${indexUrl}${PACK_RELEASE_SIGNATURE_SUFFIX}`;
+  const signatureBytes = await fetchBoundedBytes(
+    transport,
+    signatureUrl,
+    policy,
+    transport.limits.signatureBytes,
+    'pack signature download',
+    { optional404: true },
+  );
+  const sigText = signatureBytes?.toString('utf8') ?? null;
   const present = sigText !== null && sigText.trim() !== '';
   const signature = present ? decodeSignature(sigText as string) : null;
   const signedBy = signature
@@ -381,7 +589,8 @@ export async function pullPack(opts: PullPackOptions): Promise<PulledPack> {
     noVerify,
   });
   if (action === 'fail') {
-    throw new PackInstallError(
+    throw new ExternalServiceError(
+      'trust',
       present
         ? `signature verification failed for ${opts.name} (untrusted key or tampered index)`
         : `${opts.name} release is unsigned and --require-signature was set`,
@@ -396,33 +605,59 @@ export async function pullPack(opts: PullPackOptions): Promise<PulledPack> {
     );
   }
 
-  const index = assertIndex(parseIndexJson(indexBytes, indexUrl), opts.name, indexUrl);
+  const index = assertIndex(parseIndexJson(indexBytes), opts.name, transport.limits);
+  if (discovery && index.version !== discovery.version) {
+    throw new ExternalServiceError(
+      'trust',
+      'signed pack index version does not match the selected GitHub release tag',
+    );
+  }
 
   const work = mkdtempSync(join(opts.tmpRoot ?? tmpdir(), 'kgpacks-pull-'));
   try {
     const partPaths: string[] = [];
-    const overall = createHash('sha256');
     for (const part of index.parts) {
+      if (opts.signal?.aborted) {
+        throw new ExternalServiceError('cancelled', 'pack retrieval was cancelled');
+      }
       const dest = join(work, part.file);
-      const { hash, bytes } = await downloadPart(`${base}/${part.file}`, dest, overall);
+      const asset = discovery ? oneAsset(discovery, part.file) : undefined;
+      if (asset?.size !== undefined && asset.size !== part.bytes) {
+        throw new ExternalServiceError(
+          'integrity',
+          `part ${part.file} size does not match GitHub release metadata`,
+        );
+      }
+      const { sha256, bytes } = await downloadBoundedFile(
+        transport,
+        asset?.url ?? `${base}/${part.file}`,
+        policy,
+        dest,
+        part.bytes,
+        `corpus part ${part.file} download`,
+      );
       if (bytes !== part.bytes) {
-        throw new PackInstallError(
+        throw new ExternalServiceError(
+          'integrity',
           `part ${part.file} size mismatch: expected ${part.bytes} bytes, got ${bytes}`,
         );
       }
-      if (hash !== part.sha256) {
-        throw new PackInstallError(`part ${part.file} checksum mismatch`);
+      if (sha256 !== part.sha256) {
+        throw new ExternalServiceError('integrity', `part ${part.file} checksum mismatch`);
       }
       partPaths.push(dest);
     }
 
-    // Verify the overall archive checksum over the concatenated parts before
-    // touching the install root. The digest was accumulated in part order while
-    // streaming each download to disk, avoiding another full archive read.
-    if (overall.digest('hex') !== index.sha256) {
-      throw new PackInstallError(`assembled archive for ${opts.name} failed overall checksum`);
+    if ((await hashParts(partPaths, opts.signal)) !== index.sha256) {
+      throw new ExternalServiceError(
+        'integrity',
+        `assembled archive for ${opts.name} failed overall checksum`,
+      );
     }
 
+    if (opts.signal?.aborted) {
+      throw new ExternalServiceError('cancelled', 'pack installation was cancelled');
+    }
     const installed = await installPackFromStream(
       Readable.from(concatParts(partPaths)),
       opts.packsDir,

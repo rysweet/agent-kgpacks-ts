@@ -127,7 +127,7 @@ pnpm --filter @kgpacks/frontend dev
   index (Ed25519 authenticity on top of SHA-256 integrity).
 - [docs/reference/pack-release-discovery.md](docs/reference/pack-release-discovery.md)
   — automatic release selection, explicit-source precedence, signature policy,
-  download validation, and current transport boundaries.
+  download validation, and bounded transport rules.
 - [docs/entity-graph.md](docs/entity-graph.md) — entity-graph traversal:
   `entityGraph()` + `GET /api/v1/graph/entities` (co-occurrence / relation modes).
 - [docs/packs-directory.md](docs/packs-directory.md) — where the CLI/MCP server

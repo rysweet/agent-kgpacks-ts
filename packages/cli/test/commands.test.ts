@@ -5,6 +5,9 @@
 // database/embedding runtime is loaded; every other command exercises the real
 // `@kgpacks/packs` APIs.
 
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { QueryRunner } from '../src/query-runner.js';
@@ -94,6 +97,16 @@ describe('pack validate', () => {
     const result = await cli(['pack', 'validate', 'broken-pack']);
     expect(result.code).toBe(EXIT_VALIDATION);
     expect(result.stderr).toContain('invalid version');
+  });
+
+  it('exits 4 for an unsupported manifest schema', async () => {
+    writeFileSync(
+      join(packs.packsDir, 'alpha-pack', 'manifest.json'),
+      `${JSON.stringify({ ...ALPHA_MANIFEST, schemaVersion: '999' }, null, 2)}\n`,
+    );
+    const result = await cli(['pack', 'validate', 'alpha-pack']);
+    expect(result.code).toBe(EXIT_VALIDATION);
+    expect(result.stderr).toContain('unsupported manifest schema "999"');
   });
 
   it('exits 3 for a missing pack', async () => {

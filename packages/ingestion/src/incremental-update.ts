@@ -721,13 +721,24 @@ function fsyncFile(path: string): void {
   }
 }
 
-function nativeRenameHelper(): string {
+export function nativeRenameHelper(): string {
   const moduleDir = dirname(fileURLToPath(import.meta.url));
+  const configuredHelper = process.env.WIKIGR_RENAME_NOREPLACE_HELPER;
+  if (configuredHelper !== undefined) {
+    try {
+      accessSync(configuredHelper, constants.X_OK);
+      return configuredHelper;
+    } catch {
+      throw new Error(
+        `WIKIGR_RENAME_NOREPLACE_HELPER is not executable: ${JSON.stringify(configuredHelper)}`,
+      );
+    }
+  }
+
   const candidates = [
-    process.env.WIKIGR_RENAME_NOREPLACE_HELPER,
     join(moduleDir, 'rename-noreplace'),
     resolve(moduleDir, '../../../dist/rename-noreplace'),
-  ].filter((candidate): candidate is string => Boolean(candidate));
+  ];
   for (const candidate of candidates) {
     try {
       accessSync(candidate, constants.X_OK);

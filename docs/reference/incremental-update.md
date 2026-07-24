@@ -1,7 +1,7 @@
 ---
 title: Incremental knowledge-pack update contract
 description: Reference for the schema-v2 CVE update API, delta grammar, durable metadata, validation, and publication guarantees
-last_updated: 2026-07-23
+last_updated: 2026-07-24
 review_schedule: as-needed
 owner: kgpacks-maintainers
 doc_type: reference
@@ -15,6 +15,7 @@ This reference defines the implemented schema-v2 APIs and CLI semantics.
 
 - [CLI contract](#cli-contract)
 - [Public TypeScript API](#public-typescript-api)
+- [Canonical corpus provenance](#canonical-corpus-provenance)
 - [Delta grammar](#delta-grammar)
 - [Classification and identity](#classification-and-identity)
 - [Base eligibility](#base-eligibility)
@@ -152,6 +153,85 @@ implement incremental updates.
 adapter, manifest projection, complete validation, resume, and publication. It
 uses `@kgpacks/db` for LadybugDB and `@kgpacks/packs` for manifest
 serialization. The CLI loads this update seam lazily.
+
+The package also exports the provenance-capable CVE full-build entry point and
+resolver:
+
+```ts
+interface BuildCvePackConfig {
+  source: string;
+  output: string;
+  packId: string;
+  version: string;
+  embedder: Embedder;
+  corpusCommit?: string;
+  corpusDate?: string;
+  corpusTag?: string | null;
+}
+
+interface CorpusProvenanceIdentity {
+  commit: string;
+  date: string;
+  tag: string | null;
+}
+
+declare function resolveCorpusProvenance(
+  source: string,
+  supplied: {
+    corpusCommit?: string;
+    corpusDate?: string;
+    corpusTag?: string | null;
+  },
+): CorpusProvenanceIdentity;
+
+declare function buildCvePack(config: BuildCvePackConfig): Promise<void>;
+```
+
+The optional TypeScript fields do not make partial provenance valid. They may be
+omitted only when an authoritative fetched-corpus sidecar supplies the complete
+identity.
+
+## Canonical corpus provenance
+
+Every provenance-capable CVE pack has one canonical corpus identity:
+
+```ts
+{
+  commit: string; // full lowercase 40-character Git SHA-1
+  date: string; // real UTC date, YYYY-MM-DD
+  tag: string | null;
+}
+```
+
+`resolveCorpusProvenance()` searches from the source path upward for
+`corpus-provenance.json`. When found, the sidecar is authoritative and must have
+the exact complete schema documented in
+[Fetching the CVE corpus](../cve-corpus.md#provenance). Supplied values are
+optional exact-match assertions. A malformed sidecar or any conflicting value
+fails; callers cannot replace or complete sidecar data.
+
+Without a sidecar, all three supplied fields are required. `commit` and `date`
+must satisfy the formats above. `tag` must be a non-empty string when present;
+programmatic callers use explicit `null` to represent a source with no upstream
+tag. Missing, partial, malformed, or mismatched values fail before output is
+created.
+
+The closure applies at every lifecycle boundary:
+
+- `buildCvePack()` resolves provenance before creating output;
+- the comprehensive CVE builder resolves it before fresh staging, requires
+  canonical source payload provenance on every streamed article, and re-resolves
+  it before resume;
+- fresh incremental update accepts provenance only from a completely validated
+  base and copies it unchanged;
+- incremental resume compares canonical base provenance, staged durable
+  provenance, and the saved provenance digest before continuing; and
+- complete validation compares the manifest projection with durable
+  `PackMetadata` and rejects non-canonical provenance.
+
+No builder summary, checkpoint, update sidecar, command-line override, or
+manifest projection can substitute for the authoritative sidecar or durable
+database identity.
 
 ## Delta grammar
 
@@ -631,8 +711,8 @@ summaries, sidecars, or checkpoints. It independently recomputes and verifies:
   orphaned or unsupported nodes and relationships;
 - required table, column, primary-key, relationship, structured lexical, and
   vector-index definitions;
-- exact index membership: every eligible live section/chunk appears once and
-  no stale row appears;
+- exact independent index membership: every eligible live section/chunk appears
+  once in its corresponding index and no stale row appears;
 - reproduction of every article's derived sections, chunks, entities, and
   relations through the recorded extractor version;
 - listed payload sizes and SHA-256 values, aggregate `contentDigest`, exact
@@ -647,12 +727,27 @@ Every manifest identity, lineage, provenance, count, record, statistic, and
 file field is checked against durable authority. Changing related fields
 together must not make tampering pass.
 
-Vector validation keyset-scans live rows in pages of 256 and checks every
-embedding's dimensions and finite values. Validation independently enumerates
-each index with one overflow slot, rejects duplicate expected or indexed
-identities, and requires bidirectional equality with the canonical live-row ID
-set. Missing, stale, substituted, and duplicate members therefore fail even when
-counts match; an empty live table requires an empty index.
+Vector validation closes each index independently:
+
+| Canonical live rows                                                     | Required index              |
+| ----------------------------------------------------------------------- | --------------------------- |
+| Unique `Section.id` values with valid finite 768-dimensional embeddings | `Section.embedding_idx`     |
+| Unique `Chunk.id` values with valid finite 768-dimensional embeddings   | `Chunk.chunk_embedding_idx` |
+
+For each pair, validation first rejects duplicate identities in the canonical
+live rows, then keyset-scans those rows in pages of 256. It enumerates the
+corresponding index with one overflow slot, rejects invalid or duplicate indexed
+identities, and requires exact bidirectional set equality:
+
+```text
+canonical live identities ⊆ indexed identities
+indexed identities ⊆ canonical live identities
+```
+
+The rule is identity closure, not count equality. Missing, stale, substituted,
+and duplicate members fail even when counts match. Zero canonical live rows
+require zero indexed identities, so empty-set closure is validated rather than
+skipped. Passing one index never compensates for failure of the other.
 
 ## Resume and publication
 

@@ -74,12 +74,15 @@ pnpm cve:build --src .scratch/cve/cves --out data/packs/cve/pack.db --no-resume
 
 On resume the builder:
 
-1. **Validates the parameters hash.** The checkpoint records a hash of the inputs
-   that affect output (source path, `--year`, `--limit`, `--batch`, embedding
-   model, and canonical corpus provenance). The authoritative fetched-corpus
-   sidecar is revalidated before this comparison. If the current parameters do not match, the
-   builder **refuses to resume** and tells you to `--no-resume` — a checkpoint from
-   a different build can never corrupt a new one.
+1. **Revalidates canonical provenance and the parameters hash.** Before opening
+   staged output, the builder resolves the authoritative fetched-corpus sidecar
+   again, or requires complete manual commit/date/tag values when no sidecar
+   exists. Missing, malformed, conflicting, or changed provenance fails. The
+   checkpoint records a hash of every output-affecting input, including the
+   source path, `--year`, `--limit`, `--batch`, embedding model, and canonical
+   corpus provenance. If the current parameters do not match, the builder
+   **refuses to resume** and tells you to `--no-resume` — a checkpoint from a
+   different build can never corrupt a new one.
 2. **Discards the temp DB's WAL.** An abrupt crash can leave a torn trailing WAL
    record that LadybugDB refuses to replay. The checkpointed **main** DB (all
    batches up to the last sidecar) is intact, so the build reopens the recorded
@@ -134,7 +137,9 @@ sidecar against durable `UpdateApplication` rows before continuing. A sidecar
 that claims progress absent from LadybugDB is rejected.
 
 Resume also verifies the complete base snapshot, raw and semantic delta hashes,
-target version, and schema/adapter/extractor/tool versions. Changed inputs fail.
+target version, schema/adapter/extractor/tool versions, and the exact canonical
+corpus provenance shared by the base, staged database, and saved provenance
+digest. Changed inputs fail before update output is published.
 After staging is closed and completely validated, publication uses an atomic
 no-replace promotion; an existing destination is never overwritten.
 

@@ -16,8 +16,15 @@ export type { RunOptions } from './run.js';
 export { resolvePacksDir } from './config.js';
 export type { ResolvePacksDirOptions } from './config.js';
 
-export { pullPack, resolvePackBaseUrl } from './pack-pull.js';
+export { discoverLatestPackBaseUrl, pullPack, resolvePackBaseUrl } from './pack-pull.js';
 export type { PullPackOptions, PulledPack, PackReleaseIndex } from './pack-pull.js';
+export { DEFAULT_EXTERNAL_LIMITS, ExternalServiceError } from './external-transport.js';
+export type {
+  ExternalErrorCode,
+  ExternalFetch,
+  ExternalServiceLimits,
+  ExternalTransportOptions,
+} from './external-transport.js';
 
 export {
   verifyPackIndexSignature,

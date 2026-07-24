@@ -42,8 +42,13 @@ version.
 ## Pull a version
 
 Without `--tag`, `wikigr pack pull cve` discovers immutable releases for the
-requested pack and selects the highest version that contains its release index.
-Pass `--tag` to pin a release:
+requested pack. Before ranking, it excludes drafts, releases GitHub marks as
+prereleases, unsupported or SemVer-prerelease versions, non-ASCII tags, and
+releases missing the required index or signature assets. It ranks the remaining
+candidates by SemVer precedence, publication time, the original raw tag using
+ordinal ASCII-byte order, and numeric GitHub release ID. The tag tie-break is
+locale-independent and does not compare a normalized version. Pass `--tag` to
+pin a release and bypass automatic filtering and ranking:
 
 ```bash
 wikigr pack pull cve                        # latest discoverable immutable release
@@ -52,6 +57,10 @@ wikigr pack pull cve --tag cve-2025.06      # pinned, immutable version
 wikigr pack pull cve --tag cve-2025.06.1    # a specific rebuild
 wikigr pack pull cve --tag packs            # explicit legacy mutable release
 ```
+
+See the
+[pack release discovery reference](reference/pack-release-discovery.md#automatic-discovery)
+for the complete candidate and transport contract.
 
 After install, verify what you got:
 

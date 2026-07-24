@@ -98,7 +98,7 @@ count and SHA-256, verifies the assembled archive SHA-256, and then streams the
 archive into the atomic pack installer. See the
 [pack release discovery and download reference](../../docs/reference/pack-release-discovery.md)
 for tag formats, deterministic ordering, failure behavior, and transport
-boundaries.
+safety limits.
 
 ## Ingestion commands
 

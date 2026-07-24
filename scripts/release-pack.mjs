@@ -176,23 +176,30 @@ function buildProvenance() {
       ? manifest.provenance
       : {};
   const corpus = { ...(base.corpus ?? {}) };
-  if (corpusCommitArg !== undefined && corpusCommitArg !== corpus.commit) {
-    console.error('--corpus-commit must exactly match schema-v2 manifest provenance');
-    process.exit(2);
-  }
-  if (corpusDateArg !== undefined && corpusDateArg !== corpus.date) {
-    console.error('--corpus-date must exactly match schema-v2 manifest provenance');
-    process.exit(2);
-  }
-  if (corpusTagArg !== undefined && corpusTagArg !== corpus.tag) {
-    console.error('--corpus-tag must exactly match schema-v2 manifest provenance');
-    process.exit(2);
-  }
-  if (modelArg !== undefined && modelArg !== base.embedding?.model) {
-    console.error('--model must exactly match schema-v2 manifest provenance');
-    process.exit(2);
-  }
   const embedding = { ...(base.embedding ?? {}) };
+  if (legacyManifest) {
+    if (corpus.commit == null && corpusCommitArg !== undefined) corpus.commit = corpusCommitArg;
+    if (corpus.date == null && corpusDateArg !== undefined) corpus.date = corpusDateArg;
+    if (corpus.tag == null && corpusTagArg !== undefined) corpus.tag = corpusTagArg;
+    if (embedding.model == null && modelArg !== undefined) embedding.model = modelArg;
+  } else {
+    if (corpusCommitArg !== undefined && corpusCommitArg !== corpus.commit) {
+      console.error('--corpus-commit must exactly match schema-v2 manifest provenance');
+      process.exit(2);
+    }
+    if (corpusDateArg !== undefined && corpusDateArg !== corpus.date) {
+      console.error('--corpus-date must exactly match schema-v2 manifest provenance');
+      process.exit(2);
+    }
+    if (corpusTagArg !== undefined && corpusTagArg !== corpus.tag) {
+      console.error('--corpus-tag must exactly match schema-v2 manifest provenance');
+      process.exit(2);
+    }
+    if (modelArg !== undefined && modelArg !== embedding.model) {
+      console.error('--model must exactly match schema-v2 manifest provenance');
+      process.exit(2);
+    }
+  }
   if (model && !embedding.model) embedding.model = model;
   const build = { ...(base.build ?? {}) };
   const provenance = {};

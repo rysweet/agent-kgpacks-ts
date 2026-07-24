@@ -23,7 +23,7 @@ selection, signature, and integrity rules.
 - [Success output](#success-output)
 - [Programmatic API](#programmatic-api)
 - [Failure behavior](#failure-behavior)
-- [Current transport boundaries](#current-transport-boundaries)
+- [Transport safety and limits](#transport-safety-and-limits)
 
 ## Command
 
@@ -79,10 +79,13 @@ GET https://api.github.com/repos/<owner>/<repo>/releases?per_page=100&page=<n>
 It continues until GitHub returns fewer than 100 releases. A candidate must:
 
 - be a non-draft, non-prerelease GitHub release;
-- use a supported immutable tag for the requested pack;
-- resolve to a stable SemVer version;
-- advertise `<name>.pack-release.json`; and
-- advertise `<name>.pack-release.json.sig`, unless `--no-verify` is set.
+- have a raw ASCII tag in a supported immutable form for the requested pack;
+- resolve to a supported, strict, stable SemVer version with no prerelease
+  component;
+- provide a valid publication time and non-negative GitHub release ID;
+- advertise exactly one `<name>.pack-release.json`; and
+- advertise no more than one `<name>.pack-release.json.sig`, with exactly one
+  required unless `--no-verify` is set.
 
 Supported tags are:
 
@@ -90,23 +93,40 @@ Supported tags are:
 - `<name>-YYYY.MM[.N]`, such as `cve-2026.07` or `cve-2026.07.1`.
 
 Dated tags are normalized to SemVer for comparison. For example,
-`cve-2026.07` becomes `2026.7.0`. Tags whose normalized version contains a
-prerelease component are excluded.
+`cve-2026.07` becomes `2026.7.0`. Drafts, releases marked `prerelease` by
+GitHub, unsupported or malformed versions, version strings with a SemVer
+prerelease component, non-ASCII tags, and releases missing a required index or
+signature asset are filtered out before ranking. They cannot win selection and
+then cause fallback behavior.
 
 ### Selection order
 
 Candidates are compared in descending order by:
 
 1. SemVer precedence;
-2. the complete normalized version, using bytewise ordering; and
-3. the complete tag, using bytewise ordering.
+2. publication time;
+3. the original complete tag, using unsigned ordinal ASCII-byte ordering; and
+4. numeric GitHub release ID.
 
-The second comparison makes build metadata deterministic even though SemVer
-precedence ignores it. The result does not depend on GitHub response order.
-Publication time and GitHub release ID are not selection inputs.
+The tag comparison reads each raw tag byte from left to right and then compares
+length when one tag is a prefix. It does not compare normalized versions and
+does not use `localeCompare`, host collation, locale settings, or Unicode
+normalization. Because non-ASCII tags are excluded before ranking, character
+code and UTF-8 byte order are identical. Release IDs are compared as unsigned
+decimal integers without converting them to JavaScript numbers. Candidates
+identical on all four fields are rejected as ambiguous.
 
-The selected release is verified and downloaded once. If its advertised
-signature or content is invalid, the command fails; it does not try an older
+This order makes equal-precedence choices, including versions that differ only
+by SemVer build metadata or dated-versus-v tag spelling, deterministic across
+hosts and GitHub response order.
+
+The selected release is the only candidate attempted. A retryable request may be
+repeated within the limits below, but an invalid signature or content fails the
+command; it does not try an older release.
+
+These filtering and ranking rules apply only when neither `--tag` nor
+`--base-url` is supplied. An explicit source remains pinned exactly as requested,
+bypasses discovery filtering and ranking, and never falls back to another
 release.
 
 ## Signature policy
@@ -135,19 +155,24 @@ format, publishing workflow, and manual verification example.
 After signature policy succeeds, the CLI parses the release index and requires:
 
 - an object whose `name` exactly matches `<name>`;
-- an overall checksum string;
-- at least one part;
-- a filename containing only letters, digits, `.`, `_`, or `-`, plus a checksum
-  string and numeric byte count for every part.
+- format `tar.gz-multipart-v1` and a strict SemVer `version`;
+- lowercase 64-character hexadecimal part and overall SHA-256 values;
+- a positive, safe-integer `totalBytes` no larger than 32 GiB;
+- between 1 and 10,000 parts;
+- exact, unique, sequential filenames such as `cve.tar.gz.000`,
+  `cve.tar.gz.001`, and `cve.tar.gz.002`;
+- a positive, safe-integer byte count for every part; and
+- a `totalBytes` value exactly equal to the sum of the declared part sizes.
 
-The declared checksums and byte counts are compared with the downloaded bytes.
-The index's `version`, `format`, and `totalBytes` fields are not used to select
-the release or limit the download. `totalBytes` is copied to the success output.
+For an automatically discovered release, the signed index version must equal
+the version derived from the selected tag. `totalBytes` limits the compressed
+download and is copied to the success output.
 
 Parts are downloaded sequentially to a temporary directory. Each download is
-streamed to disk while its byte count, part SHA-256, and the assembled archive
-SHA-256 are calculated. Installation starts only after every declared part and
-the overall archive match the signed index.
+streamed to a distinct file while its byte count and SHA-256 are calculated.
+After all parts match, the CLI rereads the ordered files and calculates the
+assembled archive SHA-256. Installation starts only after every part and the
+assembled archive match the signed index.
 
 The verified part files are concatenated as a stream into the pack installer.
 The installer validates the archive and commits the completed pack atomically.
@@ -198,22 +223,27 @@ const result = await pullPack({
 console.log(result.path);
 ```
 
-`PullPackOptions` adds test and embedding seams beyond the CLI flags:
+`PullPackOptions` adds test and transport seams beyond the CLI flags:
 
-| Option             | Default               | Purpose                                            |
-| ------------------ | --------------------- | -------------------------------------------------- |
-| `name`             | required              | Requested pack name                                |
-| `packsDir`         | required              | Installation root                                  |
-| `repo`             | project repository    | Discovery repository                               |
-| `tag`              | omitted               | Explicit release tag                               |
-| `baseUrl`          | omitted               | Explicit asset-directory URL                       |
-| `tmpRoot`          | operating-system temp | Scratch-download root                              |
-| `requireSignature` | `false`               | Require a trusted signature for an explicit source |
-| `noVerify`         | `false`               | Skip signature verification                        |
-| `trustedKeys`      | committed key set     | Override trusted Ed25519 keys                      |
-| `log`              | stderr                | Receive human-readable signature status            |
+| Option             | Default               | Purpose                                                |
+| ------------------ | --------------------- | ------------------------------------------------------ |
+| `name`             | required              | Requested pack name                                    |
+| `packsDir`         | required              | Installation root                                      |
+| `repo`             | project repository    | Discovery repository                                   |
+| `tag`              | omitted               | Explicit release tag                                   |
+| `baseUrl`          | omitted               | Explicit asset-directory URL                           |
+| `tmpRoot`          | operating-system temp | Scratch-download root                                  |
+| `requireSignature` | `false`               | Require a trusted signature for an explicit source     |
+| `noVerify`         | `false`               | Skip signature verification                            |
+| `trustedKeys`      | committed key set     | Override trusted Ed25519 keys                          |
+| `log`              | stderr                | Receive human-readable signature status                |
+| `signal`           | omitted               | Cancel discovery, retries, downloads, and verification |
+| `externalLimits`   | bounded defaults      | Override transport limits for constrained environments |
+| `fetch`            | global `fetch`        | Inject a fetch implementation                          |
 
-The programmatic API does not accept an `AbortSignal`.
+The CLI uses the bounded defaults below. Programmatic callers can lower or
+otherwise override individual limits with `externalLimits`; invalid limits fail
+before a request is made.
 
 ## Failure behavior
 
@@ -229,29 +259,59 @@ causes include:
 - a failed part request; or
 - a size or checksum mismatch.
 
-The implementation exposes `PackInstallError`, not separate external-service
-error codes. The CLI maps that error to exit code `5`.
+Transport and trust failures are `PackInstallError` instances with a stable
+`code`, such as `cancelled`, `timeout`, `http`, `redirect`, `origin`,
+`response-too-large`, `ambiguous`, `trust`, or `integrity`. The CLI maps them to
+exit code `5`.
 
-## Current transport boundaries
+## Transport safety and limits
 
-The current implementation relies on the Node.js `fetch` redirect behavior and
-does not add an origin allowlist, per-redirect validation, retries, request
-timeouts, or cancellation. Discovery has no page or total-release limit. The
-puller has no limits on index size, signature size, part count, or compressed
-download bytes; the 32 GiB installer limit applies only while extracting the
-assembled archive.
+Every request uses manual redirect handling. The CLI rejects credentials in
+URLs, validates the initial URL and every redirect target, and permits at most
+five redirects.
 
-`--base-url` intentionally accepts HTTP URLs for local mirrors. Release entries
-with missing or unexpected fields are skipped rather than causing the entire
-discovery response to fail. Invalid top-level JSON or a non-array response does
-fail discovery.
+| Source                   | Allowed origins                                                                                                   |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| GitHub release discovery | `https://api.github.com`                                                                                          |
+| GitHub release assets    | `https://github.com`, `https://objects.githubusercontent.com`, and `https://release-assets.githubusercontent.com` |
+| Explicit `--base-url`    | The exact supplied origin; same-origin redirects only                                                             |
 
-Errors may include the requested URL and the underlying network error. Do not
-put credentials or other secrets in `--base-url`.
+`--base-url` intentionally accepts HTTP for local mirrors. It does not permit a
+redirect to a different origin. GitHub discovery also verifies that every
+advertised asset URL belongs to the requested repository, tag, and asset name.
 
-Callers that require HTTPS-only sources, restricted-address rejection,
-per-redirect origin checks, bounded retries, or total transfer limits must
-enforce those controls outside this command.
+The default bounds are:
+
+| Limit                          | Default             |
+| ------------------------------ | ------------------- |
+| Per-request timeout            | 30 seconds          |
+| Complete discovery deadline    | 2 minutes           |
+| Pull transport deadline        | 2 hours             |
+| Discovery pages                | 10 (1,000 releases) |
+| One discovery response page    | 8 MiB               |
+| Release index                  | 8 MiB               |
+| Detached signature             | 64 KiB              |
+| Compressed multipart archive   | 32 GiB              |
+| Parts                          | 10,000              |
+| Redirects per request          | 5                   |
+| Attempts per retryable request | 3                   |
+
+The extraction-time 32 GiB archive limit is enforced separately by the pack
+installer.
+
+Transport failures and HTTP `408`, `429`, `500`, `502`, `503`, and `504`
+responses are retryable. A GitHub `403` with `X-RateLimit-Remaining: 0` is also
+retryable. Other HTTP responses, timeouts, caller cancellation, trust failures,
+and integrity failures are not retried. Retry delays use bounded exponential
+backoff or `Retry-After`, capped at 30 seconds and by the operation deadline.
+
+Discovery entries with missing candidate metadata are skipped. Invalid
+top-level JSON, a non-array response, untrusted asset URLs, duplicate required
+assets, or a full final page at the pagination limit fail closed.
+
+External-service errors omit requested URLs, redirect targets, and nested
+network-error text so signed query parameters and other URL details are not
+copied into logs.
 
 ## Related documentation
 

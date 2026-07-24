@@ -8,7 +8,7 @@
 // refuse-to-resume check when the recorded params do not match the current run.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -86,6 +86,11 @@ describe('clearCheckpoint', () => {
     await clearCheckpoint(out);
     expect(existsSync(checkpointPath(out))).toBe(false);
     await expect(clearCheckpoint(out)).resolves.toBeUndefined();
+  });
+
+  it('propagates cleanup failures so a completed build cannot report success', async () => {
+    mkdirSync(checkpointPath(out));
+    await expect(clearCheckpoint(out)).rejects.toThrow();
   });
 });
 
