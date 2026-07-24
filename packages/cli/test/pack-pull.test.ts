@@ -35,6 +35,7 @@ const releaseScript = join(repoRoot, 'scripts', 'release-pack.mjs');
 const PACK_NAME = 'world-history';
 interface MutablePayloadManifest {
   version: string;
+  schemaVersion: unknown;
   files: Array<{ path: string; size: number; sha256: string }>;
 }
 let dbBytes: Buffer;
@@ -203,6 +204,42 @@ describe('pack pull (real release artifacts → real streaming install)', () => 
     }
   });
 
+  it('rejects inconsistent aggregate byte accounting before downloading parts', async () => {
+    const invalid = mkdtempSync(join(tmpdir(), 'kgpacks-pull-accounting-'));
+    const index = JSON.parse(
+      readFileSync(join(releaseDir, `${PACK_NAME}.pack-release.json`), 'utf8'),
+    );
+    index.totalBytes++;
+    writeFileSync(join(invalid, `${PACK_NAME}.pack-release.json`), JSON.stringify(index));
+    const requested: string[] = [];
+    const invalidServer = createServer((req, res) => {
+      const name = (req.url ?? '/').replace(/^\/+/, '').split('?')[0];
+      requested.push(name);
+      createReadStream(join(invalid, name))
+        .on('error', () => {
+          res.statusCode = 404;
+          res.end();
+        })
+        .pipe(res);
+    });
+    await new Promise<void>((resolve) => invalidServer.listen(0, '127.0.0.1', resolve));
+    const addr = invalidServer.address();
+    const invalidUrl = addr && typeof addr === 'object' ? `http://127.0.0.1:${addr.port}` : '';
+    try {
+      await expect(
+        pullPack({
+          name: PACK_NAME,
+          packsDir: join(base, 'install-accounting'),
+          baseUrl: invalidUrl,
+        }),
+      ).rejects.toThrow(/byte accounting mismatch/i);
+      expect(requested).not.toContain(index.parts[0].file);
+    } finally {
+      invalidServer.close();
+      rmSync(invalid, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     [
       'checksum',
@@ -298,6 +335,11 @@ describe('pack pull (real release artifacts → real streaming install)', () => 
       'declaration',
       (manifest: MutablePayloadManifest) => (manifest.files = []),
       /must declare exactly pack\.db/i,
+    ],
+    [
+      'unsupported schema',
+      (manifest: MutablePayloadManifest) => (manifest.schemaVersion = '3'),
+      /unsupported manifest schema/i,
     ],
   ])(
     'rejects a schema-v2 pack.db %s mismatch and removes the installed destination',

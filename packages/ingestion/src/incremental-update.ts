@@ -1771,36 +1771,74 @@ export async function validateVectorIndexMembership(
   const batchSize = 1024;
   const mismatch = `${index} membership does not match live ${table} rows`;
   let afterId = '';
-  const expectedIds = new Set<string>();
+  let firstPage = true;
+  const expectedIds: string[] = [];
+  const uniqueIds = new Set<string>();
   let queryVector: number[] | undefined;
   while (true) {
+    const scan =
+      `MATCH (node:${table}) ${firstPage ? '' : 'WHERE node.id > $afterId '}` +
+      `RETURN node.id AS id, node.embedding AS embedding ORDER BY id LIMIT ${batchSize}`;
     const rows = await connection.run<{ id: string; embedding: unknown }>(
-      `MATCH (node:${table}) WHERE node.id > $afterId ` +
-        `RETURN node.id AS id, node.embedding AS embedding ORDER BY id LIMIT ${batchSize}`,
-      { afterId },
+      scan,
+      firstPage ? undefined : { afterId },
     );
     if (rows.length === 0) break;
+    firstPage = false;
     afterId = rows[rows.length - 1].id;
     for (const row of rows) {
-      if (!isFiniteEmbedding(row.embedding)) throw new Error(mismatch);
+      if (typeof row.id !== 'string' || !isFiniteEmbedding(row.embedding)) {
+        throw new Error(mismatch);
+      }
       queryVector ??= asNumberArray(row.embedding);
-      if (expectedIds.has(row.id)) throw new Error(mismatch);
-      expectedIds.add(row.id);
+      if (uniqueIds.has(row.id)) throw new Error(mismatch);
+      uniqueIds.add(row.id);
+      expectedIds.push(row.id);
     }
   }
   queryVector ??= Array<number>(768).fill(0);
-  const expectedCount = expectedIds.size;
+  const expectedCount = expectedIds.length;
   const indexed = await connection.run<{ id: unknown }>(
-    `CALL QUERY_VECTOR_INDEX('${table}', '${index}', $queryVector, $requested) ` +
+    `CALL QUERY_VECTOR_INDEX(${JSON.stringify(table)}, ${JSON.stringify(index)}, ` +
+      '$queryVector, $requested) ' +
       'RETURN node.id AS id',
     { queryVector, requested: expectedCount + 1 },
   );
-  const exactMembership =
-    indexed.length === expectedCount &&
-    indexed.every((row) => typeof row.id === 'string' && expectedIds.delete(row.id)) &&
-    expectedIds.size === 0;
-  if (!exactMembership) {
+  const expected = new Set(expectedIds);
+  const seen = new Set<string>();
+  if (
+    !indexed.every(({ id }) => {
+      if (typeof id !== 'string' || !expected.has(id) || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    })
+  ) {
     throw new Error(mismatch);
+  }
+  if (expectedCount <= 1 && seen.size !== expectedCount) throw new Error(mismatch);
+
+  await connection.run('CALL enable_internal_catalog=true');
+  try {
+    const tables = await connection.run<{ id: number | bigint; name: string; type: string }>(
+      'CALL SHOW_TABLES() RETURN id, name, type',
+    );
+    const nodeTable = tables.find((entry) => entry.name === table && entry.type === 'NODE');
+    if (!nodeTable || !/^\d+$/.test(String(nodeTable.id)) || !/^[A-Za-z0-9_]+$/.test(index)) {
+      throw new Error(mismatch);
+    }
+    const lowerGraph = `_${String(nodeTable.id)}_${index}_LOWER`;
+    if (!tables.some((entry) => entry.name === lowerGraph && entry.type === 'REL')) {
+      throw new Error(mismatch);
+    }
+    const rows = await connection.run<{ count: number | bigint }>(
+      `MATCH (source:${table})-[r:${lowerGraph}]->() ` +
+        'RETURN count(DISTINCT source.id) AS count',
+    );
+    const physicalMembers = Number(rows[0]?.count ?? -1);
+    const expectedPhysicalMembers = expectedCount <= 1 ? 0 : expectedCount;
+    if (physicalMembers !== expectedPhysicalMembers) throw new Error(mismatch);
+  } finally {
+    await connection.run('CALL enable_internal_catalog=false');
   }
 }
 

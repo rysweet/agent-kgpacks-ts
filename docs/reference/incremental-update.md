@@ -9,13 +9,12 @@ doc_type: reference
 
 # Incremental knowledge-pack update contract
 
-This reference defines the schema-v2 APIs and CLI semantics. Unless a section
-is explicitly marked as implementation pending, it describes implemented
-behavior.
+This reference defines the implemented schema-v2 APIs and CLI semantics.
 
 ## Contents
 
 - [CLI contract](#cli-contract)
+- [Commander version normalization](#commander-version-normalization)
 - [Public TypeScript API](#public-typescript-api)
 - [Delta grammar](#delta-grammar)
 - [Classification and identity](#classification-and-identity)
@@ -62,6 +61,46 @@ Commander validates mode shape before calling the package API. `--resume`
 cannot be combined with `--base`, `--delta`, `--output`, `--version`, or
 `--work-dir`; without `--resume`, all four required fresh flags must be present.
 Global options such as `--packs-dir` do not become request fields.
+
+## Commander version normalization
+
+Commander reserves the root `--version` option. Before parsing, `buildProgram()`
+copies the supplied argv and rewrites update-command `--version <value>` or
+`--version=<value>` to the hidden `--target-version` spelling. The public CLI
+continues to expose `--version`; callers do not use `--target-version`.
+
+Normalization begins only after locating top-level `update` or `pack update`.
+It recognizes `--packs-dir <dir>` and `--packs-dir=<dir>` before `update`,
+including between `pack` and `update`:
+
+```bash
+wikigr --packs-dir /srv/kgpacks update \
+  --base /srv/kgpacks/cve-2026.06 \
+  --delta .scratch/cve/delta.ndjson \
+  --output /srv/kgpacks/cve-2026.07 \
+  --version=2026.7.0
+
+wikigr pack --packs-dir=/srv/kgpacks update \
+  --base /srv/kgpacks/cve-2026.06 \
+  --delta .scratch/cve/delta.ndjson \
+  --output /srv/kgpacks/cve-2026.07 \
+  --version 2026.7.0
+```
+
+The command offset follows Commander's parse mode:
+
+| Parse mode                                            | Offset |
+| ----------------------------------------------------- | -----: |
+| `{ from: "user" }`                                    |      0 |
+| `{ from: "node" }`                                    |      2 |
+| Omitted/default `from`                                |      2 |
+| `{ from: "electron" }`, packaged application          |      1 |
+| `{ from: "electron" }`, `process.defaultApp === true` |      2 |
+
+If `argv` itself is omitted, `buildProgram().parseAsync()` reads `process.argv`
+with Node offset `2`, regardless of the supplied parse options. It does not
+mutate a caller-owned array. Root `wikigr --version`, options on unrelated
+commands, and `update` appearing only as an argument remain unchanged.
 
 ## Public TypeScript API
 
@@ -283,10 +322,11 @@ exactly these fields:
 
 ```json
 {
-  "adapterVersion": "cve-adapter@2",
+  "adapterVersion": "cve-record-5.1-v1",
   "baseContentDigest": "71d3afc5a14210a66fa538af86f5a03db760f62d64b1bbf5a9f6f9f01fc01d8d",
   "deltaId": "f10f0bf4a4b7c1014544cb9a386f887812b10f1712ba8f475f64608a411c9ec6",
-  "extractorVersion": "cve-adapter@2",
+  "embeddingModel": "Xenova/bge-base-en-v1.5",
+  "extractorVersion": "cve-record-5.1-v1",
   "packId": "cve",
   "schemaVersion": "2",
   "toolVersion": "agent-kgpacks-ts@0.1.0",
@@ -496,10 +536,10 @@ A schema-v2 incremental output has this shape:
   "packId": "cve",
   "version": "2026.7.0",
   "schemaVersion": "2",
-  "adapterVersion": "cve-adapter@2",
-  "extractorVersion": "cve-adapter@2",
+  "adapterVersion": "cve-record-5.1-v1",
+  "extractorVersion": "cve-record-5.1-v1",
   "toolVersion": "agent-kgpacks-ts@0.1.0",
-  "buildId": "7a44a7f870d799ad2fbd2d6ed5675d2651319bdea3f96af95db4c7f095712c1d",
+  "buildId": "d97b24d9023609341e5c226e5915c07e5747d09c3d23c59d7346aa429dd73ef5",
   "provenance": {
     "corpus": {
       "name": "cvelistV5",
@@ -651,11 +691,20 @@ file field is checked against durable authority. Changing related fields
 together must not make tampering pass.
 
 Vector validation keyset-scans every live row in pages of 1,024 and first checks
-each embedding's dimensions, structure, and finite values. The resulting live
-IDs are authoritative. Validation then requests the complete index result plus
-one sentinel slot and compares returned IDs as a multiset: cardinality must
-match, every live ID must occur exactly once, and null, duplicate, missing,
-extra, or stale IDs fail validation.
+that each embedding is finite and exactly 768-dimensional. The resulting live
+IDs are authoritative. Validation first requests `liveCount + 1` index results
+and compares the returned multiset without relying on result order. Because HNSW
+search is approximate and may return fewer than the requested cardinality for a
+valid index, a unique subset of the authoritative live-ID universe is not treated
+as missing membership. A null, duplicate, extra, or stale ID still fails
+immediately. Validation then enables LadybugDB's internal catalog for the scope
+of one query and counts distinct visible source nodes in the index's physical
+lower HNSW graph. Every indexed node has a lower-graph edge once the table has at
+least two rows, so this count must equal the live-row count. Empty and single-row
+tables are handled explicitly; the single row must be returned by the unfiltered
+index query because its valid HNSW graph has no edge. This avoids both a bounded
+ANN probe and filtered-search shortcuts that can seed projected rows without
+traversing the physical index.
 
 The two indexes are validated independently, so a valid section index cannot
 mask an invalid chunk index or vice versa. Empty `Section` or `Chunk` tables

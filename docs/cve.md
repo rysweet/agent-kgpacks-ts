@@ -1,3 +1,12 @@
+---
+title: CVE knowledge pack
+description: Build, incrementally update, query, and publish a CVE knowledge pack
+last_updated: 2026-07-24
+review_schedule: as-needed
+owner: kgpacks-maintainers
+doc_type: howto
+---
+
 # CVE knowledge pack
 
 Builds a knowledge pack from the **MITRE / CVE Program** vulnerability corpus
@@ -5,6 +14,16 @@ Builds a knowledge pack from the **MITRE / CVE Program** vulnerability corpus
 CVE Record Format 5.1 — the authoritative feed published by the MITRE-run CVE
 Program). The result is queryable through the exact same read path as every other
 pack (`@kgpacks/query`, `wikigr query`, the backend, the MCP server).
+
+## Contents
+
+- [Why this is a different ingestion path](#why-this-is-a-different-ingestion-path)
+- [Get the corpus](#get-the-corpus)
+- [Download the prebuilt pack](#download-the-prebuilt-pack-no-build-required)
+- [Build](#build)
+- [Apply an incremental CVE delta](#apply-an-incremental-cve-delta)
+- [Query](#query)
+- [Publish a pack as a release artifact](#publish-a-pack-as-a-release-artifact)
 
 ## Why this is a different ingestion path
 
@@ -39,7 +58,8 @@ the compiled ingestion export.
 
 Entities dedupe by name in the loader, so shared CWEs, vendors and products knit
 the per-CVE articles into one cross-referenced vulnerability graph. Rejected
-records and records with no English description are skipped.
+records and records with no usable description are skipped. The adapter prefers
+the first English description and otherwise uses the first description.
 
 For product selection, a `product` or `packageName` is valid only when it is a
 string whose trimmed value is non-empty and is not the case-insensitive
@@ -62,12 +82,15 @@ The adapter truncates by Unicode code point, not UTF-16 code unit:
 
 | Field                                                     |             Limit | Suffix                                       |
 | --------------------------------------------------------- | ----------------: | -------------------------------------------- |
-| English-description summary in section content            | 1,500 code points | `...` only when the source exceeds the limit |
+| Selected-description summary in section content           | 1,500 code points | `...` only when the source exceeds the limit |
 | Vulnerability entity description when the title is absent |   200 code points | none                                         |
 
 Astral characters such as `😀` count as one code point, so truncation never
 splits a surrogate pair. Grapheme clusters are not preserved and text is not
 Unicode-normalized.
+
+See the [CVE adapter API reference](reference/cve-adapter.md) for exact input,
+return, fallback, and truncation behavior with executable examples.
 
 ## Get the corpus
 

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_PACK_REPO, DEFAULT_PACK_TAG } from '../src/constants.js';
@@ -305,12 +307,15 @@ describe('latest immutable pack discovery', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it('keeps resolvePackBaseUrl static and defaults an omitted tag', () => {
+  it('keeps resolution static, defaults an omitted tag, and preserves an explicit tag exactly', () => {
     expect(resolvePackBaseUrl({})).toBe(
       `https://github.com/${DEFAULT_PACK_REPO}/releases/download/${DEFAULT_PACK_TAG}`,
     );
     expect(resolvePackBaseUrl({ repo: 'owner/repo' })).toBe(
       `https://github.com/owner/repo/releases/download/${DEFAULT_PACK_TAG}`,
+    );
+    expect(resolvePackBaseUrl({ repo: 'owner/repo', tag: 'cve-v2.0.0+build.7' })).toBe(
+      'https://github.com/owner/repo/releases/download/cve-v2.0.0+build.7',
     );
     expect(resolvePackBaseUrl({ baseUrl: 'https://packs.example.test///' })).toBe(
       'https://packs.example.test',
@@ -354,5 +359,50 @@ describe('latest immutable pack discovery', () => {
       }),
     ).rejects.toThrow(/cannot fetch optional release asset.*HTTP 403/i);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('bounds the release index before parsing it', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response(Buffer.alloc(1024 * 1024 + 1), { status: 200 })),
+    );
+
+    await expect(
+      pullPack({
+        name: 'cve',
+        packsDir: '/unused',
+        baseUrl: 'https://packs.example.test',
+      }),
+    ).rejects.toThrow(/pack index.*byte limit/i);
+  });
+
+  it('stops a part download as soon as it exceeds its declared size', async () => {
+    const partFile = 'cve.tar.gz.000';
+    const oneByteHash = createHash('sha256').update('a').digest('hex');
+    const index = JSON.stringify({
+      name: 'cve',
+      version: '1.0.0',
+      format: 'tar.gz-multipart-v1',
+      sha256: oneByteHash,
+      totalBytes: 1,
+      parts: [{ file: partFile, bytes: 1, sha256: oneByteHash }],
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((input: string | URL | Request) => {
+        const url = String(input);
+        if (url.endsWith('.sig')) return Promise.resolve(new Response('', { status: 404 }));
+        if (url.endsWith(partFile)) return Promise.resolve(new Response('ab', { status: 200 }));
+        return Promise.resolve(new Response(index, { status: 200 }));
+      }),
+    );
+
+    await expect(
+      pullPack({
+        name: 'cve',
+        packsDir: '/unused',
+        baseUrl: 'https://packs.example.test',
+      }),
+    ).rejects.toThrow(/exceeds its declared 1-byte size/i);
   });
 });

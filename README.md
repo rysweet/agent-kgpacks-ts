@@ -113,6 +113,8 @@ pnpm --filter @kgpacks/frontend dev
 - [docs/reference/incremental-update.md](docs/reference/incremental-update.md) —
   schema-v2 update API, delta grammar, durable metadata, validation, and
   atomic publication contract.
+- [docs/reference/cve-adapter.md](docs/reference/cve-adapter.md) — exact CVE
+  record mapping, affected-product fallback, and Unicode truncation behavior.
 - [docs/reference/pack-management.md](docs/reference/pack-management.md) —
   pack pull source resolution, stable release eligibility, integrity
   checks, manifest schema dispatch, and programmatic API behavior.

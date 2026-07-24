@@ -23,9 +23,9 @@ import {
   compareVersions,
   installPackFromStream,
   isValidSemver,
-  loadManifestFromDir,
   packVersionFromReleaseTag,
 } from '@kgpacks/packs';
+import type { PackManifest } from '@kgpacks/packs';
 
 import {
   DEFAULT_PACK_REPO,
@@ -93,11 +93,16 @@ export interface PulledPack {
 }
 
 const PART_FILE_RE = /^[A-Za-z0-9._-]+$/;
+const SHA256_RE = /^[a-f0-9]{64}$/;
+const PACK_RELEASE_FORMAT = 'tar.gz-multipart-v1';
 const DATED_RELEASE_VERSION_RE = /^\d{4}\.\d{2}(?:\.\d+)?$/;
 const HTTP_TIMEOUT_MS = 30_000;
 const HTTP_MAX_RETRIES = 2;
 const HTTP_RETRY_BASE_DELAY_MS = 250;
 const HTTP_MAX_RETRY_DELAY_MS = 30_000;
+const MAX_INDEX_BYTES = 1024 * 1024;
+const MAX_SIGNATURE_BYTES = 4 * 1024;
+const MAX_ARCHIVE_BYTES = 32 * 1024 * 1024 * 1024;
 const RETRYABLE_HTTP_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 
 /** Resolves the base URL (directory) that hosts the index and part assets. */
@@ -257,8 +262,13 @@ async function fetchIndexBytes(url: string): Promise<Buffer> {
           );
         }
         try {
-          return Buffer.from(await request.response.arrayBuffer());
+          return await readBoundedResponse(
+            request,
+            MAX_INDEX_BYTES,
+            `pack index at ${url} exceeds the ${MAX_INDEX_BYTES}-byte limit`,
+          );
         } catch (error) {
+          if (error instanceof PackInstallError) throw error;
           throw new TransientHttpError(`cannot read pack index at ${url}: ${errorMessage(error)}`);
         }
       } finally {
@@ -288,8 +298,15 @@ async function fetchOptionalText(url: string): Promise<string | null> {
           );
         }
         try {
-          return await request.response.text();
+          return (
+            await readBoundedResponse(
+              request,
+              MAX_SIGNATURE_BYTES,
+              `release signature at ${url} exceeds the ${MAX_SIGNATURE_BYTES}-byte limit`,
+            )
+          ).toString('utf8');
         } catch (error) {
+          if (error instanceof PackInstallError) throw error;
           throw new TransientHttpError(
             `cannot read optional release asset ${url}: ${errorMessage(error)}`,
           );
@@ -335,17 +352,33 @@ function assertIndex(value: unknown, expectedName: string, url: string): PackRel
       `pack index name mismatch: requested ${JSON.stringify(expectedName)}, index declares ${JSON.stringify(idx.name)}`,
     );
   }
-  if (typeof idx.sha256 !== 'string' || !Array.isArray(idx.parts) || idx.parts.length === 0) {
+  if (
+    typeof idx.version !== 'string' ||
+    !isValidSemver(idx.version) ||
+    idx.format !== PACK_RELEASE_FORMAT ||
+    typeof idx.sha256 !== 'string' ||
+    !SHA256_RE.test(idx.sha256) ||
+    !Number.isSafeInteger(idx.totalBytes) ||
+    (idx.totalBytes ?? 0) <= 0 ||
+    (idx.totalBytes ?? 0) > MAX_ARCHIVE_BYTES ||
+    !Array.isArray(idx.parts) ||
+    idx.parts.length === 0
+  ) {
     throw new PackInstallError(`pack index at ${url} has no parts or overall checksum`);
   }
   const partFiles = new Set<string>();
+  let accountedBytes = 0;
   for (const part of idx.parts) {
     if (
       !part ||
       typeof part.file !== 'string' ||
       typeof part.sha256 !== 'string' ||
-      typeof part.bytes !== 'number' ||
-      !PART_FILE_RE.test(part.file)
+      !SHA256_RE.test(part.sha256) ||
+      !Number.isSafeInteger(part.bytes) ||
+      part.bytes <= 0 ||
+      !PART_FILE_RE.test(part.file) ||
+      part.file === '.' ||
+      part.file === '..'
     ) {
       throw new PackInstallError(`pack index at ${url} has an invalid part entry`);
     }
@@ -353,11 +386,32 @@ function assertIndex(value: unknown, expectedName: string, url: string): PackRel
       throw new PackInstallError(`pack index at ${url} has duplicate part filename ${part.file}`);
     }
     partFiles.add(part.file);
+    accountedBytes += part.bytes;
+    if (!Number.isSafeInteger(accountedBytes)) {
+      throw new PackInstallError(`pack index at ${url} has invalid aggregate byte accounting`);
+    }
+  }
+  if (accountedBytes !== idx.totalBytes) {
+    throw new PackInstallError(
+      `pack index at ${url} byte accounting mismatch: parts total ${accountedBytes}, index declares ${idx.totalBytes}`,
+    );
+  }
+  if (
+    idx.partSize !== undefined &&
+    (!Number.isSafeInteger(idx.partSize) ||
+      idx.partSize <= 0 ||
+      idx.parts.some(
+        (part, position) =>
+          (position < idx.parts!.length - 1 && part.bytes !== idx.partSize) ||
+          (position === idx.parts!.length - 1 && part.bytes > idx.partSize!),
+      ))
+  ) {
+    throw new PackInstallError(`pack index at ${url} has invalid part-size accounting`);
   }
   return idx as PackReleaseIndex;
 }
 
-async function downloadPart(url: string, dest: string): Promise<void> {
+async function downloadPart(url: string, dest: string, expectedBytes: number): Promise<void> {
   try {
     return await retryHttp(async () => {
       const request = await fetchOnce(url);
@@ -367,9 +421,22 @@ async function downloadPart(url: string, dest: string): Promise<void> {
           await res.body?.cancel().catch(() => undefined);
           throw new PackInstallError(`failed to download part ${url} (HTTP ${res.status})`);
         }
+        const declaredLength = Number(res.headers.get('content-length'));
+        if (Number.isFinite(declaredLength) && declaredLength > expectedBytes) {
+          await res.body.cancel().catch(() => undefined);
+          throw new PackInstallError(`part ${url} exceeds its declared ${expectedBytes}-byte size`);
+        }
+        let downloadedBytes = 0;
         const activity = new Transform({
           transform(chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback) {
             request.refreshTimeout();
+            downloadedBytes += chunk.length;
+            if (downloadedBytes > expectedBytes) {
+              callback(
+                new PackInstallError(`part ${url} exceeds its declared ${expectedBytes}-byte size`),
+              );
+              return;
+            }
             callback(null, chunk);
           },
         });
@@ -381,6 +448,7 @@ async function downloadPart(url: string, dest: string): Promise<void> {
           );
         } catch (error) {
           rmSync(dest, { force: true });
+          if (error instanceof PackInstallError) throw error;
           throw new TransientHttpError(`download stream failed for ${url}: ${errorMessage(error)}`);
         }
       } finally {
@@ -407,6 +475,30 @@ interface TimedHttpResponse {
   response: Response;
   refreshTimeout(): void;
   finish(): void;
+}
+
+async function readBoundedResponse(
+  request: TimedHttpResponse,
+  maxBytes: number,
+  limitMessage: string,
+): Promise<Buffer> {
+  const body = request.response.body;
+  if (!body) return Buffer.alloc(0);
+  const declaredLength = Number(request.response.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    await body.cancel().catch(() => undefined);
+    throw new PackInstallError(limitMessage);
+  }
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  for await (const chunk of Readable.fromWeb(body as Parameters<typeof Readable.fromWeb>[0])) {
+    request.refreshTimeout();
+    const buffer = chunk as Buffer;
+    bytes += buffer.length;
+    if (bytes > maxBytes) throw new PackInstallError(limitMessage);
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks, bytes);
 }
 
 async function fetchOnce(url: string, init: RequestInit = {}): Promise<TimedHttpResponse> {
@@ -552,9 +644,25 @@ async function pumpVerifiedParts(
   }
 }
 
-async function verifyInstalledPayloads(packDir: string): Promise<void> {
-  const manifest = loadManifestFromDir(packDir);
-  if (manifest.schemaVersion !== '2') return;
+async function validateStagedPack(
+  packDir: string,
+  manifest: PackManifest,
+  index: PackReleaseIndex,
+): Promise<void> {
+  if (manifest.name !== index.name || manifest.version !== index.version) {
+    throw new PackInstallError(
+      `pack manifest identity ${manifest.name}@${manifest.version} does not match release index ${index.name}@${index.version}`,
+    );
+  }
+  const schemaVersion = Object.hasOwn(manifest, 'schemaVersion')
+    ? manifest.schemaVersion
+    : undefined;
+  if (schemaVersion === undefined || schemaVersion === '1') return;
+  if (schemaVersion !== '2') {
+    throw new PackInstallError(
+      `unsupported manifest schema ${JSON.stringify(schemaVersion)} in pulled pack`,
+    );
+  }
   const files = manifest.files;
   if (
     !Array.isArray(files) ||
@@ -652,14 +760,16 @@ export async function pullPack(opts: PullPackOptions): Promise<PulledPack> {
     const partPaths: string[] = [];
     for (const part of index.parts) {
       const dest = join(work, part.file);
-      await downloadPart(`${base}/${part.file}`, dest);
+      await downloadPart(`${base}/${part.file}`, dest, part.bytes);
       partPaths.push(dest);
     }
 
     const archive = new PassThrough();
     const [verification, installation] = await Promise.allSettled([
       pumpVerifiedParts(partPaths, index, archive),
-      installPackFromStream(archive, opts.packsDir),
+      installPackFromStream(archive, opts.packsDir, {
+        validate: (staging, manifest) => validateStagedPack(staging, manifest, index),
+      }),
     ]);
     if (verification.status === 'rejected') {
       if (installation.status === 'fulfilled') {
@@ -669,17 +779,6 @@ export async function pullPack(opts: PullPackOptions): Promise<PulledPack> {
     }
     if (installation.status === 'rejected') throw installation.reason;
     const installed = installation.value;
-    try {
-      await verifyInstalledPayloads(installed.path);
-    } catch (error) {
-      rmSync(installed.path, { recursive: true, force: true });
-      if (error instanceof PackInstallError) throw error;
-      throw new PackInstallError(
-        `cannot verify installed payloads for ${opts.name}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
     return {
       name: installed.name,
       version: installed.version,
