@@ -21,7 +21,7 @@ import { Command } from 'commander';
 import { DEFAULT_PACK_REPO } from '../constants.js';
 import type { CliContext } from '../context.js';
 import { CliError } from '../errors.js';
-import { EXIT_PACK_NOT_FOUND, EXIT_USAGE } from '../exit-codes.js';
+import { EXIT_PACK_NOT_FOUND, EXIT_USAGE, EXIT_VALIDATION } from '../exit-codes.js';
 import { printJson } from '../io.js';
 import { pullPack } from '../pack-pull.js';
 import { resolveExistingPackDir } from '../pack-dir.js';
@@ -128,7 +128,14 @@ export function registerPack(parent: Command, ctx: CliContext): void {
         });
         return;
       }
-      printJson(ctx.io, { valid: true, name: manifest.name, version: manifest.version });
+      if (manifest.schemaVersion == null || manifest.schemaVersion === '1') {
+        printJson(ctx.io, { valid: true, name: manifest.name, version: manifest.version });
+        return;
+      }
+      throw new CliError(
+        `unsupported manifest schema: ${JSON.stringify(manifest.schemaVersion)}`,
+        EXIT_VALIDATION,
+      );
     });
 
   pack

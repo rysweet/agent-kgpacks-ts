@@ -120,6 +120,35 @@ describe('latest immutable pack discovery', () => {
     );
   });
 
+  it('ignores releases marked as prereleases by GitHub even when the tag is stable SemVer', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(
+        new Response(
+          JSON.stringify([
+            {
+              tag_name: 'cve-v3.0.0',
+              draft: false,
+              prerelease: true,
+              assets: [{ name: 'cve.pack-release.json' }, { name: 'cve.pack-release.json.sig' }],
+            },
+            {
+              tag_name: 'cve-v2.0.0',
+              draft: false,
+              prerelease: false,
+              assets: [{ name: 'cve.pack-release.json' }, { name: 'cve.pack-release.json.sig' }],
+            },
+          ]),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    await expect(discoverLatestPackBaseUrl('cve', 'owner/repo')).resolves.toBe(
+      'https://github.com/owner/repo/releases/download/cve-v2.0.0',
+    );
+  });
+
   it('orders equal-precedence candidates by full version before tag bytewise', async () => {
     vi.stubGlobal(
       'fetch',

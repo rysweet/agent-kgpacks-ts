@@ -11,7 +11,7 @@ import {
 } from '@kgpacks/ingestion';
 import { expect, it } from 'vitest';
 
-import { EXIT_OK } from '../src/exit-codes.js';
+import { EXIT_OK, EXIT_VALIDATION } from '../src/exit-codes.js';
 import { parseStdout, runCli } from './helpers/run-cli.js';
 
 const embedder: Embedder = {
@@ -91,6 +91,24 @@ it('falls back to manifest validation for a legacy pack without schema-v2 payloa
     const result = await runCli(['--packs-dir', temp, 'pack', 'validate', 'legacy'], {});
     expect(result.code, result.stderr).toBe(EXIT_OK);
     expect(parseStdout(result)).toEqual({ valid: true, name: 'legacy', version: '1.2.3' });
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+it('rejects an unsupported manifest schema instead of reporting the pack as valid', async () => {
+  const temp = mkdtempSync(join(tmpdir(), 'kgpacks-cli-unknown-schema-'));
+  try {
+    const pack = join(temp, 'future');
+    mkdirSync(pack);
+    writeFileSync(
+      join(pack, 'manifest.json'),
+      `${JSON.stringify({ name: 'future', version: '1.2.3', schemaVersion: '999' }, null, 2)}\n`,
+    );
+    const result = await runCli(['--packs-dir', temp, 'pack', 'validate', 'future'], {});
+    expect(result.code).toBe(EXIT_VALIDATION);
+    expect(result.stderr).toMatch(/unsupported manifest schema.*999/i);
+    expect(result.stdout).toBe('');
   } finally {
     rmSync(temp, { recursive: true, force: true });
   }

@@ -142,14 +142,31 @@ describe('immutable pack release artifacts', () => {
         packsDir,
         '--out-dir',
         legacyOut,
+        '--corpus-commit',
+        '0123456789abcdef0123456789abcdef01234567',
+        '--corpus-date',
+        '2026-07-23',
+        '--corpus-tag',
+        'cve_2026-07-23_0000Z',
+        '--model',
+        'legacy-embedding-model',
         '--dry-run',
       ],
       { encoding: 'utf8' },
     );
     expect(legacy.status, legacy.stderr).toBe(0);
-    expect(readFileSync(join(legacyOut, 'cve.pack-release.json'), 'utf8')).toContain(
-      '"version": "1.2.3"',
-    );
+    const legacyIndex = JSON.parse(readFileSync(join(legacyOut, 'cve.pack-release.json'), 'utf8'));
+    expect(legacyIndex).toMatchObject({
+      version: '1.2.3',
+      provenance: {
+        corpus: {
+          commit: '0123456789abcdef0123456789abcdef01234567',
+          date: '2026-07-23',
+          tag: 'cve_2026-07-23_0000Z',
+        },
+        embedding: { model: 'legacy-embedding-model' },
+      },
+    });
 
     writeFileSync(
       manifestPath,
@@ -162,6 +179,66 @@ describe('immutable pack release artifacts', () => {
     );
     expect(unknown.status).toBe(2);
     expect(unknown.stderr).toMatch(/unsupported manifest schema/i);
+  });
+
+  it('rejects release flags that conflict with legacy manifest provenance', () => {
+    const manifestPath = join(packsDir, 'cve', 'manifest.json');
+    writeFileSync(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          name: 'cve',
+          version: '1.2.3',
+          schemaVersion: '1',
+          provenance: {
+            corpus: {
+              commit: '0123456789abcdef0123456789abcdef01234567',
+              date: '2026-07-23',
+              tag: 'cve_2026-07-23_0000Z',
+            },
+            embedding: { model: 'legacy-embedding-model' },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    for (const [flag, value] of [
+      ['--corpus-commit', 'abcdef0123456789abcdef0123456789abcdef01'],
+      ['--corpus-date', '2026-07-24'],
+      ['--corpus-tag', 'cve_2026-07-24_0000Z'],
+      ['--model', 'different-embedding-model'],
+    ]) {
+      const result = spawnSync(
+        'node',
+        [releaseScript, '--pack', 'cve', '--packs-dir', packsDir, flag, value, '--dry-run'],
+        { encoding: 'utf8' },
+      );
+      expect(result.status, `${flag}: ${result.stderr}`).toBe(2);
+      expect(result.stderr).toMatch(
+        new RegExp(`${flag} does not match legacy manifest provenance`),
+      );
+    }
+  });
+
+  it('retains exact-match enforcement for schema-v2 provenance flags', () => {
+    for (const [flag, value] of [
+      ['--corpus-commit', 'abcdef0123456789abcdef0123456789abcdef01'],
+      ['--corpus-date', '2026-07-24'],
+      ['--corpus-tag', 'cve_2026-07-24_0000Z'],
+      ['--model', 'different-embedding-model'],
+    ]) {
+      const result = spawnSync(
+        'node',
+        [releaseScript, '--pack', 'cve', '--packs-dir', packsDir, flag, value, '--dry-run'],
+        { encoding: 'utf8' },
+      );
+      expect(result.status, `${flag}: ${result.stderr}`).toBe(2);
+      expect(result.stderr).toMatch(
+        new RegExp(`${flag} must exactly match schema-v2 manifest provenance`),
+      );
+    }
   });
 
   it('validates database contents even during a dry run', () => {

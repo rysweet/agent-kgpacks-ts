@@ -15,7 +15,11 @@ dependencies** (Node built-ins only). It ports the reference Python builder
 (`bootstrap/src/{sources,extraction,expansion,database}`,
 `bootstrap/schema/ryugraph_schema.py`).
 
-## Public API
+## Workspace API
+
+`@kgpacks/ingestion` is private to this pnpm workspace. Import it only from a
+workspace package that declares `"@kgpacks/ingestion": "workspace:*"`; it is not
+published as an external npm API.
 
 ```ts
 import { buildPack } from '@kgpacks/ingestion';
@@ -31,7 +35,7 @@ const result = await buildPack({
 
 ### Immutable CVE updates
 
-`@kgpacks/ingestion` exports the versioned CVE adapter and the public lifecycle
+`@kgpacks/ingestion` exports the versioned CVE adapter and workspace lifecycle
 API: `updateKnowledgePack`, `validateKnowledgePack`, request/result types, and
 typed failures. `@kgpacks/packs` supplies the schema-v2 manifest types and
 structural validation used by that lifecycle. Incremental updates do not reuse

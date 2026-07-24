@@ -148,6 +148,7 @@ describe('pack pull (real release artifacts → real streaming install)', () => 
         })
         .pipe(res);
     });
+
     await new Promise<void>((resolve) => tamperServer.listen(0, '127.0.0.1', resolve));
     const addr = tamperServer.address();
     const tamperUrl = addr && typeof addr === 'object' ? `http://127.0.0.1:${addr.port}` : '';
@@ -159,6 +160,36 @@ describe('pack pull (real release artifacts → real streaming install)', () => 
     } finally {
       tamperServer.close();
       rmSync(tampered, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects duplicate part filenames before downloading archive bytes', async () => {
+    const index = JSON.parse(
+      readFileSync(join(releaseDir, `${PACK_NAME}.pack-release.json`), 'utf8'),
+    );
+    index.parts = [index.parts[0], index.parts[0]];
+    const duplicateServer = createServer((req, res) => {
+      const name = (req.url ?? '/').replace(/^\/+/, '').split('?')[0];
+      if (name === `${PACK_NAME}.pack-release.json`) {
+        res.end(JSON.stringify(index));
+        return;
+      }
+      res.statusCode = 404;
+      res.end();
+    });
+    await new Promise<void>((resolve) => duplicateServer.listen(0, '127.0.0.1', resolve));
+    const addr = duplicateServer.address();
+    const duplicateUrl = addr && typeof addr === 'object' ? `http://127.0.0.1:${addr.port}` : '';
+    try {
+      await expect(
+        pullPack({
+          name: PACK_NAME,
+          packsDir: join(base, 'install-duplicate'),
+          baseUrl: duplicateUrl,
+        }),
+      ).rejects.toThrow(/duplicate part filename/i);
+    } finally {
+      duplicateServer.close();
     }
   });
 

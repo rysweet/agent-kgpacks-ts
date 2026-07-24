@@ -176,23 +176,45 @@ function buildProvenance() {
       ? manifest.provenance
       : {};
   const corpus = { ...(base.corpus ?? {}) };
-  if (corpusCommitArg !== undefined && corpusCommitArg !== corpus.commit) {
-    console.error('--corpus-commit must exactly match schema-v2 manifest provenance');
-    process.exit(2);
-  }
-  if (corpusDateArg !== undefined && corpusDateArg !== corpus.date) {
-    console.error('--corpus-date must exactly match schema-v2 manifest provenance');
-    process.exit(2);
-  }
-  if (corpusTagArg !== undefined && corpusTagArg !== corpus.tag) {
-    console.error('--corpus-tag must exactly match schema-v2 manifest provenance');
-    process.exit(2);
-  }
-  if (modelArg !== undefined && modelArg !== base.embedding?.model) {
-    console.error('--model must exactly match schema-v2 manifest provenance');
-    process.exit(2);
-  }
   const embedding = { ...(base.embedding ?? {}) };
+  if (legacyManifest) {
+    for (const [flag, value, key] of [
+      ['--corpus-commit', corpusCommitArg, 'commit'],
+      ['--corpus-date', corpusDateArg, 'date'],
+      ['--corpus-tag', corpusTagArg, 'tag'],
+    ]) {
+      if (value === undefined) continue;
+      if (corpus[key] != null && corpus[key] !== value) {
+        console.error(`${flag} does not match legacy manifest provenance`);
+        process.exit(2);
+      }
+      corpus[key] = value;
+    }
+    if (modelArg !== undefined) {
+      if (embedding.model != null && embedding.model !== modelArg) {
+        console.error('--model does not match legacy manifest provenance');
+        process.exit(2);
+      }
+      embedding.model = modelArg;
+    }
+  } else {
+    if (corpusCommitArg !== undefined && corpusCommitArg !== corpus.commit) {
+      console.error('--corpus-commit must exactly match schema-v2 manifest provenance');
+      process.exit(2);
+    }
+    if (corpusDateArg !== undefined && corpusDateArg !== corpus.date) {
+      console.error('--corpus-date must exactly match schema-v2 manifest provenance');
+      process.exit(2);
+    }
+    if (corpusTagArg !== undefined && corpusTagArg !== corpus.tag) {
+      console.error('--corpus-tag must exactly match schema-v2 manifest provenance');
+      process.exit(2);
+    }
+    if (modelArg !== undefined && modelArg !== embedding.model) {
+      console.error('--model must exactly match schema-v2 manifest provenance');
+      process.exit(2);
+    }
+  }
   if (model && !embedding.model) embedding.model = model;
   const build = { ...(base.build ?? {}) };
   const provenance = {};

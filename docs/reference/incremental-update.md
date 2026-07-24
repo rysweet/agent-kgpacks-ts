@@ -1,7 +1,7 @@
 ---
 title: Incremental knowledge-pack update contract
 description: Reference for the schema-v2 CVE update API, delta grammar, durable metadata, validation, and publication guarantees
-last_updated: 2026-07-23
+last_updated: 2026-07-24
 review_schedule: as-needed
 owner: kgpacks-maintainers
 doc_type: reference
@@ -14,7 +14,7 @@ This reference defines the implemented schema-v2 APIs and CLI semantics.
 ## Contents
 
 - [CLI contract](#cli-contract)
-- [Public TypeScript API](#public-typescript-api)
+- [Workspace TypeScript API](#workspace-typescript-api)
 - [Delta grammar](#delta-grammar)
 - [Classification and identity](#classification-and-identity)
 - [Base eligibility](#base-eligibility)
@@ -61,11 +61,31 @@ cannot be combined with `--base`, `--delta`, `--output`, `--version`, or
 `--work-dir`; without `--resume`, all four required fresh flags must be present.
 Global options such as `--packs-dir` do not become request fields.
 
-## Public TypeScript API
+## Workspace TypeScript API
 
 `@kgpacks/ingestion` exports the lifecycle entry points, configuration/result
 types, durable metadata types, and typed failures. `@kgpacks/packs` exports the
 schema-v2 manifest types and structural manifest validator.
+
+`@kgpacks/ingestion` is a private package for this pnpm workspace, not a
+published npm package or an externally supported API. Package-name imports work
+from workspace packages that declare the dependency:
+
+```json
+{
+  "dependencies": {
+    "@kgpacks/embeddings": "workspace:*",
+    "@kgpacks/ingestion": "workspace:*"
+  }
+}
+```
+
+The examples in this section run from such a workspace package after
+`pnpm --filter @kgpacks/ingestion build`. They do not run as package-name imports
+from the repository root, whose package manifest does not declare either
+dependency.
+
+### Update configuration
 
 ```ts
 interface FreshUpdateConfig {
@@ -85,6 +105,46 @@ interface ResumeUpdateConfig {
 }
 
 type UpdateKnowledgePackConfig = FreshUpdateConfig | ResumeUpdateConfig;
+```
+
+Only `UpdateKnowledgePackConfig` is exported; the two interfaces above show its
+discriminated shapes.
+
+| Fresh field    | Type                       | Required | Default         | Meaning                                                       |
+| -------------- | -------------------------- | -------- | --------------- | ------------------------------------------------------------- |
+| `base`         | `string`                   | Yes      | -               | Completed schema-v2 CVE pack directory                        |
+| `delta`        | `string`                   | Yes      | -               | Strict UTF-8 NDJSON delta                                     |
+| `output`       | `string`                   | Yes      | -               | New immutable pack directory                                  |
+| `version`      | `string`                   | Yes      | -               | Strict SemVer 2.0 target distinct from the base               |
+| `workDir`      | `string`                   | No       | `<output>.work` | Durable same-filesystem workspace                             |
+| `embedder`     | `Embedder`                 | No       | `BgeEmbedder`   | Document embedder whose `modelId` exactly matches the base    |
+| `onCheckpoint` | `(PackCheckpoint) => void` | No       | -               | Synchronous notification after each durable update checkpoint |
+
+| Resume field   | Type                       | Required | Default       | Meaning                                                       |
+| -------------- | -------------------------- | -------- | ------------- | ------------------------------------------------------------- |
+| `resume`       | `string`                   | Yes      | -             | Durable work directory from an interrupted update             |
+| `embedder`     | `Embedder`                 | No       | `BgeEmbedder` | Embedder with the model identity saved in the workspace       |
+| `onCheckpoint` | `(PackCheckpoint) => void` | No       | -             | Synchronous notification after each durable update checkpoint |
+
+Custom embedders must expose a non-empty, stable `modelId` and produce
+768-dimensional finite document embeddings. Changing the model between the base,
+fresh update, and resume is rejected.
+
+`onCheckpoint` is called after every committed batch of up to 256 final articles
+while the phase is `prepared`, then once after the finalized staging pack and
+sidecar reach `delta-applied`. It is synchronous; return values and promises are
+not awaited. If it throws, the update fails immediately and retains the durable
+workspace for `--resume`. A callback failure after `delta-applied` therefore
+leaves a resumable pack ready for publication. Equivalent-output no-ops and a
+resume that begins at `delta-applied` do not invoke the callback.
+
+### Update and validation functions
+
+```ts
+interface PackCheckpoint {
+  phase: 'prepared' | 'delta-applied';
+  workDir: string;
+}
 
 interface UpdateKnowledgePackResult {
   packId: string;
@@ -122,6 +182,38 @@ declare function updateKnowledgePack(
 declare function validateKnowledgePack(packDir: string): Promise<PackValidationResult>;
 ```
 
+Programmatic fresh update and validation:
+
+```ts
+import { updateKnowledgePack, validateKnowledgePack } from '@kgpacks/ingestion';
+
+const result = await updateKnowledgePack({
+  base: 'data/releases/2026.06/cve',
+  delta: '.scratch/cve/delta.ndjson',
+  output: 'data/releases/2026.07/cve',
+  version: '2026.7.0',
+});
+
+const validation = await validateKnowledgePack(result.output);
+console.log({
+  buildId: result.buildId,
+  noop: result.noop,
+  articles: validation.counts.articles,
+});
+```
+
+Programmatic resume:
+
+```ts
+import { updateKnowledgePack } from '@kgpacks/ingestion';
+
+const result = await updateKnowledgePack({
+  resume: 'data/releases/2026.07/cve.work',
+});
+
+console.log(result.output);
+```
+
 `UpdateKnowledgePackResult` has exactly the nine fields shown above. Successful
 fresh, resume, and matching-destination no-op calls all return that shape.
 Failures throw and never return a partial or success-shaped result.
@@ -145,6 +237,104 @@ updateKnowledgePack?: (
 
 `buildPack` remains the seed-based full ingestion seam for `create`; it does not
 implement incremental updates.
+
+### Baseline build and publication functions
+
+`buildCvePack` creates a small provenance-capable baseline directly from an
+NDJSON corpus of accepted CVE records. `publishBuiltCvePack` finalizes a
+completed staging database produced by the repository's streaming full builder.
+Both functions publish atomically and reject an existing destination.
+
+```ts
+interface BuildCvePackConfig {
+  source: string;
+  output: string;
+  packId: string;
+  version: string;
+  embedder: Embedder;
+  corpusCommit: string;
+  corpusDate: string;
+  corpusTag?: string | null;
+}
+
+interface PublishBuiltCvePackConfig {
+  staging: string;
+  output: string;
+  packId: string;
+  version: string;
+  embeddingModelId?: string;
+  corpusCommit: string;
+  corpusDate: string;
+  corpusTag?: string | null;
+}
+
+declare function buildCvePack(config: BuildCvePackConfig): Promise<void>;
+
+declare function publishBuiltCvePack(config: PublishBuiltCvePackConfig): Promise<void>;
+```
+
+Build and validate a small baseline from accepted CVE NDJSON:
+
+```ts
+import { execFileSync } from 'node:child_process';
+
+import { BgeEmbedder } from '@kgpacks/embeddings';
+import { buildCvePack, validateKnowledgePack } from '@kgpacks/ingestion';
+
+const corpusCheckout = '.scratch/cve/cvelistV5';
+const git = (...args: string[]) =>
+  execFileSync('git', ['-C', corpusCheckout, ...args], { encoding: 'utf8' }).trim();
+
+await buildCvePack({
+  source: '.scratch/cve/accepted.ndjson',
+  output: 'data/releases/2026.06/cve',
+  packId: 'cve',
+  version: '2026.6.0',
+  embedder: new BgeEmbedder(),
+  corpusCommit: git('rev-parse', 'HEAD'),
+  corpusDate: git('show', '-s', '--format=%cs', 'HEAD'),
+});
+
+await validateKnowledgePack('data/releases/2026.06/cve');
+```
+
+Finalize a completed streaming build. The staging directory must contain the
+finalized `pack.db` produced by `createPackWriter`; the function adds
+authoritative metadata and `manifest.json`, validates the pack, and moves the
+directory to the output without replacement:
+
+```ts
+import { execFileSync } from 'node:child_process';
+
+import { publishBuiltCvePack, validateKnowledgePack } from '@kgpacks/ingestion';
+
+const corpusCheckout = '.scratch/cve/cvelistV5';
+const git = (...args: string[]) =>
+  execFileSync('git', ['-C', corpusCheckout, ...args], { encoding: 'utf8' }).trim();
+
+await publishBuiltCvePack({
+  staging: '.scratch/cve/full-build-staging',
+  output: 'data/releases/2026.06/cve',
+  packId: 'cve',
+  version: '2026.6.0',
+  corpusCommit: git('rev-parse', 'HEAD'),
+  corpusDate: git('show', '-s', '--format=%cs', 'HEAD'),
+});
+
+await validateKnowledgePack('data/releases/2026.06/cve');
+```
+
+| Function                | Input                                                                | Result                                                              |
+| ----------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `buildCvePack`          | Accepted CVE NDJSON, output identity, embedder, and exact provenance | New validated baseline containing `manifest.json` and `pack.db`     |
+| `publishBuiltCvePack`   | Completed staging database, output identity, and exact provenance    | Staging finalized, validated, and atomically promoted to the output |
+| `updateKnowledgePack`   | Fresh-update or resume configuration                                 | `UpdateKnowledgePackResult` for a publication or equivalent no-op   |
+| `validateKnowledgePack` | Schema-v2 pack directory                                             | `PackValidationResult`; throws when any integrity invariant fails   |
+
+`corpusCommit` is a full lowercase 40-character Git SHA-1, `corpusDate` is a
+real UTC `YYYY-MM-DD` date, and `corpusTag`, when present, is a non-empty source
+release tag. `embeddingModelId` defaults to the repository BGE model identity.
+The staging and output paths must be disjoint and on the same filesystem.
 
 `@kgpacks/ingestion` also exports `PackCheckpoint`, `DurablePackMetadata`,
 `DurableUpdateApplication`, `KnowledgePackUpdateError`, and
@@ -352,7 +542,8 @@ Complete update validation accepts only exact string schema version `"2"`.
 Legacy manifests remain eligible for the shared structural checks in
 `validateManifest`, but they are never eligible incremental bases. The CLI
 invokes complete validation only when the loaded manifest declares exact string
-`"2"`; other manifests receive only the shared structural checks.
+`"2"`; manifests with an absent schema version or exact string `"1"` receive
+only the shared structural checks, and all other schema versions are rejected.
 
 The first v2 implementation has no implicit adapter or extractor migration. The
 base's `adapterVersion` and `extractorVersion` must exactly equal identifiers in
@@ -686,9 +877,9 @@ Durable update state records:
 
 Final articles are loaded in stable-key batches of 256. Each batch commits,
 checkpoints LadybugDB, and then records sidecar progress. A fault after any
-batch resumes from durable database evidence. Coverage uses 257 delta records,
-compares the resumed graph with an uninterrupted run, and then compares the
-finalized staged `pack.db` and `manifest.json` bytes with the published output.
+batch resumes from durable database evidence. A full batch has exactly 256
+articles; any final partial batch contains the remaining articles. Resume skips
+articles already proven durable in the staged database.
 
 Schema-v2 directory closure requires exactly `manifest.json` and `pack.db`, so
 the two saved base hashes cover the complete eligible base tree. Resume
