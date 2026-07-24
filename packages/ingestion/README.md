@@ -72,8 +72,17 @@ expectations exactly:
   `Section.id`. Article→article links are therefore materialized as
   lead-section → lead-section `LINKS_TO` edges (a deliberate divergence from the
   reference's Article→Article edge, required for read compatibility).
-- `Chunk` carries its own `chunk_embedding_idx` (cosine) and never collides with
-  the `Section` read path.
+- `Chunk` carries its own `chunk_embedding_idx` (cosine HNSW) and never collides
+  with the `Section` read path.
+
+Both indexes are built after embeddings are loaded. Incremental `prepared`
+resume drops and rebuilds only these two allowlisted indexes; `delta-applied`
+resume revalidates the finalized staging database without rebuilding. See the
+[vector index contract](../../docs/reference/vector-indexes.md) for the exact
+DDL, exported helpers, and lifecycle. The builder's
+`pu := 0.9999999999999999` setting requests effectively complete HNSW
+upper-layer sampling while satisfying LadybugDB's requirement that `pu` remain
+below `1`; it is not part of the read-side or pack-validation contract.
 
 ## Security
 

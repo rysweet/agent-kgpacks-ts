@@ -22,6 +22,7 @@ import {
   updateKnowledgePack,
   validateKnowledgePack,
 } from '../src/index.js';
+import { VECTOR_INDEX_DDL } from '../src/schema.js';
 
 const FIXTURES = resolve(import.meta.dirname, '../../../test/fixtures/cve-update');
 const BASE_SOURCE = join(FIXTURES, 'base.ndjson');
@@ -79,6 +80,36 @@ async function rows<T>(packDir: string, cypher: string): Promise<T[]> {
   try {
     if (cypher.includes('QUERY_VECTOR_INDEX')) await conn.loadExtension('vector');
     return await conn.run<T>(cypher);
+  } finally {
+    conn.close();
+    db.close();
+  }
+}
+
+async function vectorIndexes(
+  packDir: string,
+): Promise<Array<{ tableName: string; indexName: string; indexType: string; definition: string }>> {
+  const db = new Database(join(packDir, 'pack.db'), { readOnly: true });
+  const conn = db.connect();
+  try {
+    await conn.loadExtension('vector');
+    return await conn.run(
+      'CALL SHOW_INDEXES() RETURN table_name AS tableName, index_name AS indexName, ' +
+        'index_type AS indexType, index_definition AS definition ORDER BY tableName, indexName',
+    );
+  } finally {
+    conn.close();
+    db.close();
+  }
+}
+
+async function createVectorIndexes(packDir: string, ddl: readonly string[]): Promise<void> {
+  const db = new Database(join(packDir, 'pack.db'), { autoCheckpoint: false });
+  const conn = db.connect();
+  try {
+    await conn.loadExtension('vector');
+    for (const statement of ddl) await conn.run(statement);
+    await conn.run('CHECKPOINT');
   } finally {
     conn.close();
     db.close();
@@ -733,6 +764,81 @@ describe('incremental CVE pack update', () => {
       valid: true,
       counts: { articles: 3 },
     });
+  });
+
+  it('drops and rebuilds required vector indexes when resuming prepared staging', async () => {
+    const checkpointOutput = join(temp, 'indexed-checkpoint-output');
+    const checkpointWork = `${checkpointOutput}.work`;
+    let interrupted = false;
+    await expect(
+      updateKnowledgePack({
+        base,
+        delta: DELTA,
+        output: checkpointOutput,
+        version: '3.2.0',
+        embedder,
+        onCheckpoint(checkpoint) {
+          if (!interrupted && checkpoint.phase === 'prepared') {
+            interrupted = true;
+            throw new Error('simulated indexed staging interruption');
+          }
+        },
+      }),
+    ).rejects.toThrow('simulated indexed staging interruption');
+
+    const staging = join(checkpointWork, 'staging');
+    await createVectorIndexes(staging, VECTOR_INDEX_DDL);
+    expect(await vectorIndexes(staging)).toHaveLength(2);
+
+    await expect(updateKnowledgePack({ resume: checkpointWork, embedder })).resolves.toMatchObject({
+      version: '3.2.0',
+      noop: false,
+    });
+    const rebuilt = await vectorIndexes(checkpointOutput);
+    expect(
+      rebuilt.map(({ tableName, indexName, indexType }) => ({ tableName, indexName, indexType })),
+    ).toEqual([
+      { tableName: 'Chunk', indexName: 'chunk_embedding_idx', indexType: 'HNSW' },
+      { tableName: 'Section', indexName: 'embedding_idx', indexType: 'HNSW' },
+    ]);
+    for (const index of rebuilt) {
+      expect(index.definition).toContain("metric := 'cosine'");
+    }
+  });
+
+  it('does not drop an unexpected staged index and rejects it during validation', async () => {
+    const checkpointOutput = join(temp, 'unexpected-index-output');
+    const checkpointWork = `${checkpointOutput}.work`;
+    let interrupted = false;
+    await expect(
+      updateKnowledgePack({
+        base,
+        delta: DELTA,
+        output: checkpointOutput,
+        version: '3.3.0',
+        embedder,
+        onCheckpoint(checkpoint) {
+          if (!interrupted && checkpoint.phase === 'prepared') {
+            interrupted = true;
+            throw new Error('simulated unexpected-index interruption');
+          }
+        },
+      }),
+    ).rejects.toThrow('simulated unexpected-index interruption');
+
+    const staging = join(checkpointWork, 'staging');
+    await createVectorIndexes(staging, [
+      ...VECTOR_INDEX_DDL,
+      "CALL CREATE_VECTOR_INDEX('Section', 'unexpected_embedding_idx', 'embedding', metric := 'cosine', pu := 0.9999999999999999)",
+    ]);
+
+    await expect(updateKnowledgePack({ resume: checkpointWork, embedder })).rejects.toThrow(
+      /vector index definitions/i,
+    );
+    expect(existsSync(checkpointOutput)).toBe(false);
+    expect((await vectorIndexes(staging)).map((index) => index.indexName)).toContain(
+      'unexpected_embedding_idx',
+    );
   });
 
   it('keeps interrupted-build checkpoints separate from incremental update work', async () => {

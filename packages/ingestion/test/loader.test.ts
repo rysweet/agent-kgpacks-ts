@@ -107,6 +107,46 @@ describe('loadPack — in-memory round-trip', () => {
     expect(rows[0].id).toBe('Beta#0#0');
   });
 
+  it('creates exactly the required HNSW cosine index metadata', async () => {
+    const indexes = await conn.run<{
+      tableName: string;
+      indexName: string;
+      indexType: string;
+      propertyNames: string[];
+      definition: string;
+    }>(
+      'CALL SHOW_INDEXES() RETURN table_name AS tableName, index_name AS indexName, ' +
+        'index_type AS indexType, property_names AS propertyNames, ' +
+        'index_definition AS definition ORDER BY tableName, indexName',
+    );
+
+    expect(indexes).toHaveLength(2);
+    expect(
+      indexes.map(({ tableName, indexName, indexType, propertyNames }) => ({
+        tableName,
+        indexName,
+        indexType,
+        propertyNames,
+      })),
+    ).toEqual([
+      {
+        tableName: 'Chunk',
+        indexName: 'chunk_embedding_idx',
+        indexType: 'HNSW',
+        propertyNames: ['embedding'],
+      },
+      {
+        tableName: 'Section',
+        indexName: 'embedding_idx',
+        indexType: 'HNSW',
+        propertyNames: ['embedding'],
+      },
+    ]);
+    for (const index of indexes) {
+      expect(index.definition).toContain("metric := 'cosine'");
+    }
+  });
+
   it('traverses Section→Section LINKS_TO exactly as the query reranker does', async () => {
     const rows = await conn.run<{ id: string; content: unknown }>(
       `MATCH (seed:Section {id: $id})-[:LINKS_TO]->(neighbor:Section)

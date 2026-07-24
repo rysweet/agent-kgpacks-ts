@@ -1,7 +1,7 @@
 ---
 title: Incremental knowledge-pack update contract
 description: Reference for the schema-v2 CVE update API, delta grammar, durable metadata, validation, and publication guarantees
-last_updated: 2026-07-23
+last_updated: 2026-07-24
 review_schedule: as-needed
 owner: kgpacks-maintainers
 doc_type: reference
@@ -331,7 +331,13 @@ The required LadybugDB surface is:
 
 The full CVE builder creates this schema, provenance, and the required live
 Entity-to-Entity edges on a fresh baseline. It cannot upgrade a legacy pack;
-update-capable baselines require the complete provenance schema.
+update-capable baselines require the complete provenance schema. The physical
+index definitions and lifecycle are specified in the
+[vector index contract](vector-indexes.md). Supported builders use
+`pu := 0.9999999999999999` to request effectively complete HNSW upper-layer
+sampling while remaining below LadybugDB's exclusive upper bound of `1`.
+Validation does not inspect `pu`, so the value is builder behavior rather than a
+base-eligibility criterion.
 
 A schema-v2 full-build baseline uses `lineage: { base: null, delta: null }`, an
 `update` object with zero counts and an empty `records` array, null durable
@@ -703,10 +709,13 @@ version, exact base tree and delta bytes, semantic `deltaId`, staged database,
 durable applications, all recorded component versions, and the embedding model.
 
 The durable phases are `prepared` and `delta-applied`. During `prepared`,
-resume reconciles per-record sidecar status with staged source/application
-evidence and continues in stable-key order. During `delta-applied`, resume
-revalidates staging and retries no-replace publication. If publication already
-completed, an equivalent output completes as a no-op; any other output fails.
+resume drops only the allowlisted `Section.embedding_idx` and
+`Chunk.chunk_embedding_idx` generated indexes, reconciles per-record sidecar
+status with staged source/application evidence, continues in stable-key order,
+and rebuilds both indexes during finalization. During `delta-applied`, resume
+does not rebuild: it revalidates staging and retries no-replace publication. If
+publication already completed, an equivalent output completes as a no-op; any
+other output fails.
 
 After successful publication or equivalent-output recovery, the workspace is
 removed. On failure it is retained only if it has reached one of the durable
@@ -783,4 +792,5 @@ declare class KnowledgePackValidationError extends Error {}
 - [CVE knowledge pack](../cve.md)
 - [Resumable pack builds](../resumable-build.md)
 - [Pack versioning and provenance](../pack-versioning.md)
+- [Knowledge-pack vector index contract](vector-indexes.md)
 - [`@kgpacks/packs` reference](../packages/packs.md)

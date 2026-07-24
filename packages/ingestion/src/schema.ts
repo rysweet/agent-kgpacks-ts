@@ -134,6 +134,6 @@ export const REL_TABLE_DDL: readonly string[] = [
  * post-insert).
  */
 export const VECTOR_INDEX_DDL: readonly string[] = [
-  `CALL CREATE_VECTOR_INDEX('${SECTION_TABLE}', '${SECTION_VECTOR_INDEX}', 'embedding', metric := 'cosine')`,
-  `CALL CREATE_VECTOR_INDEX('${CHUNK_TABLE}', '${CHUNK_VECTOR_INDEX}', 'embedding', metric := 'cosine')`,
+  `CALL CREATE_VECTOR_INDEX('${SECTION_TABLE}', '${SECTION_VECTOR_INDEX}', 'embedding', metric := 'cosine', pu := 0.9999999999999999)`,
+  `CALL CREATE_VECTOR_INDEX('${CHUNK_TABLE}', '${CHUNK_VECTOR_INDEX}', 'embedding', metric := 'cosine', pu := 0.9999999999999999)`,
 ];
