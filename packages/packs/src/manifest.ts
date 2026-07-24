@@ -220,7 +220,7 @@ export function validateManifest(value: unknown): PackManifest {
     value.schemaVersion !== '2'
   ) {
     throw new ManifestValidationError(
-      `unsupported schema version ${JSON.stringify(value.schemaVersion)}`,
+      `unsupported manifest schema version ${JSON.stringify(value.schemaVersion)}`,
     );
   }
   if ('description' in value && typeof value.description !== 'string') {

@@ -530,6 +530,14 @@ describe('incremental CVE pack update', () => {
       },
       /valid CVE stable key/i,
     ],
+    [
+      'malformed nested CVE members',
+      {
+        cveMetadata: { cveId: 'CVE-2025-9003', state: 'PUBLISHED' },
+        containers: { cna: { descriptions: [null] } },
+      },
+      /invalid delta record 1.*descriptions\[0\] must be an object/i,
+    ],
   ])('preflights and rejects %s before creating work', async (name, record, expected) => {
     const delta = join(temp, `${name.replace(/\W+/g, '-')}.ndjson`);
     const rejectedOutput = join(temp, `${name.replace(/\W+/g, '-')}-output`);
