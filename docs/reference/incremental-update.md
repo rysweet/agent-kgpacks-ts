@@ -281,10 +281,10 @@ exactly these fields:
 
 ```json
 {
-  "adapterVersion": "cve-adapter@2",
+  "adapterVersion": "cve-record-5.1-v1",
   "baseContentDigest": "71d3afc5a14210a66fa538af86f5a03db760f62d64b1bbf5a9f6f9f01fc01d8d",
   "deltaId": "f10f0bf4a4b7c1014544cb9a386f887812b10f1712ba8f475f64608a411c9ec6",
-  "extractorVersion": "cve-adapter@2",
+  "extractorVersion": "cve-record-5.1-v1",
   "packId": "cve",
   "schemaVersion": "2",
   "toolVersion": "agent-kgpacks-ts@0.1.0",
@@ -494,8 +494,8 @@ A schema-v2 incremental output has this shape:
   "packId": "cve",
   "version": "2026.7.0",
   "schemaVersion": "2",
-  "adapterVersion": "cve-adapter@2",
-  "extractorVersion": "cve-adapter@2",
+  "adapterVersion": "cve-record-5.1-v1",
+  "extractorVersion": "cve-record-5.1-v1",
   "toolVersion": "agent-kgpacks-ts@0.1.0",
   "buildId": "7a44a7f870d799ad2fbd2d6ed5675d2651319bdea3f96af95db4c7f095712c1d",
   "provenance": {
