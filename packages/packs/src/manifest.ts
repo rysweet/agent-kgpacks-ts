@@ -214,6 +214,15 @@ export function validateManifest(value: unknown): PackManifest {
       `invalid version ${JSON.stringify(version)} (must be SemVer 2.0)`,
     );
   }
+  if (
+    value.schemaVersion !== undefined &&
+    value.schemaVersion !== '1' &&
+    value.schemaVersion !== '2'
+  ) {
+    throw new ManifestValidationError(
+      `unsupported schema version ${JSON.stringify(value.schemaVersion)}`,
+    );
+  }
   if ('description' in value && typeof value.description !== 'string') {
     throw new ManifestValidationError('description must be a string');
   }

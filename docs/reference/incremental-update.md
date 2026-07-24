@@ -62,10 +62,10 @@ base version. The difference is exact string inequality after validation.
 | `--resume <work-dir>` | resume | yes      | none            | Existing update workspace; excludes every fresh option            |
 
 The canonicalized base, output, and work paths must be pairwise disjoint: no
-path may equal, contain, or be contained by another. Symlinks and non-directory
-ancestors are rejected rather than followed into the trust boundary. Work and
-output must be on the same filesystem. If `--work-dir` is omitted, fresh mode
-uses `<output>.work`.
+path may equal, contain, or be contained by another. Existing symlink ancestors
+are resolved before this comparison, so disjointness applies to their real
+targets. Work and output must be on the same filesystem. If `--work-dir` is
+omitted, fresh mode uses `<output>.work`.
 
 Commander validates mode shape before calling the package API. `--resume`
 cannot be combined with `--base`, `--delta`, `--output`, `--version`, or
@@ -383,6 +383,7 @@ exactly these fields:
   "adapterVersion": "cve-adapter@2",
   "baseContentDigest": "71d3afc5a14210a66fa538af86f5a03db760f62d64b1bbf5a9f6f9f01fc01d8d",
   "deltaId": "f10f0bf4a4b7c1014544cb9a386f887812b10f1712ba8f475f64608a411c9ec6",
+  "embeddingModel": "Xenova/bge-base-en-v1.5",
   "extractorVersion": "cve-adapter@2",
   "packId": "cve",
   "schemaVersion": "2",

@@ -28,6 +28,7 @@ import {
   loadExtensions,
   type LoadableArticle,
 } from './loader.js';
+import { IngestionError } from './errors.js';
 import type { ArticleLink, Relationship } from './types.js';
 
 function wordCount(text: string): number {
@@ -166,6 +167,12 @@ export async function createPackWriter(
 
   let ftsLoaded: boolean;
   if (resume) {
+    const tables = await conn.run<{ name: string }>('CALL SHOW_TABLES() RETURN name');
+    if (!tables.some((table) => table.name === 'RelationSupport')) {
+      throw new IngestionError(
+        'cannot resume pack with an incompatible legacy schema: RelationSupport is missing; rebuild the pack before resuming',
+      );
+    }
     // The pack already exists: load extensions only, and repopulate the dedup sets
     // from the DB so cross-batch dedup survives the restart.
     ftsLoaded = await loadExtensions(conn);
@@ -442,6 +449,11 @@ export async function createPackWriter(
   }
 
   async function finalize(links: ArticleLink[] = []): Promise<PackWriterStats> {
+    await conn.run(
+      'MATCH (p:RelationSupport) ' +
+        'WHERE NOT EXISTS { MATCH (s:Entity) WHERE s.entity_id = p.source_entity_id } ' +
+        'OR NOT EXISTS { MATCH (t:Entity) WHERE t.entity_id = p.target_entity_id } DELETE p',
+    );
     if (!skipEntityRelations) {
       const relationSignatures = new Set<string>();
       const relRows = pendingRelationships

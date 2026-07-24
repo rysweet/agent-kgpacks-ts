@@ -12,6 +12,7 @@ import {
   mkdtempSync,
   openSync,
   readFileSync,
+  readSync,
   realpathSync,
   readdirSync,
   renameSync,
@@ -27,11 +28,13 @@ import { BGE_MODEL_ID, BgeEmbedder } from '@kgpacks/embeddings';
 import {
   isValidSemver,
   loadManifestFromDir,
+  PACK_NAME_RE,
   saveManifest,
   type PackManifest,
 } from '@kgpacks/packs';
 
 import { readBaseLoadables, toLoadable } from './article-copy.js';
+import { canonicalJson as canonical } from './canonical-json.js';
 import { chunkArticle } from './chunking.js';
 import { CVE_ADAPTER_VERSION, CVE_ID_RE, cveToGraph } from './cve-adapter.js';
 import { KnowledgePackUpdateError, KnowledgePackValidationError } from './errors.js';
@@ -60,14 +63,16 @@ const provenanceFor = (
 interface DeltaRecord {
   ordinal: number;
   key: string;
-  payload: string;
   payloadHash: string;
+  byteOffset: number;
+  byteLength: number;
 }
 
 interface ParsedDelta {
   records: DeltaRecord[];
   deltaId: string;
   fileSha256: string;
+  path: string;
 }
 
 interface UpdateState {
@@ -206,33 +211,6 @@ function sha256(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
-function compareUnicodeScalars(left: string, right: string): number {
-  let leftIndex = 0;
-  let rightIndex = 0;
-  while (leftIndex < left.length && rightIndex < right.length) {
-    const leftPoint = left.codePointAt(leftIndex) ?? 0;
-    const rightPoint = right.codePointAt(rightIndex) ?? 0;
-    if (leftPoint !== rightPoint) return leftPoint - rightPoint;
-    leftIndex += leftPoint > 0xffff ? 2 : 1;
-    rightIndex += rightPoint > 0xffff ? 2 : 1;
-  }
-  if (leftIndex < left.length) return 1;
-  if (rightIndex < right.length) return -1;
-  return 0;
-}
-
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
-  if (value && typeof value === 'object') {
-    return `{${Object.keys(value as Record<string, unknown>)
-      .sort(compareUnicodeScalars)
-      .map((key) => `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`)
-      .join(',')}}`;
-  }
-
-  return JSON.stringify(value);
-}
-
 function embedderModelId(embedder: Embedder): string {
   const modelId = embedder.modelId?.trim();
   if (!modelId) {
@@ -316,94 +294,199 @@ function assertScalarStrings(value: unknown, location: string): void {
   }
 }
 
-function readDelta(path: string): ParsedDelta {
-  const bytes = readFileSync(path);
-  const records: DeltaRecord[] = [];
-  const seen = new Set<string>();
-  let decoded: string;
+interface ParsedDeltaPayload {
+  key: string;
+  payload: string;
+  payloadHash: string;
+}
+
+function decodeDeltaLine(bytes: Buffer): string {
   try {
-    decoded = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   } catch {
     throw new Error('delta is not valid UTF-8');
   }
-  let ordinal = 0;
-  let lineStart = 0;
-  while (lineStart <= decoded.length) {
-    const newline = decoded.indexOf('\n', lineStart);
-    const lineEnd = newline === -1 ? decoded.length : newline;
-    const contentEnd =
-      lineEnd > lineStart && decoded.charCodeAt(lineEnd - 1) === 13 ? lineEnd - 1 : lineEnd;
-    const raw = decoded.slice(lineStart, contentEnd);
-    lineStart = newline === -1 ? decoded.length + 1 : newline + 1;
-    if (raw.trim() === '') continue;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (error) {
-      throw new Error(`invalid delta record ${ordinal + 1}: ${(error as Error).message}`);
-    }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error(`invalid delta record ${ordinal + 1}: expected a JSON object`);
-    }
-    const object = parsed as Record<string, unknown>;
-    if (object.operation === 'delete') {
-      throw new Error(`delete operation is not supported (${String(object.key ?? 'unknown')})`);
-    }
-    if (object.operation !== undefined && object.operation !== 'upsert') {
-      throw new Error(`unsupported delta operation ${JSON.stringify(object.operation)}`);
-    }
-    if (object.operation === 'upsert') {
-      const keys = Object.keys(object).sort();
-      if (canonical(keys) !== canonical(['key', 'operation', 'payload']) || !object.payload) {
-        throw new Error(`invalid delta record ${ordinal + 1}: malformed upsert envelope`);
-      }
-    }
-    const payloadObject =
-      object.operation === 'upsert' && object.payload && typeof object.payload === 'object'
-        ? object.payload
-        : parsed;
-    const metadata = (payloadObject as Record<string, unknown>).cveMetadata;
-    const key =
-      metadata && typeof metadata === 'object'
-        ? String((metadata as Record<string, unknown>).cveId ?? '').trim()
-        : String(object.key ?? '').trim();
-    if (!CVE_ID_RE.test(key)) {
-      throw new Error(`delta record ${ordinal + 1} has no valid CVE stable key`);
-    }
-    if (object.key !== undefined && String(object.key).trim() !== key) {
-      throw new Error(`delta record ${ordinal + 1} key does not match its CVE payload`);
-    }
-    if (seen.has(key)) throw new Error(`duplicate delta stable key: ${key}`);
-    seen.add(key);
-    assertScalarStrings(payloadObject, `delta record ${ordinal + 1}`);
-    const payload = canonical(payloadObject);
-    const metadataObject =
-      metadata && typeof metadata === 'object' ? (metadata as Record<string, unknown>) : {};
-    if (String(metadataObject.state ?? '').toUpperCase() === 'REJECTED') {
-      throw new Error(`delete operation is not supported (${key} is REJECTED)`);
-    }
-    if (!cveToGraph(payloadObject)) {
-      throw new Error(`delta record ${ordinal + 1} cannot be mapped by the CVE adapter`);
-    }
-    records.push({ ordinal, key, payload, payloadHash: sha256(payload) });
-    ordinal++;
+}
+
+function parseDeltaPayload(raw: string, ordinal: number): ParsedDeltaPayload {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`invalid delta record ${ordinal + 1}: ${(error as Error).message}`);
   }
-  records.sort((left, right) => left.key.localeCompare(right.key));
-  const deltaId = sha256(
-    canonical(
-      records.map((record) => ({
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`invalid delta record ${ordinal + 1}: expected a JSON object`);
+  }
+  const object = parsed as Record<string, unknown>;
+  if (object.operation === 'delete') {
+    throw new Error(`delete operation is not supported (${String(object.key ?? 'unknown')})`);
+  }
+  if (object.operation !== undefined && object.operation !== 'upsert') {
+    throw new Error(`unsupported delta operation ${JSON.stringify(object.operation)}`);
+  }
+  if (object.operation === 'upsert') {
+    const keys = Object.keys(object).sort();
+    if (canonical(keys) !== canonical(['key', 'operation', 'payload']) || !object.payload) {
+      throw new Error(`invalid delta record ${ordinal + 1}: malformed upsert envelope`);
+    }
+  }
+  const payloadObject =
+    object.operation === 'upsert' && object.payload && typeof object.payload === 'object'
+      ? object.payload
+      : parsed;
+  const metadata = (payloadObject as Record<string, unknown>).cveMetadata;
+  const key =
+    metadata && typeof metadata === 'object'
+      ? String((metadata as Record<string, unknown>).cveId ?? '').trim()
+      : String(object.key ?? '').trim();
+  if (!CVE_ID_RE.test(key)) {
+    throw new Error(`delta record ${ordinal + 1} has no valid CVE stable key`);
+  }
+  if (object.key !== undefined && String(object.key).trim() !== key) {
+    throw new Error(`delta record ${ordinal + 1} key does not match its CVE payload`);
+  }
+  assertScalarStrings(payloadObject, `delta record ${ordinal + 1}`);
+  const payload = canonical(payloadObject);
+  const metadataObject =
+    metadata && typeof metadata === 'object' ? (metadata as Record<string, unknown>) : {};
+  if (String(metadataObject.state ?? '').toUpperCase() === 'REJECTED') {
+    throw new Error(`delete operation is not supported (${key} is REJECTED)`);
+  }
+  if (!cveToGraph(payloadObject)) {
+    throw new Error(`delta record ${ordinal + 1} cannot be mapped by the CVE adapter`);
+  }
+  return { key, payload, payloadHash: sha256(payload) };
+}
+
+function deltaIdFor(records: DeltaRecord[]): string {
+  const hash = createHash('sha256');
+  hash.update('[');
+  records.forEach((record, index) => {
+    if (index > 0) hash.update(',');
+    hash.update(
+      canonical({
         operation: 'upsert',
         key: record.key,
         sourcePayloadSha256: record.payloadHash,
-      })),
-    ),
-  );
-  return { records, deltaId, fileSha256: sha256(bytes) };
+      }),
+    );
+  });
+  hash.update(']');
+  return hash.digest('hex');
+}
+
+async function readDelta(path: string): Promise<ParsedDelta> {
+  const sourcePath = resolve(path);
+  const fileHash = createHash('sha256');
+  const records: DeltaRecord[] = [];
+  const seen = new Set<string>();
+  let ordinal = 0;
+  let absoluteOffset = 0;
+  let lineOffset = 0;
+  let fragments: Buffer[] = [];
+  let fragmentsLength = 0;
+
+  const processLine = (line: Buffer, byteOffset: number): void => {
+    const byteLength = line.at(-1) === 13 ? line.length - 1 : line.length;
+    const raw = decodeDeltaLine(line.subarray(0, byteLength));
+    if (raw.trim() === '') return;
+    const parsed = parseDeltaPayload(raw, ordinal);
+    if (seen.has(parsed.key)) throw new Error(`duplicate delta stable key: ${parsed.key}`);
+    seen.add(parsed.key);
+    records.push({
+      ordinal,
+      key: parsed.key,
+      payloadHash: parsed.payloadHash,
+      byteOffset,
+      byteLength,
+    });
+    ordinal++;
+  };
+
+  for await (const chunk of createReadStream(sourcePath)) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    fileHash.update(bytes);
+    let cursor = 0;
+    while (cursor < bytes.length) {
+      const newline = bytes.indexOf(10, cursor);
+      if (newline === -1) {
+        if (fragments.length === 0) lineOffset = absoluteOffset + cursor;
+        const fragment = bytes.subarray(cursor);
+        fragments.push(fragment);
+        fragmentsLength += fragment.length;
+        break;
+      }
+      let line: Buffer;
+      if (fragments.length > 0) {
+        const tail = bytes.subarray(cursor, newline);
+        line = Buffer.concat([...fragments, tail], fragmentsLength + tail.length);
+        fragments = [];
+        fragmentsLength = 0;
+      } else {
+        lineOffset = absoluteOffset + cursor;
+        line = bytes.subarray(cursor, newline);
+      }
+      processLine(line, lineOffset);
+      cursor = newline + 1;
+    }
+    absoluteOffset += bytes.length;
+  }
+  if (fragments.length > 0) {
+    processLine(Buffer.concat(fragments, fragmentsLength), lineOffset);
+  }
+  records.sort((left, right) => left.key.localeCompare(right.key));
+  return {
+    records,
+    deltaId: deltaIdFor(records),
+    fileSha256: fileHash.digest('hex'),
+    path: sourcePath,
+  };
+}
+
+interface DeltaPayloadReader {
+  read(record: DeltaRecord): string;
+  close(): void;
+}
+
+function openDeltaPayloadReader(path: string): DeltaPayloadReader {
+  const descriptor = openSync(path, 'r');
+  return {
+    read(record) {
+      const bytes = Buffer.allocUnsafe(record.byteLength);
+      let offset = 0;
+      while (offset < bytes.length) {
+        const count = readSync(
+          descriptor,
+          bytes,
+          offset,
+          bytes.length - offset,
+          record.byteOffset + offset,
+        );
+        if (count === 0) throw new Error('delta input changed while it was being processed');
+        offset += count;
+      }
+      const parsed = parseDeltaPayload(decodeDeltaLine(bytes), record.ordinal);
+      if (parsed.key !== record.key || parsed.payloadHash !== record.payloadHash) {
+        throw new Error('delta input changed while it was being processed');
+      }
+      return parsed.payload;
+    },
+    close() {
+      closeSync(descriptor);
+    },
+  };
 }
 
 function assertVersion(version: string): void {
   if (!isValidSemver(version)) {
     throw new Error(`invalid target version ${JSON.stringify(version)}`);
+  }
+}
+
+function assertPackId(packId: string): void {
+  if (typeof packId !== 'string' || !PACK_NAME_RE.test(packId)) {
+    throw new Error(`invalid pack ID ${JSON.stringify(packId)} (must match PACK_NAME_RE)`);
   }
 }
 
@@ -636,6 +719,13 @@ function runNoReplaceMove(
 function assertNoReplacePublicationAvailable(filesystemPath: string): void {
   if (process.platform !== 'linux') {
     throw new Error('atomic no-replace publication requires Linux renameat2 support');
+  }
+
+  /** Fails before expensive work when an immutable output cannot be published safely. */
+  export function assertPackPublicationAvailable(output: string): void {
+    const target = resolve(output);
+    if (existsSync(target)) throw new Error(`output already exists: ${target}`);
+    assertNoReplacePublicationAvailable(nearestExisting(dirname(target)));
   }
   const helper = nativeRenameHelper();
   const probeRoot = mkdtempSync(join(filesystemPath, '.kgpacks-renameat2-'));
@@ -919,11 +1009,11 @@ async function finalizePack(
 
 /** Builds a small provenance-capable CVE pack from an NDJSON corpus. */
 export async function buildCvePack(config: BuildCvePackConfig): Promise<void> {
+  assertPackId(config.packId);
   assertVersion(config.version);
   assertCorpusProvenance(config.corpusCommit, config.corpusDate, config.corpusTag ?? null);
-  if (existsSync(config.output)) throw new Error(`output already exists: ${config.output}`);
-  const parsed = readDelta(config.source);
-  assertNoReplacePublicationAvailable(nearestExisting(dirname(resolve(config.output))));
+  assertPackPublicationAvailable(config.output);
+  const parsed = await readDelta(config.source);
   const embeddingModel = embedderModelId(config.embedder);
   const buildId = buildIdFor({
     packId: config.packId,
@@ -960,8 +1050,13 @@ export async function buildCvePack(config: BuildCvePackConfig): Promise<void> {
   );
   try {
     const loadables = [];
-    for (const record of parsed.records)
-      loadables.push(await toLoadable(record.payload, config.embedder));
+    const payloadReader = openDeltaPayloadReader(parsed.path);
+    try {
+      for (const record of parsed.records)
+        loadables.push(await toLoadable(payloadReader.read(record), config.embedder));
+    } finally {
+      payloadReader.close();
+    }
     await writeDatabase(join(staging, 'pack.db'), loadables, metadata);
     await publishBuiltCvePack({
       staging,
@@ -984,6 +1079,7 @@ export async function buildCvePack(config: BuildCvePackConfig): Promise<void> {
  * validates its exact manifest projection, and atomically publishes it.
  */
 export async function publishBuiltCvePack(config: PublishBuiltCvePackConfig): Promise<void> {
+  assertPackId(config.packId);
   assertVersion(config.version);
   assertCorpusProvenance(config.corpusCommit, config.corpusDate, config.corpusTag ?? null);
   const staging = resolve(config.staging);
@@ -1345,7 +1441,9 @@ async function executeUpdate(
   }
   const outputDatabase = new Database(stagingDatabase, { autoCheckpoint: false });
   const outputConnection = outputDatabase.connect();
+  let payloadReader: DeltaPayloadReader | undefined;
   try {
+    payloadReader = openDeltaPayloadReader(parsed.path);
     if (resumingStaging) await normalizeResumedDatabase(outputConnection);
     const loadedTitles = new Set<string>();
     const checkpoints = new Map(state.records.map((record) => [record.key, record]));
@@ -1404,7 +1502,7 @@ async function executeUpdate(
       for (const title of batchTitles) {
         const record = deltaByKey.get(title);
         if (record && baseHashes.get(title) !== record.payloadHash) {
-          items.push(await toLoadable(record.payload, embedder));
+          items.push(await toLoadable(payloadReader.read(record), embedder));
         }
       }
       items.sort((left, right) => left.article.title.localeCompare(right.article.title));
@@ -1454,6 +1552,7 @@ async function executeUpdate(
       await outputConnection.run('CHECKPOINT');
     }
   } finally {
+    payloadReader?.close();
     outputConnection.close();
     outputDatabase.close();
     baseConnection.close();
@@ -1505,7 +1604,7 @@ async function updateKnowledgePackInternal(
     ) {
       throw new Error('base input changed since the interrupted update');
     }
-    const parsed = readDelta(state.delta);
+    const parsed = await readDelta(state.delta);
     if (parsed.fileSha256 !== state.deltaFileSha256 || parsed.deltaId !== state.deltaId) {
       throw new Error('delta input changed since the interrupted update');
     }
@@ -1515,7 +1614,6 @@ async function updateKnowledgePackInternal(
     ) {
       throw new Error('update resume record checkpoints do not match the delta');
     }
-    assertNoReplacePublicationAvailable(nearestExisting(dirname(state.output)));
     const expected = await expectedUpdateFor(state, parsed, baseValidation);
     if (existsSync(state.output)) {
       if (!lstatSync(state.output).isDirectory()) {
@@ -1532,6 +1630,7 @@ async function updateKnowledgePackInternal(
       rmSync(state.workDir, { recursive: true, force: true });
       return resultFromValidation(state, completed, true);
     }
+    assertNoReplacePublicationAvailable(nearestExisting(dirname(state.output)));
     return executeUpdate(state, parsed, expected, embedder, config.onCheckpoint);
   }
 
@@ -1540,7 +1639,7 @@ async function updateKnowledgePackInternal(
   const deltaPath = resolve(config.delta);
   const output = resolve(config.output);
   if (base === output) throw new Error('output must be distinct from the base pack');
-  const parsed = readDelta(deltaPath);
+  const parsed = await readDelta(deltaPath);
   const baseValidation = await validateKnowledgePack(base);
   const baseMetadata = baseValidation.metadata;
   const embedder = config.embedder ?? new BgeEmbedder();
@@ -1572,7 +1671,6 @@ async function updateKnowledgePackInternal(
   const workDir = resolve(config.workDir ?? `${output}.work`);
   assertDisjointPaths(base, output, workDir);
   assertSameFilesystem(output, workDir);
-  assertNoReplacePublicationAvailable(nearestExisting(dirname(output)));
   if (existsSync(workDir)) {
     throw new Error(`incomplete update work exists at ${workDir}; use --resume ${workDir}`);
   }
@@ -1616,6 +1714,7 @@ async function updateKnowledgePackInternal(
     }
     throw new Error(`output collision: ${output} already exists`);
   }
+  assertNoReplacePublicationAvailable(nearestExisting(dirname(output)));
   mkdirSync(dirname(output), { recursive: true });
   mkdirSync(dirname(workDir), { recursive: true });
   try {
@@ -1785,7 +1884,7 @@ async function validateKnowledgePackInternal(packDir: string): Promise<PackValid
       metadata.schemaVersion !== INCREMENTAL_SCHEMA_VERSION ||
       metadata.adapterVersion !== CVE_ADAPTER_VERSION ||
       metadata.extractorVersion !== CVE_ADAPTER_VERSION ||
-      metadata.toolVersion !== UPDATE_TOOL_VERSION ||
+      metadata.toolVersion.trim() === '' ||
       !SHA256_RE.test(metadata.buildId) ||
       embeddingModel === null ||
       !hasCanonicalProvenance(metadata.provenance, embeddingModel)
@@ -1981,16 +2080,37 @@ async function validateKnowledgePackInternal(packDir: string): Promise<PackValid
         { titles },
       );
       const relationSupport = await connection.run<{
+        supportId: string;
         article: string;
         signature: string;
+        source: string;
+        target: string;
+        relation: string;
+        context: string;
         version: string;
       }>(
         'MATCH (p:RelationSupport) WHERE p.article_title IN $titles ' +
-          'RETURN p.article_title AS article, p.signature AS signature, ' +
+          'RETURN p.support_id AS supportId, p.article_title AS article, ' +
+          'p.signature AS signature, p.source_entity_id AS source, ' +
+          'p.target_entity_id AS target, p.relation AS relation, p.context AS context, ' +
           'p.extractor_version AS version ORDER BY article, signature',
         { titles },
       );
-      if (relationSupport.some((support) => support.version !== CVE_ADAPTER_VERSION)) {
+      if (
+        relationSupport.some((support) => {
+          const expectedSignature = JSON.stringify([
+            support.source,
+            support.relation,
+            support.target,
+            support.context,
+          ]);
+          return (
+            support.version !== CVE_ADAPTER_VERSION ||
+            support.signature !== expectedSignature ||
+            support.supportId !== JSON.stringify([support.article, expectedSignature])
+          );
+        })
+      ) {
         throw new Error('relation provenance has an incompatible extractor version');
       }
       processedArticles += sources.length;
@@ -2008,6 +2128,10 @@ async function validateKnowledgePackInternal(packDir: string): Promise<PackValid
         relationSupport as unknown as Array<Record<string, unknown>>,
       );
       for (const source of sources) {
+        const payloadObject = JSON.parse(source.payload) as unknown;
+        if (source.payload !== canonical(payloadObject)) {
+          throw new Error(`article source payload is not canonical: ${source.title}`);
+        }
         if (sha256(source.payload) !== source.hash) {
           throw new Error(`article source hash mismatch: ${source.title}`);
         }
@@ -2023,7 +2147,7 @@ async function validateKnowledgePackInternal(packDir: string): Promise<PackValid
           }
           applicationSourceHashes.delete(source.title);
         }
-        const graph = cveToGraph(JSON.parse(source.payload));
+        const graph = cveToGraph(payloadObject);
         if (!graph || graph.article.title !== source.title) {
           throw new Error(`article source adapter mismatch: ${source.title}`);
         }

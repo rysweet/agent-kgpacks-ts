@@ -28,6 +28,7 @@ import {
 
 import {
   DEFAULT_PACK_REPO,
+  DEFAULT_PACK_TAG,
   PACK_RELEASE_INDEX_SUFFIX,
   PACK_RELEASE_SIGNATURE_SUFFIX,
 } from './constants.js';
@@ -99,10 +100,7 @@ export function resolvePackBaseUrl(
 ): string {
   if (opts.baseUrl) return opts.baseUrl.replace(/\/+$/, '');
   const repo = opts.repo ?? DEFAULT_PACK_REPO;
-  if (!opts.tag) {
-    throw new PackInstallError('a release tag is required when resolving a static pack URL');
-  }
-  const tag = opts.tag;
+  const tag = opts.tag ?? DEFAULT_PACK_TAG;
   return `https://github.com/${repo}/releases/download/${tag}`;
 }
 
@@ -150,12 +148,14 @@ export async function discoverLatestPackBaseUrl(
       const release = value as {
         tag_name?: unknown;
         draft?: unknown;
+        prerelease?: unknown;
         assets?: unknown;
       };
       const tag = typeof release.tag_name === 'string' ? release.tag_name : '';
       const version = versionFromImmutableTag(name, tag);
       if (
         release.draft === true ||
+        release.prerelease === true ||
         version === null ||
         hasPrerelease(version) ||
         !Array.isArray(release.assets)
@@ -295,6 +295,7 @@ function assertIndex(value: unknown, expectedName: string, url: string): PackRel
   if (typeof idx.sha256 !== 'string' || !Array.isArray(idx.parts) || idx.parts.length === 0) {
     throw new PackInstallError(`pack index at ${url} has no parts or overall checksum`);
   }
+  const partFiles = new Set<string>();
   for (const part of idx.parts) {
     if (
       !part ||
@@ -305,6 +306,10 @@ function assertIndex(value: unknown, expectedName: string, url: string): PackRel
     ) {
       throw new PackInstallError(`pack index at ${url} has an invalid part entry`);
     }
+    if (partFiles.has(part.file)) {
+      throw new PackInstallError(`pack index at ${url} contains duplicate part ${part.file}`);
+    }
+    partFiles.add(part.file);
   }
   return idx as PackReleaseIndex;
 }

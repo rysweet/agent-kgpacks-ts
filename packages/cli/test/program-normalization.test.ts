@@ -5,6 +5,7 @@ import { buildProgram } from '../src/program.js';
 type ParseFrom = 'node' | 'user';
 
 const originalArgv = process.argv;
+const originalExecArgv = process.execArgv;
 const userArgv = [
   'update',
   '--base',
@@ -19,6 +20,7 @@ const userArgv = [
 
 afterEach(() => {
   process.argv = originalArgv;
+  process.execArgv = originalExecArgv;
 });
 
 function explicitArgv(from: ParseFrom): string[] {
@@ -55,4 +57,41 @@ describe.each(['parse', 'parseAsync'] as const)('%s invocation normalization', (
     expect(action).toHaveBeenCalledOnce();
     expect(update.opts()).toMatchObject({ targetVersion: '2.0.0' });
   });
+
+  it.each([
+    ['default process argv', false],
+    ['explicit process argv', true],
+  ] as const)('normalizes %s when parse options are omitted', async (_label, explicit) => {
+    process.argv = explicitArgv('node');
+    const program = buildProgram();
+    const update = program.commands.find((command) => command.name() === 'update');
+    if (!update) throw new Error('update command is not registered');
+    const action = vi.fn();
+    update.action(action);
+
+    const result = program[method](explicit ? process.argv : undefined);
+    if (method === 'parseAsync') await result;
+
+    expect(action).toHaveBeenCalledOnce();
+    expect(update.opts()).toMatchObject({ targetVersion: '2.0.0' });
+  });
+
+  it.each([undefined, {}] as const)(
+    'normalizes auto-detected eval argv with parse options %s',
+    async (parseOptions) => {
+      process.argv = [process.execPath, ...userArgv];
+      process.execArgv = ['--eval', 'void 0'];
+      const program = buildProgram();
+      const update = program.commands.find((command) => command.name() === 'update');
+      if (!update) throw new Error('update command is not registered');
+      const action = vi.fn();
+      update.action(action);
+
+      const result = program[method](undefined, parseOptions);
+      if (method === 'parseAsync') await result;
+
+      expect(action).toHaveBeenCalledOnce();
+      expect(update.opts()).toMatchObject({ targetVersion: '2.0.0' });
+    },
+  );
 });

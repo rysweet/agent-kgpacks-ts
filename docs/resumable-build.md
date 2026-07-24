@@ -20,10 +20,10 @@ This full-build checkpoint is not an incremental content update. The
 
 ### The checkpoint sidecar
 
-As it makes durable progress, the builder writes a `<out>.build-checkpoint.json`
-sidecar next to the output pack (e.g. `data/packs/cve/pack.db.build-checkpoint.json`).
-It records where the staged database lives plus an observational snapshot of
-progress:
+As it makes durable progress, the builder writes a sibling
+`<pack-dir>.build-work.build-checkpoint.json` sidecar (for example,
+`data/packs/cve.build-work.build-checkpoint.json`). It records where the staged
+database lives plus an observational snapshot of progress:
 
 ```jsonc
 {

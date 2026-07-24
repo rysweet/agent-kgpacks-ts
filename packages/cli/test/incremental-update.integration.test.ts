@@ -95,3 +95,20 @@ it('falls back to manifest validation for a legacy pack without schema-v2 payloa
     rmSync(temp, { recursive: true, force: true });
   }
 });
+
+it('rejects unsupported manifest schema versions', async () => {
+  const temp = mkdtempSync(join(tmpdir(), 'kgpacks-cli-unknown-schema-'));
+  try {
+    const pack = join(temp, 'unknown');
+    mkdirSync(pack);
+    writeFileSync(
+      join(pack, 'manifest.json'),
+      `${JSON.stringify({ name: 'unknown', version: '1.2.3', schemaVersion: '999' }, null, 2)}\n`,
+    );
+    const result = await runCli(['--packs-dir', temp, 'pack', 'validate', 'unknown'], {});
+    expect(result.code).not.toBe(EXIT_OK);
+    expect(result.stderr).toMatch(/unsupported schema version/i);
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});

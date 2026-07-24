@@ -48,6 +48,26 @@ function sha256(value: string): string {
 }
 
 describe('article-copy decomposition', () => {
+  it('truncates CVE descriptions without splitting Unicode surrogate pairs', () => {
+    const longDescription = `${'a'.repeat(1499)}😀tail`;
+    const graph = cveToGraph({
+      cveMetadata: { cveId: 'CVE-2026-10000', state: 'PUBLISHED' },
+      containers: { cna: { descriptions: [{ lang: 'en', value: longDescription }] } },
+    });
+    expect(graph?.article.sections[0].content).toBe(`${'a'.repeat(1499)}😀...`);
+    expect(Buffer.from(graph?.article.sections[0].content ?? '').toString('utf8')).toBe(
+      graph?.article.sections[0].content,
+    );
+
+    const entityGraph = cveToGraph({
+      cveMetadata: { cveId: 'CVE-2026-10001', state: 'PUBLISHED' },
+      containers: {
+        cna: { descriptions: [{ lang: 'en', value: `${'b'.repeat(199)}😀tail` }] },
+      },
+    });
+    expect(entityGraph?.extraction.entities[0].description).toBe(`${'b'.repeat(199)}😀`);
+  });
+
   it('embeds section content before chunk content and preserves both embedding slices', async () => {
     const { toLoadable } = await loadSubject();
     const payload = sourceRecords[0];

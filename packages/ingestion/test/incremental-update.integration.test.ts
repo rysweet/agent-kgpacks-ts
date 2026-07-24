@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -19,6 +20,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   buildCvePack,
   type Embedder,
+  publishBuiltCvePack,
   updateKnowledgePack,
   validateKnowledgePack,
 } from '../src/index.js';
@@ -200,6 +202,40 @@ describe('incremental CVE pack update', () => {
       ).rejects.toThrow(/corpus (commit|date)/i);
       expect(existsSync(invalidOutput)).toBe(false);
     }
+  });
+
+  it('rejects invalid pack IDs before reading source or staging paths', async () => {
+    await expect(
+      buildCvePack({
+        source: join(temp, 'missing-source.ndjson'),
+        output: join(temp, 'invalid-pack-output'),
+        packId: '../invalid',
+        version: '1.0.0',
+        embedder,
+        ...CORPUS_PROVENANCE,
+      }),
+    ).rejects.toThrow(/invalid pack ID/i);
+    await expect(
+      publishBuiltCvePack({
+        staging: join(temp, 'missing-staging'),
+        output: join(temp, 'invalid-publish-output'),
+        packId: '../invalid',
+        version: '1.0.0',
+        ...CORPUS_PROVENANCE,
+      }),
+    ).rejects.toThrow(/invalid pack ID/i);
+    await expect(
+      Reflect.apply(buildCvePack, undefined, [
+        {
+          source: join(temp, 'missing-source.ndjson'),
+          output: join(temp, 'invalid-runtime-pack-output'),
+          packId: undefined,
+          version: '1.0.0',
+          embedder,
+          ...CORPUS_PROVENANCE,
+        },
+      ]),
+    ).rejects.toThrow(/invalid pack ID/i);
   });
 
   it('canonicalizes object keys by Unicode scalar value', async () => {
@@ -416,13 +452,19 @@ describe('incremental CVE pack update', () => {
     rmSync(`${output}.work`, { recursive: true, force: true });
 
     const completedDigest = treeDigest(output);
-    const repeated = await updateKnowledgePack({
-      base,
-      delta: DELTA,
-      output,
-      version: '2.0.0',
-      embedder,
-    });
+    chmodSync(temp, 0o555);
+    let repeated;
+    try {
+      repeated = await updateKnowledgePack({
+        base,
+        delta: DELTA,
+        output,
+        version: '2.0.0',
+        embedder,
+      });
+    } finally {
+      chmodSync(temp, 0o755);
+    }
     expect(repeated.noop).toBe(true);
     expect(treeDigest(output)).toBe(completedDigest);
 

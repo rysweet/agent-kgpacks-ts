@@ -85,21 +85,31 @@ function normalizeParseInvocation(
   argv: readonly string[] | undefined,
   parseOptions: ParseOptions | undefined,
 ): readonly [readonly string[] | undefined, ParseOptions | undefined] {
-  if (parseOptions?.from === undefined) return [argv, parseOptions];
   const effectiveArgv = argv ?? process.argv;
   const electronProcess = process as NodeJS.Process & { defaultApp?: boolean };
+  const evalMode = process.execArgv.some((arg) => ['-e', '--eval', '-p', '--print'].includes(arg));
+  const effectiveFrom =
+    parseOptions?.from ??
+    (argv === undefined
+      ? evalMode
+        ? 'eval'
+        : process.versions.electron
+          ? 'electron'
+          : 'node'
+      : 'node');
   const userArgOffset =
-    parseOptions.from === 'user'
+    effectiveFrom === 'user'
       ? 0
-      : parseOptions.from === 'electron' && !electronProcess.defaultApp
+      : effectiveFrom === 'eval' || (effectiveFrom === 'electron' && !electronProcess.defaultApp)
         ? 1
         : 2;
+  const normalizedUserArgs = normalizeUpdateVersion(effectiveArgv.slice(userArgOffset));
+  if (effectiveFrom === 'eval') {
+    return [normalizedUserArgs, { ...parseOptions, from: 'user' }];
+  }
   return [
-    [
-      ...effectiveArgv.slice(0, userArgOffset),
-      ...normalizeUpdateVersion(effectiveArgv.slice(userArgOffset)),
-    ],
-    parseOptions,
+    [...effectiveArgv.slice(0, userArgOffset), ...normalizedUserArgs],
+    { ...parseOptions, from: effectiveFrom },
   ];
 }
 

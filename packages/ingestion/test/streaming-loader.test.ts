@@ -7,8 +7,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { Database, type Connection } from '@kgpacks/db';
 
+import { IngestionError } from '../src/errors.js';
+import { createSchema, type LoadableArticle } from '../src/loader.js';
 import { createPackWriter, type PackWriterStats } from '../src/streaming-loader.js';
-import type { LoadableArticle } from '../src/loader.js';
 import { makeArticle, oneHot } from './helpers.js';
 
 function loadable(
@@ -132,6 +133,16 @@ describe('createPackWriter — streaming round-trip', () => {
     expect(forward).toEqual([{ rel: 'anticipates' }]);
   });
 
+  it('removes relation support whose endpoints never materialized', async () => {
+    const rows = await conn.run<{ n: number | bigint }>(
+      'MATCH (p:RelationSupport) ' +
+        'WHERE NOT EXISTS { MATCH (s:Entity) WHERE s.entity_id = p.source_entity_id } ' +
+        'OR NOT EXISTS { MATCH (t:Entity) WHERE t.entity_id = p.target_entity_id } ' +
+        'RETURN count(p) AS n',
+    );
+    expect(Number(rows[0].n)).toBe(0);
+  });
+
   it('persists Article.expansion_depth (default 0) like loadPack, so /stats by_depth works', async () => {
     // Streaming articles carry no expansion depth, so they must default to 0 (a
     // queryable value), not NULL — otherwise a streaming-built pack's by_depth is
@@ -142,6 +153,20 @@ describe('createPackWriter — streaming round-trip', () => {
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {
       expect(row.depth).toBe(0);
+    }
+  });
+
+  it('rejects resume from the incompatible pre-RelationSupport schema', async () => {
+    const db = new Database();
+    const conn = db.connect();
+    try {
+      await createSchema(conn);
+      await conn.run('DROP TABLE RelationSupport');
+      await expect(createPackWriter(conn, { resume: true })).rejects.toBeInstanceOf(IngestionError);
+      await expect(createPackWriter(conn, { resume: true })).rejects.toThrow(/legacy schema/i);
+    } finally {
+      conn.close();
+      db.close();
     }
   });
 });

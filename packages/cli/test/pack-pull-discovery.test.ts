@@ -1,9 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { discoverLatestPackBaseUrl, pullPack } from '../src/pack-pull.js';
+import { discoverLatestPackBaseUrl, pullPack, resolvePackBaseUrl } from '../src/pack-pull.js';
 
 describe('latest immutable pack discovery', () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it('keeps the exported static resolver defaulting to the packs tag', () => {
+    expect(resolvePackBaseUrl({})).toBe(
+      'https://github.com/rysweet/agent-kgpacks-ts/releases/download/packs',
+    );
+  });
 
   it('paginates releases and recognizes dated immutable tags', async () => {
     const firstPage = Array.from({ length: 100 }, (_, index) => ({
@@ -118,6 +124,68 @@ describe('latest immutable pack discovery', () => {
     await expect(discoverLatestPackBaseUrl('cve', 'owner/repo')).rejects.toThrow(
       /no immutable release/i,
     );
+  });
+
+  it('ignores GitHub-marked prereleases even when the tag is stable-looking', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(
+        new Response(
+          JSON.stringify([
+            {
+              tag_name: 'cve-v3.0.0',
+              draft: false,
+              prerelease: true,
+              assets: [{ name: 'cve.pack-release.json' }, { name: 'cve.pack-release.json.sig' }],
+            },
+            {
+              tag_name: 'cve-v2.0.0',
+              draft: false,
+              prerelease: false,
+              assets: [{ name: 'cve.pack-release.json' }, { name: 'cve.pack-release.json.sig' }],
+            },
+          ]),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    await expect(discoverLatestPackBaseUrl('cve', 'owner/repo')).resolves.toBe(
+      'https://github.com/owner/repo/releases/download/cve-v2.0.0',
+    );
+  });
+
+  it('rejects duplicate part filenames before downloading any part', async () => {
+    const index = {
+      name: 'cve',
+      version: '1.0.0',
+      format: 'tar.gz',
+      sha256: '0'.repeat(64),
+      totalBytes: 2,
+      parts: [
+        { file: 'cve.tar.gz.000', bytes: 1, sha256: '1'.repeat(64) },
+        { file: 'cve.tar.gz.000', bytes: 1, sha256: '2'.repeat(64) },
+      ],
+    };
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      return Promise.resolve(
+        url.endsWith('.sig')
+          ? new Response('', { status: 404 })
+          : new Response(JSON.stringify(index), { status: 200 }),
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      pullPack({
+        name: 'cve',
+        packsDir: '/unused',
+        baseUrl: 'https://mirror.example/releases',
+        noVerify: true,
+      }),
+    ).rejects.toThrow(/duplicate part/i);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('orders equal-precedence candidates by full version before tag bytewise', async () => {
