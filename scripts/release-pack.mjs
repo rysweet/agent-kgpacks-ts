@@ -380,9 +380,7 @@ function releaseIsDraft(t) {
   if (result.error || result.status !== 0) {
     const detail =
       result.error?.message || String(result.stderr).trim() || `gh exited ${result.status}`;
-    throw new Error(
-      `cannot determine whether release ${t} is a draft: ${detail}`,
-    );
+    throw new Error(`cannot determine whether release ${t} is a draft: ${detail}`);
   }
   const value = String(result.stdout).trim();
   if (value !== 'true' && value !== 'false') {

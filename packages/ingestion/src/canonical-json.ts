@@ -21,8 +21,7 @@ export function canonicalJson(value: unknown): string {
     return `{${Object.keys(value as Record<string, unknown>)
       .sort(compareUnicodeScalars)
       .map(
-        (key) =>
-          `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`,
+        (key) => `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`,
       )
       .join(',')}}`;
   }

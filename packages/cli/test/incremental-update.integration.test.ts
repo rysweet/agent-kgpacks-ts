@@ -107,7 +107,7 @@ it('rejects unsupported manifest schema versions', async () => {
     );
     const result = await runCli(['--packs-dir', temp, 'pack', 'validate', 'unknown'], {});
     expect(result.code).not.toBe(EXIT_OK);
-    expect(result.stderr).toMatch(/unsupported schema version/i);
+    expect(result.stderr).toMatch(/unsupported manifest schema version/i);
   } finally {
     rmSync(temp, { recursive: true, force: true });
   }
