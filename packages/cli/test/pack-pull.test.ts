@@ -7,7 +7,6 @@
 // archive; a localhost server stands in for the GitHub release host.
 
 import { execFileSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
 import {
   createReadStream,
   mkdirSync,
@@ -24,23 +23,14 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { PackInstallError } from '@kgpacks/packs';
+import { buildValidCvePack } from '../../../test/helpers/valid-cve-pack.js';
 
 import { pullPack } from '../src/pack-pull.js';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const releaseScript = join(repoRoot, 'scripts', 'release-pack.mjs');
 const PACK_NAME = 'world-history';
-// Incompressible random bytes so a small --part-size yields a genuine multi-part
-// archive (compressible content would gzip down to a single part).
-const DB_BYTES = randomBytes(8192);
-
-const manifest = {
-  name: PACK_NAME,
-  version: '1.2.0',
-  description: 'World history knowledge pack',
-  graph_stats: { articles: 10, entities: 20, relationships: 15, size_mb: 1.2 },
-  eval_scores: { recall_at_5: 0.8 },
-};
+let dbBytes: Buffer;
 
 let base: string;
 let releaseDir: string;
@@ -52,9 +42,8 @@ beforeAll(async () => {
   const fixtures = mkdtempSync(join(tmpdir(), 'kgpacks-pull-fixtures-'));
   const packsDir = join(fixtures, 'packs');
   const packDir = join(packsDir, PACK_NAME);
-  mkdirSync(packDir, { recursive: true });
-  writeFileSync(join(packDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
-  writeFileSync(join(packDir, 'pack.db'), DB_BYTES);
+  await buildValidCvePack(packDir, PACK_NAME, '1.2.0');
+  dbBytes = readFileSync(join(packDir, 'pack.db'));
 
   releaseDir = join(fixtures, 'release');
   mkdirSync(releaseDir, { recursive: true });
@@ -128,7 +117,7 @@ describe('pack pull (real release artifacts → real streaming install)', () => 
     expect(result.name).toBe(PACK_NAME);
     expect(result.version).toBe('1.2.0');
     expect(result.parts).toBeGreaterThan(1);
-    expect(readFileSync(join(result.path, 'pack.db')).equals(DB_BYTES)).toBe(true);
+    expect(readFileSync(join(result.path, 'pack.db')).equals(dbBytes)).toBe(true);
     expect(JSON.parse(readFileSync(join(result.path, 'manifest.json'), 'utf8')).name).toBe(
       PACK_NAME,
     );

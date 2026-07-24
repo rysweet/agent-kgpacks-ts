@@ -16,7 +16,6 @@ export const MANIFEST_FILENAME = 'manifest.json';
 // Ported verbatim from the upstream source: 1–64 chars, alphanumeric lead, then
 // ASCII letters/digits/underscore/hyphen. Anchored + bounded ⇒ ReDoS-safe.
 export const PACK_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
-export const IMMUTABLE_PACK_VERSION_RE = /^[0-9A-Za-z]+(?:[._-][0-9A-Za-z]+)*$/;
 
 const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -45,7 +44,13 @@ export interface EvalScores {
  */
 export interface PackProvenance {
   /** Source corpus the records were built from (e.g. cvelistV5 @ a commit). */
-  corpus?: { name?: string; commit?: string | null; date?: string | null; [k: string]: unknown };
+  corpus?: {
+    name?: string;
+    commit?: string | null;
+    date?: string | null;
+    tag?: string | null;
+    [k: string]: unknown;
+  };
   /** Embedding model used to embed every record (deterministic). */
   embedding?: { model?: string; dimensions?: number; [k: string]: unknown };
   /** Builder identity + when the pack was produced (UTC ISO-8601). */
@@ -133,7 +138,7 @@ function deepSanitize(value: unknown): unknown {
 // Declared string fields per provenance section. Present values must be strings
 // (or null/absent for undeterminable ones); anything else is a hard error.
 const PROVENANCE_STRING_FIELDS: Record<string, readonly string[]> = {
-  corpus: ['name', 'commit', 'date'],
+  corpus: ['name', 'commit', 'date', 'tag'],
   embedding: ['model'],
   build: ['date', 'tool_version'],
 };
@@ -204,13 +209,9 @@ export function validateManifest(value: unknown): PackManifest {
       `invalid pack name ${JSON.stringify(name)} (must match PACK_NAME_RE)`,
     );
   }
-  const validVersion =
-    typeof version === 'string' &&
-    (isValidSemver(version) ||
-      (value.schemaVersion === '2' && IMMUTABLE_PACK_VERSION_RE.test(version)));
-  if (!validVersion) {
+  if (typeof version !== 'string' || !isValidSemver(version)) {
     throw new ManifestValidationError(
-      `invalid version ${JSON.stringify(version)} (must be SemVer 2.0, or an immutable schema-v2 version)`,
+      `invalid version ${JSON.stringify(version)} (must be SemVer 2.0)`,
     );
   }
   if ('description' in value && typeof value.description !== 'string') {

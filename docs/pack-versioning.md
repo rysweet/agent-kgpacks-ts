@@ -27,10 +27,9 @@ Pack **manifest** `version` fields use a **SemVer 2.0** string derived from the
 tag, so `wikigr pack info cve` and the registry's version comparison (see
 [`@kgpacks/packs` versioning](packages/packs.md)) order releases correctly.
 
-The schema-v2 incremental API requires the intersection of SemVer 2.0
-and the filesystem-safe token constraint
-`^[0-9A-Za-z]+(?:[._-][0-9A-Za-z]+)*$`. Values such as `2026.7.0` satisfy both.
-A target version must differ from its base version.
+The schema-v2 incremental API requires strict SemVer 2.0, including valid
+prerelease and build metadata. A target version must differ from its base
+version.
 
 > **Tag vs. version — the month is _not_ zero-padded in the version.** The git
 > **tag** zero-pads the month for readable, lexically-sortable tags
@@ -75,14 +74,16 @@ release index mirrors the manifest block so they can be cross-checked:
 | `corpus.name`          | `"cvelistV5"`               | Source corpus identifier.                                          |
 | `corpus.commit`        | `"a1b2c3d4…"`               | The exact upstream commit SHA the records were built from.         |
 | `corpus.date`          | `"2025-06-14"`              | Publish/snapshot date of that corpus revision (UTC, `YYYY-MM-DD`). |
+| `corpus.tag`           | `"cve_2025-06-14_0000Z"`    | Human-readable upstream release tag, preserved separately.         |
 | `embedding.model`      | `"Xenova/bge-base-en-v1.5"` | The BGE model id used to embed every record (deterministic).       |
 | `embedding.dimensions` | `768`                       | Embedding vector length.                                           |
 | `build.date`           | `"2025-06-15T04:22:10Z"`    | When the pack was built (UTC, ISO-8601).                           |
 | `build.tool_version`   | `"agent-kgpacks-ts@0.0.0"`  | The builder version that produced the pack.                        |
 
-Legacy builders may use `"unknown"` for unavailable values. Schema-v2
-provenance permits `null` for unavailable corpus commit/date values and omits
-wall-clock build dates from deterministic outputs.
+Legacy builders may use `"unknown"` for unavailable values. Schema-v2 CVE packs
+require a full lowercase 40-character Git SHA-1 and a real UTC calendar date;
+tags, branches, abbreviations, malformed dates, and `"unknown"` are rejected.
+Wall-clock build dates remain omitted from deterministic outputs.
 
 ### Example `manifest.json`
 
@@ -188,9 +189,12 @@ version pin its explicit release tag.
 
 ## Publishing with provenance
 
-`scripts/build-cve-pack.mjs` stamps provenance into the manifest. The release
-script mirrors that provenance into the release index; command-line corpus/model
-overrides affect the index only and do not rewrite the packaged manifest:
+`scripts/build-cve-pack.mjs` stamps the exact corpus commit and date into the
+database and manifest. Incremental updates preserve those values without
+normalization. The release script mirrors the same values into the release
+index. For schema-v2 packs, command-line provenance values must exactly match
+the manifest; only legacy packs without durable provenance may fill missing
+release-index values from command-line flags:
 
 ```bash
 # Publish using the default manifest-derived tag
@@ -204,12 +208,13 @@ node scripts/release-pack.mjs --pack cve --tag cve-2025.06 --dry-run --out-dir /
 cat /tmp/cve-rel/cve.pack-release.json | jq .provenance
 ```
 
-| Flag              | Default                      | Meaning                                                                  |
-| ----------------- | ---------------------------- | ------------------------------------------------------------------------ |
-| `--tag`           | `<name>-v<manifest.version>` | Immutable release tag; dated tags must imply the exact manifest version. |
-| `--corpus-commit` | manifest provenance          | Override the release-index corpus commit.                                |
-| `--corpus-date`   | manifest provenance          | Override the release-index corpus date.                                  |
-| `--model`         | manifest model               | Override the release-index embedding model ID.                           |
+| Flag              | Default                      | Meaning                                                                                          |
+| ----------------- | ---------------------------- | ------------------------------------------------------------------------------------------------ |
+| `--tag`           | `<name>-v<manifest.version>` | Immutable release tag; dated tags must imply the exact manifest version.                         |
+| `--corpus-commit` | manifest provenance          | Exact-match assertion for schema v2; fills a missing legacy release-index value.                 |
+| `--corpus-date`   | manifest provenance          | Exact-match assertion for schema v2; fills a missing legacy release-index value.                 |
+| `--corpus-tag`    | manifest provenance          | Exact-match assertion for the separately preserved source release tag.                           |
+| `--model`         | manifest model               | Exact-match assertion for schema v2; supplies the legacy release-index embedding model when set. |
 
 See [docs/cve.md](cve.md#publish-a-pack-as-a-release-artifact) for the full
 publishing flow and the remaining `release-pack.mjs` flags, and

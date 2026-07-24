@@ -5,7 +5,6 @@
 // docs/packages/packs.md for the full API reference and security model.
 
 export {
-  IMMUTABLE_PACK_VERSION_RE,
   MANIFEST_FILENAME,
   PACK_NAME_RE,
   validateManifest,

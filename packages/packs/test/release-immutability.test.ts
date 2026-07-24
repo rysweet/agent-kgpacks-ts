@@ -1,31 +1,43 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { buildValidCvePack } from '../../../test/helpers/valid-cve-pack.js';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const releaseScript = join(repoRoot, 'scripts', 'release-pack.mjs');
 
 describe('immutable pack release artifacts', () => {
+  let templateRoot: string;
+  let templatePack: string;
   let temp: string;
   let packsDir: string;
+
+  beforeAll(async () => {
+    templateRoot = mkdtempSync(join(tmpdir(), 'kgpacks-release-template-'));
+    templatePack = join(templateRoot, 'cve');
+    await buildValidCvePack(templatePack, 'cve', '2026.7.0');
+  }, 60_000);
 
   beforeEach(() => {
     temp = mkdtempSync(join(tmpdir(), 'kgpacks-release-immutable-'));
     packsDir = join(temp, 'packs');
     const packDir = join(packsDir, 'cve');
-    mkdirSync(packDir, { recursive: true });
-    writeFileSync(
-      join(packDir, 'manifest.json'),
-      `${JSON.stringify({ name: 'cve', version: '2026.7.0' }, null, 2)}\n`,
-    );
-    writeFileSync(join(packDir, 'pack.db'), randomBytes(4096));
+    cpSync(templatePack, packDir, { recursive: true });
   });
 
+  afterAll(() => rmSync(templateRoot, { recursive: true, force: true }));
   afterEach(() => rmSync(temp, { recursive: true, force: true }));
 
   it('produces byte-identical multipart artifacts for identical inputs', () => {
@@ -113,10 +125,101 @@ describe('immutable pack release artifacts', () => {
     expect(result.stderr).toMatch(/tar failed.*exit 42/i);
   });
 
-  it('preserves the legacy release path while adding schema-v2 validation', () => {
-    expect(readFileSync(releaseScript, 'utf8')).not.toContain(
-      'refusing to publish a pack without comprehensive schema-v2 validation',
+  it('falls back to structural packaging for legacy packs and rejects unknown schemas', () => {
+    const manifestPath = join(packsDir, 'cve', 'manifest.json');
+    writeFileSync(
+      manifestPath,
+      `${JSON.stringify({ name: 'cve', version: '1.2.3', schemaVersion: '1' }, null, 2)}\n`,
     );
+    const legacyOut = join(temp, 'legacy');
+    const legacy = spawnSync(
+      'node',
+      [
+        releaseScript,
+        '--pack',
+        'cve',
+        '--packs-dir',
+        packsDir,
+        '--out-dir',
+        legacyOut,
+        '--dry-run',
+      ],
+      { encoding: 'utf8' },
+    );
+    expect(legacy.status, legacy.stderr).toBe(0);
+    expect(readFileSync(join(legacyOut, 'cve.pack-release.json'), 'utf8')).toContain(
+      '"version": "1.2.3"',
+    );
+
+    writeFileSync(
+      manifestPath,
+      `${JSON.stringify({ name: 'cve', version: '1.2.3', schemaVersion: '999' }, null, 2)}\n`,
+    );
+    const unknown = spawnSync(
+      'node',
+      [releaseScript, '--pack', 'cve', '--packs-dir', packsDir, '--dry-run'],
+      { encoding: 'utf8' },
+    );
+    expect(unknown.status).toBe(2);
+    expect(unknown.stderr).toMatch(/unsupported manifest schema/i);
+  });
+
+  it('validates database contents even during a dry run', () => {
+    writeFileSync(join(packsDir, 'cve', 'pack.db'), 'tampered');
+    const outDir = join(temp, 'invalid');
+    const result = spawnSync(
+      'node',
+      [releaseScript, '--pack', 'cve', '--packs-dir', packsDir, '--out-dir', outDir, '--dry-run'],
+      { encoding: 'utf8' },
+    );
+    expect(result.status).toBe(1);
+    expect(() => readFileSync(join(outDir, 'cve.pack-release.json'))).toThrow();
+  });
+
+  it('refuses unsigned publication and limits --no-sign to dry runs', () => {
+    for (const extra of [[], ['--no-sign']]) {
+      const result = spawnSync(
+        'node',
+        [releaseScript, '--pack', 'cve', '--packs-dir', packsDir, ...extra],
+        { encoding: 'utf8', env: { ...process.env, KGPACKS_SIGNING_KEY: undefined } },
+      );
+      expect(result.status).toBe(2);
+      expect(result.stderr).toMatch(
+        extra.length ? /allowed only with --dry-run/i : /requires a signing key/i,
+      );
+    }
+  });
+
+  it('allows explicitly unsigned dry-run artifacts', () => {
+    const outDir = join(temp, 'unsigned-dry-run');
+    execFileSync(
+      'node',
+      [
+        releaseScript,
+        '--pack',
+        'cve',
+        '--packs-dir',
+        packsDir,
+        '--out-dir',
+        outDir,
+        '--no-sign',
+        '--dry-run',
+      ],
+      { stdio: 'ignore' },
+    );
+    expect(readFileSync(join(outDir, 'cve.pack-release.json'), 'utf8')).toContain('"name": "cve"');
+  });
+
+  it('mirrors corpus commit and date exactly into the release index', () => {
+    const manifest = JSON.parse(readFileSync(join(packsDir, 'cve', 'manifest.json'), 'utf8'));
+    const outDir = join(temp, 'provenance');
+    execFileSync(
+      'node',
+      [releaseScript, '--pack', 'cve', '--packs-dir', packsDir, '--out-dir', outDir, '--dry-run'],
+      { stdio: 'ignore' },
+    );
+    const index = JSON.parse(readFileSync(join(outDir, 'cve.pack-release.json'), 'utf8'));
+    expect(index.provenance).toEqual(manifest.provenance);
   });
 
   it('derives the default immutable tag from the manifest version', () => {

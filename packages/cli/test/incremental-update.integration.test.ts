@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -36,6 +36,9 @@ it('drives the real CVE update engine through the public CLI', async () => {
       packId: 'cve-fixture',
       version: '1.0.0',
       embedder,
+      corpusCommit: '0123456789abcdef0123456789abcdef01234567',
+      corpusDate: '2026-07-03',
+      corpusTag: 'cve_2026-07-03_0000Z',
     });
     const result = await runCli(
       [
@@ -75,3 +78,20 @@ it('drives the real CVE update engine through the public CLI', async () => {
     rmSync(temp, { recursive: true, force: true });
   }
 }, 30_000);
+
+it('falls back to manifest validation for a legacy pack without schema-v2 payloads', async () => {
+  const temp = mkdtempSync(join(tmpdir(), 'kgpacks-cli-legacy-'));
+  try {
+    const legacy = join(temp, 'legacy');
+    mkdirSync(legacy);
+    writeFileSync(
+      join(legacy, 'manifest.json'),
+      `${JSON.stringify({ name: 'legacy', version: '1.2.3' }, null, 2)}\n`,
+    );
+    const result = await runCli(['--packs-dir', temp, 'pack', 'validate', 'legacy'], {});
+    expect(result.code, result.stderr).toBe(EXIT_OK);
+    expect(parseStdout(result)).toEqual({ valid: true, name: 'legacy', version: '1.2.3' });
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});

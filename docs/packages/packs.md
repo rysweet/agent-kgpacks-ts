@@ -171,7 +171,7 @@ interface PackManifest {
 | Field          | Required | Validated when present                                                                                                                                                                  |
 | -------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `name`         | yes      | matches [`PACK_NAME_RE`](#pack_name_re)                                                                                                                                                 |
-| `version`      | yes      | valid SemVer 2.0; when `schemaVersion` is exact string `"2"`, the structural loader also accepts [`IMMUTABLE_PACK_VERSION_RE`](#immutable_pack_version_re)                              |
+| `version`      | yes      | valid SemVer 2.0 for every manifest schema                                                                                                                                              |
 | `description`  | no       | string                                                                                                                                                                                  |
 | `graph_stats`  | no       | every declared value is a non-negative finite number                                                                                                                                    |
 | `eval_scores`  | no       | every value is a finite number                                                                                                                                                          |
@@ -197,17 +197,6 @@ PACK_NAME_RE.test('../etc'); // false — '.' is not allowed, no leading separat
 PACK_NAME_RE.test(''); // false — must be at least 1 char
 PACK_NAME_RE.test('a'.repeat(65)); // false — max 64 chars
 ```
-
-### `IMMUTABLE_PACK_VERSION_RE`
-
-```ts
-const IMMUTABLE_PACK_VERSION_RE: RegExp = /^[0-9A-Za-z]+(?:[._-][0-9A-Za-z]+)*$/;
-```
-
-When `schemaVersion` is exact string `"2"`, `validateManifest` accepts this
-filesystem-safe token grammar in addition to SemVer 2.0. The incremental update
-API is stricter: target versions must satisfy both this expression and SemVer
-2.0.
 
 ### `validateManifest(value: unknown): PackManifest`
 

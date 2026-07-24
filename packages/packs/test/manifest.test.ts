@@ -71,11 +71,13 @@ describe('@kgpacks/packs — validateManifest', () => {
     expect(validateManifest(m)).toEqual(m);
   });
 
-  it('accepts the immutable update version grammar for schema-v2 manifests', () => {
-    expect(validateManifest({ name: 'cve', version: '2026.07', schemaVersion: '2' }).version).toBe(
-      '2026.07',
+  it('requires strict SemVer 2.0 for schema-v2 manifests', () => {
+    expect(validateManifest({ name: 'cve', version: '2026.7.0', schemaVersion: '2' }).version).toBe(
+      '2026.7.0',
     );
-    expect(() => validateManifest({ name: 'cve', version: '2026.07' })).toThrow();
+    expect(() => validateManifest({ name: 'cve', version: '2026.07', schemaVersion: '2' })).toThrow(
+      /SemVer 2\.0/,
+    );
   });
 
   it.each([

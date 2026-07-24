@@ -46,12 +46,9 @@ wikigr update --resume <work-dir>
 
 `wikigr pack update` is an exact alias. Fresh mode requires all four required
 options. Resume mode accepts only `--resume`; the fresh and resume option sets
-are mutually exclusive. The target version must be valid SemVer 2.0, must also
-match the filesystem-safe token constraint
-`^[0-9A-Za-z]+(?:[._-][0-9A-Za-z]+)*$`, and must differ from the base version.
-The difference is exact string inequality after validation. The safe-token
-intersection intentionally excludes SemVer build metadata because `+` is not a
-safe-token character.
+are mutually exclusive. The target version must be strict SemVer 2.0, including
+the standard prerelease and build-metadata grammar, and must differ from the
+base version. The difference is exact string inequality after validation.
 
 The canonicalized base, output, and work paths must be pairwise disjoint: no
 path may equal, contain, or be contained by another. Symlinks and non-directory
@@ -504,8 +501,9 @@ A schema-v2 incremental output has this shape:
   "provenance": {
     "corpus": {
       "name": "cvelistV5",
-      "commit": "cve_2026-07-16_0000Z",
-      "date": "2026-07-16"
+      "commit": "0123456789abcdef0123456789abcdef01234567",
+      "date": "2026-07-16",
+      "tag": "cve_2026-07-16_0000Z"
     },
     "embedding": {
       "model": "Xenova/bge-base-en-v1.5",
@@ -648,6 +646,14 @@ Every manifest identity, lineage, provenance, count, record, statistic, and
 file field is checked against durable authority. Changing related fields
 together must not make tampering pass.
 
+Vector validation keyset-scans live rows in pages of 256 and checks every
+embedding's dimensions and finite values. Exact coverage follows from the
+validated native HNSW definition over that complete fixed-width property;
+LadybugDB prevents indexed-property mutation, and updates rebuild the indexes
+after final graph state. A bounded 32-result query additionally rejects
+duplicate or dangling hits without requesting the complete index as one top-k
+result or materializing it in Node memory.
+
 ## Resume and publication
 
 Incremental resume uses `<work-dir>/update-state.json`; full-build resume uses a
@@ -677,6 +683,12 @@ Durable update state records:
 - current durable phase;
 - each delta ordinal, key, canonical payload hash, and advisory processed
   status.
+
+Final articles are loaded in stable-key batches of 256. Each batch commits,
+checkpoints LadybugDB, and then records sidecar progress. A fault after any
+batch resumes from durable database evidence. Coverage uses 257 delta records,
+compares the resumed graph with an uninterrupted run, and then compares the
+finalized staged `pack.db` and `manifest.json` bytes with the published output.
 
 Schema-v2 directory closure requires exactly `manifest.json` and `pack.db`, so
 the two saved base hashes cover the complete eligible base tree. Resume
@@ -715,8 +727,10 @@ Publication follows this order:
    `renameat2(RENAME_NOREPLACE)`;
 9. fsync the output parent directory.
 
-The implementation must use a tested no-replace promotion primitive, not
-Node.js `rename()` followed by a pre-check. If the platform or filesystem
+The packaged native helper probes the target filesystem with the Linux
+`renameat2(RENAME_NOREPLACE)` syscall, verifying both a preserved collision and
+a successful promotion. It does not use Node.js `rename()` followed by a
+pre-check or permit a copy fallback. If the platform or filesystem
 cannot guarantee `RENAME_NOREPLACE`, the update fails before work starts. A
 destination that appears during promotion is never replaced. After `RENAME_NOREPLACE` reports the collision, the engine completely validates
 that destination and proves equivalence across request identity, lineage,

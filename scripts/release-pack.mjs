@@ -30,13 +30,18 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  statSync,
   writeFileSync,
 } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import {
+  INCREMENTAL_SCHEMA_VERSION,
+  validateKnowledgePack,
+} from '../packages/ingestion/dist/index.js';
+import { validateManifest } from '../packages/packs/dist/index.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -54,13 +59,15 @@ const notes = opt('--notes');
 const modelArg = opt('--model');
 const corpusCommitArg = opt('--corpus-commit');
 const corpusDateArg = opt('--corpus-date');
+const corpusTagArg = opt('--corpus-tag');
 const dryRun = has('--dry-run');
 
 if (!pack) {
   console.error(
     'usage: release-pack.mjs --pack <name> [--packs-dir dir] [--tag t] [--repo owner/repo]\n' +
       '       [--part-size 1900MiB] [--out-dir dir] [--notes text] [--model id]\n' +
-      '       [--corpus-commit sha] [--corpus-date YYYY-MM-DD] [--sign|--no-sign] [--dry-run]',
+      '       [--corpus-commit sha] [--corpus-date YYYY-MM-DD] [--corpus-tag tag]\n' +
+      '       [--sign|--no-sign] [--dry-run]',
   );
   process.exit(2);
 }
@@ -108,9 +115,23 @@ for (const [label, p] of [
   }
 }
 
-const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+let manifest;
+try {
+  manifest = validateManifest(JSON.parse(readFileSync(manifestPath, 'utf8')));
+} catch (error) {
+  console.error(`invalid manifest: ${error?.message ?? error}`);
+  process.exit(2);
+}
 if (manifest.name !== pack) {
   console.error(`manifest name ${JSON.stringify(manifest.name)} does not match --pack ${pack}`);
+  process.exit(2);
+}
+const legacyManifest = manifest.schemaVersion == null || manifest.schemaVersion === '1';
+if (!legacyManifest && manifest.schemaVersion !== INCREMENTAL_SCHEMA_VERSION) {
+  console.error(
+    `refusing to release unsupported manifest schema ${JSON.stringify(manifest.schemaVersion)}; ` +
+      `expected ${INCREMENTAL_SCHEMA_VERSION}`,
+  );
   process.exit(2);
 }
 const model = modelArg ?? manifest.model ?? manifest.synthesis_model;
@@ -155,8 +176,22 @@ function buildProvenance() {
       ? manifest.provenance
       : {};
   const corpus = { ...(base.corpus ?? {}) };
-  if (corpusCommitArg) corpus.commit = corpusCommitArg;
-  if (corpusDateArg) corpus.date = corpusDateArg;
+  if (corpusCommitArg !== undefined && corpusCommitArg !== corpus.commit) {
+    console.error('--corpus-commit must exactly match schema-v2 manifest provenance');
+    process.exit(2);
+  }
+  if (corpusDateArg !== undefined && corpusDateArg !== corpus.date) {
+    console.error('--corpus-date must exactly match schema-v2 manifest provenance');
+    process.exit(2);
+  }
+  if (corpusTagArg !== undefined && corpusTagArg !== corpus.tag) {
+    console.error('--corpus-tag must exactly match schema-v2 manifest provenance');
+    process.exit(2);
+  }
+  if (modelArg !== undefined && modelArg !== base.embedding?.model) {
+    console.error('--model must exactly match schema-v2 manifest provenance');
+    process.exit(2);
+  }
   const embedding = { ...(base.embedding ?? {}) };
   if (model && !embedding.model) embedding.model = model;
   const build = { ...(base.build ?? {}) };
@@ -289,10 +324,10 @@ function gh(ghArgs) {
   }
 }
 
-// Optional Ed25519 signing of the release index. The private key comes from the
+// Ed25519 signing of the release index. The private key comes from the
 // KGPACKS_SIGNING_KEY env (a base64 PKCS8 DER key, populated from an Actions
-// secret in CI); it is never passed on argv or logged. When absent, the release
-// is published UNSIGNED (integrity-only) unless --sign forces an error.
+// secret in CI); it is never passed on argv or logged. Unsigned artifacts are
+// allowed only for an explicit dry run and can never be published.
 const signFlag = has('--sign');
 const noSignFlag = has('--no-sign');
 function resolveSigning() {
@@ -300,11 +335,15 @@ function resolveSigning() {
     console.error('--sign and --no-sign are mutually exclusive');
     process.exit(2);
   }
+  if (noSignFlag && !dryRun) {
+    console.error('--no-sign is unsafe and is allowed only with --dry-run');
+    process.exit(2);
+  }
   if (noSignFlag) return null;
   const secret = process.env.KGPACKS_SIGNING_KEY;
   if (!secret) {
-    if (signFlag) {
-      console.error('--sign requires a signing key in KGPACKS_SIGNING_KEY');
+    if (signFlag || !dryRun) {
+      console.error('release publication requires a signing key in KGPACKS_SIGNING_KEY');
       process.exit(2);
     }
     return null;
@@ -361,21 +400,30 @@ function remoteAssets(t) {
 
 async function hashAsset(path) {
   const hash = createHash('sha256');
-  for await (const chunk of createReadStream(path)) hash.update(chunk);
-  return `sha256:${hash.digest('hex')}`;
+  let size = 0;
+  for await (const chunk of createReadStream(path)) {
+    size += chunk.length;
+    hash.update(chunk);
+  }
+  return { size, digest: `sha256:${hash.digest('hex')}` };
 }
 
-async function matchingRemoteAssets(t, assets) {
-  const remote = remoteAssets(t);
-  if (!remote) return null;
+async function localAssets(assets) {
   const local = new Map();
   for (const asset of assets) {
+    const { size, digest } = await hashAsset(asset);
     local.set(basename(asset), {
       path: asset,
-      size: statSync(asset).size,
-      digest: await hashAsset(asset),
+      size,
+      digest,
     });
   }
+  return local;
+}
+
+function matchingRemoteAssets(t, local) {
+  const remote = remoteAssets(t);
+  if (!remote) return null;
   for (const [name, expected] of remote) {
     const asset = local.get(name);
     if (!asset || expected.size !== asset.size || expected.digest !== asset.digest) return null;
@@ -383,22 +431,17 @@ async function matchingRemoteAssets(t, assets) {
   return { remote, local };
 }
 
-async function exactReleaseExists(t, assets) {
-  const matching = await matchingRemoteAssets(t, assets);
-  return (
-    matching !== null &&
-    matching.remote.size === matching.local.size &&
-    assets.every(
-      (asset) =>
-        matching.remote.get(basename(asset))?.digest ===
-        matching.local.get(basename(asset))?.digest,
-    )
-  );
+function exactReleaseExists(t, local) {
+  const matching = matchingRemoteAssets(t, local);
+  // matchingRemoteAssets already proved every remote name/size/digest exists
+  // locally. Equal cardinality therefore proves exact closure without allocating
+  // and scanning a second copy of the local asset entries.
+  return matching !== null && matching.remote.size === matching.local.size;
 }
 
-async function waitForExactReleaseAssets(t, assets) {
+async function waitForExactReleaseAssets(t, local) {
   for (let attempt = 0; attempt < 5; attempt++) {
-    if (await exactReleaseExists(t, assets)) return true;
+    if (exactReleaseExists(t, local)) return true;
     if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 1000));
   }
   return false;
@@ -406,8 +449,9 @@ async function waitForExactReleaseAssets(t, assets) {
 
 /** Create a draft release and publish it only after immutable assets are uploaded. */
 async function publishTo(t) {
+  const local = await localAssets(currentAssets);
   if (releaseExists(t)) {
-    if (await exactReleaseExists(t, currentAssets)) {
+    if (exactReleaseExists(t, local)) {
       if (releaseIsDraft(t)) {
         const publishArgs = ['release', 'edit', t, '--draft=false'];
         if (repo) publishArgs.push('--repo', repo);
@@ -417,7 +461,7 @@ async function publishTo(t) {
       return false;
     }
     if (releaseIsDraft(t)) {
-      const matching = await matchingRemoteAssets(t, currentAssets);
+      const matching = matchingRemoteAssets(t, local);
       if (matching) {
         const missing = currentAssets.filter((asset) => !matching.remote.has(basename(asset)));
         if (missing.length > 0) {
@@ -425,7 +469,7 @@ async function publishTo(t) {
           if (repo) uploadArgs.push('--repo', repo);
           gh(uploadArgs);
         }
-        if (!(await waitForExactReleaseAssets(t, currentAssets))) {
+        if (!(await waitForExactReleaseAssets(t, local))) {
           console.error(
             `release ${t} assets could not be verified; leaving the release as a draft`,
           );
@@ -455,7 +499,7 @@ async function publishTo(t) {
   const uploadArgs = ['release', 'upload', t, ...currentAssets];
   if (repo) uploadArgs.push('--repo', repo);
   gh(uploadArgs);
-  if (!(await waitForExactReleaseAssets(t, currentAssets))) {
+  if (!(await waitForExactReleaseAssets(t, local))) {
     console.error(`release ${t} assets could not be verified; leaving the release as a draft`);
     process.exit(1);
   }
@@ -468,10 +512,8 @@ async function publishTo(t) {
 let currentAssets = [];
 
 async function main() {
-  if (manifest.schemaVersion === '2') {
-    const { validateKnowledgePack } = await import('../packages/ingestion/dist/index.js');
-    await validateKnowledgePack(packDir);
-  }
+  if (!legacyManifest) await validateKnowledgePack(packDir);
+  const signing = resolveSigning();
   const outDir = opt('--out-dir', await mkdtemp(join(tmpdir(), 'kgpacks-release-')));
   mkdirSync(outDir, { recursive: true });
   console.error(`[release] packaging pack=${pack} v${version} → ${outDir}`);
@@ -486,7 +528,6 @@ async function main() {
 
   // Sign the RAW index bytes (Ed25519) and publish the detached signature + public
   // key alongside it, so `wikigr pack pull` can verify authenticity before parsing.
-  const signing = resolveSigning();
   if (signing) {
     const indexBytes = readFileSync(indexPath);
     const sig = edSign(null, indexBytes, signing.key);
@@ -497,9 +538,7 @@ async function main() {
     assets.push(sigPath, pubPath);
     console.error('[release] signed index (Ed25519); wrote .sig + .pubkey');
   } else {
-    console.error(
-      '[release] no signing key (KGPACKS_SIGNING_KEY unset) — publishing UNSIGNED (integrity-only)',
-    );
+    console.error('[release] dry-run artifacts are unsigned (integrity-only)');
   }
   currentAssets = assets;
 

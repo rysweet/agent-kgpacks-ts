@@ -22,7 +22,8 @@ This full-build checkpoint is not an incremental content update. The
 
 As it makes durable progress, the builder writes a `<out>.build-checkpoint.json`
 sidecar next to the output pack (e.g. `data/packs/cve/pack.db.build-checkpoint.json`).
-It records exactly what has been durably loaded:
+It records where the staged database lives plus an observational snapshot of
+progress:
 
 ```jsonc
 {
@@ -36,12 +37,16 @@ It records exactly what has been durably loaded:
 }
 ```
 
-Each batch is loaded in its own atomic `BEGIN…COMMIT` transaction (so a crash
+The database, not these mutable progress fields, is authoritative. Each batch is
+loaded in its own atomic `BEGIN…COMMIT` transaction (so a crash
 mid-batch rolls back cleanly), and every `--checkpoint-every` batches (default 50)
 the builder forces a durable **`CHECKPOINT`** (flushing the WAL into the main DB)
-**before** writing the sidecar. So the sidecar never claims progress that would not
-survive losing the WAL — a crash costs at most one checkpoint interval of re-work,
-never the whole build. On a clean finish the sidecar is removed.
+**before** writing the sidecar. On resume, the builder derives the accepted source
+prefix from durable `ArticleSource(title, payload_sha256)` rows and rejects any
+database that is not an exact prefix of the current source inventory. Forging
+`sourceOffset`, counts, or batch index cannot skip records. A crash costs at most one
+checkpoint interval of re-work, never the whole build. On a clean finish the
+sidecar is removed.
 
 ### Resuming
 
@@ -86,9 +91,14 @@ On resume the builder:
    `entity_id` and articles by title; on resume the loader repopulates its "already
    seen" sets from the DB, so cross-batch dedup stays correct — and re-loading an
    already-present article is an idempotent no-op.
-5. **Restarts at the checkpointed `sourceOffset`** against the **deterministic**
-   record scan (sorted, stable ordering), re-embedding and loading only the records
-   after the last durable checkpoint.
+5. **Derives the restart offset from durable sources.** The builder matches
+   `ArticleSource` title/hash rows to an ordered inventory of accepted corpus
+   records, then resumes after that exact prefix. Sidecar progress values are never
+   trusted.
+6. **Verifies final source closure.** Before publication, every accepted corpus
+   title and canonical payload hash must exactly match the completed
+   `ArticleSource` set; omitted, extra, duplicated, or changed sources abort the
+   build.
 
 Because each batch is loaded in a **single atomic transaction** and the sidecar is
 written only **after** a durable `CHECKPOINT`, a crash mid-batch rolls back cleanly

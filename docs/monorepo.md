@@ -302,8 +302,22 @@ node scripts/check-no-python.mjs
 Installs with `--frozen-lockfile` and runs `pnpm audit --audit-level moderate`,
 failing the build on any known advisory (moderate or higher) in the dependency
 tree. Because dependencies are exact-pinned, clearing an advisory means bumping
-the offending dependency (or its `pnpm.overrides` entry) and committing the
-updated lockfile.
+the offending dependency (or its root `package.json` `pnpm.overrides` entry) and
+committing the updated lockfile.
+
+The root `package.json` `pnpm.overrides` entries are security constraints, not
+opportunistic upgrades:
+
+| Override                                                | Purpose                                                                         |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `vite`                                                  | Pins the audited frontend build tool across workspace consumers.                |
+| `brace-expansion` (three affected major ranges)         | Forces patched range expansion for every transitive dependency line.            |
+| `js-yaml`, `tar`, `protobufjs`                          | Replaces advisory-affected parser/archive/serialization versions.               |
+| `@hono/node-server`, `fast-uri`, `find-my-way`, `sharp` | Replaces advisory-affected transitive server, router, URI, and image libraries. |
+
+When changing an override, update `package.json` and `pnpm-lock.yaml` together,
+run the frozen install and audit gates, and remove the override only after all
+requesting dependency ranges resolve to a patched version without it.
 
 ### Job: `docker-image`
 

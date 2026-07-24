@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -25,6 +26,11 @@ import {
 const FIXTURES = resolve(import.meta.dirname, '../../../test/fixtures/cve-update');
 const BASE_SOURCE = join(FIXTURES, 'base.ndjson');
 const DELTA = join(FIXTURES, 'delta.ndjson');
+const CORPUS_PROVENANCE = {
+  corpusCommit: '0123456789abcdef0123456789abcdef01234567',
+  corpusDate: '2026-07-03',
+  corpusTag: 'cve_2026-07-03_0000Z',
+} as const;
 
 const embedder: Embedder = {
   modelId: 'test-deterministic-embedder-v1',
@@ -80,40 +86,41 @@ async function rows<T>(packDir: string, cypher: string): Promise<T[]> {
 }
 
 async function logicalPackDigest(packDir: string): Promise<string> {
-  const graph = {
-    articles: await rows(
-      packDir,
-      'MATCH (a:Article) RETURN a.title AS title, a.category AS category ORDER BY title',
-    ),
-    sections: await rows(
-      packDir,
-      'MATCH (s:Section) RETURN s.id AS id, s.content AS content, s.embedding AS embedding ORDER BY id',
-    ),
-    chunks: await rows(
-      packDir,
-      'MATCH (c:Chunk) RETURN c.id AS id, c.content AS content, c.embedding AS embedding ORDER BY id',
-    ),
-    entities: await rows(
-      packDir,
-      'MATCH (e:Entity) RETURN e.entity_id AS id, e.type AS type ORDER BY id',
-    ),
-    sources: await rows(
-      packDir,
-      'MATCH (s:ArticleSource) RETURN s.title AS title, s.payload AS payload, ' +
-        's.payload_sha256 AS hash ORDER BY title',
-    ),
-    support: await rows(
-      packDir,
-      'MATCH (s:RelationSupport) RETURN s.article_title AS article, s.signature AS signature ' +
-        'ORDER BY article, signature',
-    ),
-  };
-  return createHash('sha256').update(JSON.stringify(graph)).digest('hex');
+  const db = new Database(join(packDir, 'pack.db'), { readOnly: true });
+  const conn = db.connect();
+  try {
+    const graph = {
+      articles: await conn.run(
+        'MATCH (a:Article) RETURN a.title AS title, a.category AS category ORDER BY title',
+      ),
+      sections: await conn.run(
+        'MATCH (s:Section) RETURN s.id AS id, s.content AS content, s.embedding AS embedding ORDER BY id',
+      ),
+      chunks: await conn.run(
+        'MATCH (c:Chunk) RETURN c.id AS id, c.content AS content, c.embedding AS embedding ORDER BY id',
+      ),
+      entities: await conn.run(
+        'MATCH (e:Entity) RETURN e.entity_id AS id, e.type AS type ORDER BY id',
+      ),
+      sources: await conn.run(
+        'MATCH (s:ArticleSource) RETURN s.title AS title, s.payload AS payload, ' +
+          's.payload_sha256 AS hash ORDER BY title',
+      ),
+      support: await conn.run(
+        'MATCH (s:RelationSupport) RETURN s.article_title AS article, s.signature AS signature ' +
+          'ORDER BY article, signature',
+      ),
+    };
+    return createHash('sha256').update(JSON.stringify(graph)).digest('hex');
+  } finally {
+    conn.close();
+    db.close();
+  }
 }
 
 describe('incremental CVE pack update', () => {
   const temp = mkdtempSync(join(tmpdir(), 'kgpacks-update-'));
-  const base = join(temp, 'cve-base');
+  const base = join(temp, 'cve-fixture');
   const output = join(temp, 'cve-v2');
   let baseDigest: string;
 
@@ -124,11 +131,76 @@ describe('incremental CVE pack update', () => {
       packId: 'cve-fixture',
       version: '1.0.0',
       embedder,
+      ...CORPUS_PROVENANCE,
     });
     baseDigest = treeDigest(base);
   });
 
   afterAll(() => rmSync(temp, { recursive: true, force: true }));
+
+  it('publishes exact schema-v2 corpus provenance and rejects substitutions', () => {
+    const releaseScript = resolve(import.meta.dirname, '../../../scripts/release-pack.mjs');
+    const releaseDir = join(temp, 'release-provenance');
+    execFileSync(
+      'node',
+      [
+        releaseScript,
+        '--pack',
+        'cve-fixture',
+        '--packs-dir',
+        temp,
+        '--out-dir',
+        releaseDir,
+        '--dry-run',
+      ],
+      { stdio: 'ignore' },
+    );
+    const index = JSON.parse(
+      readFileSync(join(releaseDir, 'cve-fixture.pack-release.json'), 'utf8'),
+    );
+    expect(index.provenance).toEqual(
+      JSON.parse(readFileSync(join(base, 'manifest.json'), 'utf8')).provenance,
+    );
+
+    const mismatch = spawnSync(
+      'node',
+      [
+        releaseScript,
+        '--pack',
+        'cve-fixture',
+        '--packs-dir',
+        temp,
+        '--corpus-commit',
+        'substituted',
+        '--dry-run',
+      ],
+      { encoding: 'utf8' },
+    );
+    expect(mismatch.status).toBe(2);
+    expect(mismatch.stderr).toMatch(/must exactly match schema-v2 manifest provenance/i);
+  });
+
+  it('rejects non-commit provenance and impossible UTC dates before creating output', async () => {
+    for (const [name, provenance] of [
+      ['tag', { ...CORPUS_PROVENANCE, corpusCommit: CORPUS_PROVENANCE.corpusTag }],
+      ['abbreviated', { ...CORPUS_PROVENANCE, corpusCommit: '01234567' }],
+      ['unknown', { ...CORPUS_PROVENANCE, corpusCommit: 'unknown' }],
+      ['impossible-date', { ...CORPUS_PROVENANCE, corpusDate: '2025-02-29' }],
+    ] as const) {
+      const invalidOutput = join(temp, `invalid-provenance-${name}`);
+      await expect(
+        buildCvePack({
+          source: BASE_SOURCE,
+          output: invalidOutput,
+          packId: 'cve-invalid-provenance',
+          version: '1.0.0',
+          embedder,
+          ...provenance,
+        }),
+      ).rejects.toThrow(/corpus (commit|date)/i);
+      expect(existsSync(invalidOutput)).toBe(false);
+    }
+  });
 
   it('canonicalizes object keys by Unicode scalar value', async () => {
     const source = join(temp, 'unicode-source.ndjson');
@@ -144,6 +216,7 @@ describe('incremental CVE pack update', () => {
       packId: 'cve-unicode',
       version: '1.0.0',
       embedder,
+      ...CORPUS_PROVENANCE,
     });
 
     const sources = await rows<{ payload: string }>(
@@ -162,6 +235,7 @@ describe('incremental CVE pack update', () => {
         packId: 'cve-concurrent',
         version: '1.0.0',
         embedder,
+        ...CORPUS_PROVENANCE,
       }),
       buildCvePack({
         source: BASE_SOURCE,
@@ -169,6 +243,7 @@ describe('incremental CVE pack update', () => {
         packId: 'cve-concurrent',
         version: '1.0.0',
         embedder,
+        ...CORPUS_PROVENANCE,
       }),
     ]);
 
@@ -257,6 +332,14 @@ describe('incremental CVE pack update', () => {
 
     const validation = await validateKnowledgePack(output);
     expect(validation.valid).toBe(true);
+    expect(validation.metadata.provenance).toMatchObject({
+      corpus: {
+        name: 'cvelistV5',
+        commit: CORPUS_PROVENANCE.corpusCommit,
+        date: '2026-07-03',
+        tag: 'cve_2026-07-03_0000Z',
+      },
+    });
     expect(validation.counts).toMatchObject({
       articles: 3,
       entities: entities.length,
@@ -273,6 +356,14 @@ describe('incremental CVE pack update', () => {
         delta: { deltaId: result.deltaId },
       },
       update: { added: 1, modified: 1, unchanged: 1 },
+      provenance: {
+        corpus: {
+          name: 'cvelistV5',
+          commit: CORPUS_PROVENANCE.corpusCommit,
+          date: '2026-07-03',
+          tag: 'cve_2026-07-03_0000Z',
+        },
+      },
     });
     expect(manifest.files).toEqual([
       {
@@ -472,6 +563,7 @@ describe('incremental CVE pack update', () => {
       packId: 'cve-fixture',
       version: '1.0.4',
       embedder,
+      ...CORPUS_PROVENANCE,
     });
     const database = new Database(join(corrupted, 'pack.db'));
     const connection = database.connect();
@@ -547,6 +639,7 @@ describe('incremental CVE pack update', () => {
       packId: 'cve-fixture',
       version: '1.0.1',
       embedder,
+      ...CORPUS_PROVENANCE,
     });
     const database = new Database(join(corrupted, 'pack.db'));
     const connection = database.connect();
@@ -706,7 +799,96 @@ describe('incremental CVE pack update', () => {
     expect(await validateKnowledgePack(resumedOutput)).toMatchObject({ valid: true });
     expect(resumed.buildId).toBe(uninterrupted.buildId);
     expect(await logicalPackDigest(resumedOutput)).toBe(uninterruptedDigest);
-    expect(readFileSync(join(resumedOutput, 'pack.db'))).toEqual(stagedPayload);
-    expect(readFileSync(join(resumedOutput, 'manifest.json'))).toEqual(stagedManifest);
+    expect(Buffer.compare(readFileSync(join(resumedOutput, 'pack.db')), stagedPayload)).toBe(0);
+    expect(Buffer.compare(readFileSync(join(resumedOutput, 'manifest.json')), stagedManifest)).toBe(
+      0,
+    );
   });
+
+  it('durably resumes multiple batches with byte-identical staged publication', async () => {
+    const largeDelta = join(temp, 'large-delta.ndjson');
+    const records = Array.from({ length: 257 }, (_, index) => ({
+      cveMetadata: {
+        cveId: `CVE-2026-${10000 + index}`,
+        state: 'PUBLISHED',
+        datePublished: '2026-07-03T00:00:00.000Z',
+      },
+      containers: {
+        cna: {
+          title: `Synthetic CVE ${index}`,
+          descriptions: [{ lang: 'en', value: `Deterministic batch record ${index}.` }],
+          affected: [],
+        },
+      },
+    }));
+    writeFileSync(largeDelta, `${records.map((record) => JSON.stringify(record)).join('\n')}\n`);
+    const largeOutput = join(temp, 'large-output');
+    const workDir = `${largeOutput}.work`;
+
+    await updateKnowledgePack({
+      base,
+      delta: largeDelta,
+      output: largeOutput,
+      version: '5.0.0',
+      embedder,
+    });
+    const expectedDigest = await logicalPackDigest(largeOutput);
+    const expectedTreeDigest = treeDigest(largeOutput);
+    const sectionCount = await rows<{ count: number | bigint }>(
+      largeOutput,
+      'MATCH (s:Section) RETURN count(s) AS count',
+    );
+    const chunkCount = await rows<{ count: number | bigint }>(
+      largeOutput,
+      'MATCH (c:Chunk) RETURN count(c) AS count',
+    );
+    expect(Number(sectionCount[0].count)).toBeGreaterThan(256);
+    expect(Number(chunkCount[0].count)).toBeGreaterThan(256);
+    rmSync(largeOutput, { recursive: true });
+
+    let checkpoints = 0;
+    await expect(
+      updateKnowledgePack({
+        base,
+        delta: largeDelta,
+        output: largeOutput,
+        version: '5.0.0',
+        embedder,
+        onCheckpoint(checkpoint) {
+          if (checkpoint.phase === 'prepared' && checkpoints++ === 0) {
+            throw new Error('simulated multi-batch interruption');
+          }
+        },
+      }),
+    ).rejects.toThrow('simulated multi-batch interruption');
+    const interruptedState = JSON.parse(
+      readFileSync(join(workDir, 'update-state.json'), 'utf8'),
+    ) as { records: Array<{ processed: boolean }> };
+    const processed = interruptedState.records.filter((record) => record.processed).length;
+    expect(processed).toBeGreaterThan(0);
+    expect(processed).toBeLessThan(257);
+    expect(existsSync(largeOutput)).toBe(false);
+
+    await expect(
+      updateKnowledgePack({
+        resume: workDir,
+        embedder,
+        onCheckpoint(checkpoint) {
+          if (checkpoint.phase === 'delta-applied')
+            throw new Error('simulated publication interruption');
+        },
+      }),
+    ).rejects.toThrow('simulated publication interruption');
+    const stagedPayload = readFileSync(join(workDir, 'staging', 'pack.db'));
+    const stagedManifest = readFileSync(join(workDir, 'staging', 'manifest.json'));
+
+    await updateKnowledgePack({ resume: workDir, embedder });
+    expect(await logicalPackDigest(largeOutput)).toBe(expectedDigest);
+    expect(treeDigest(largeOutput)).toBe(expectedTreeDigest);
+    expect(Buffer.compare(readFileSync(join(largeOutput, 'pack.db')), stagedPayload)).toBe(0);
+    expect(Buffer.compare(readFileSync(join(largeOutput, 'manifest.json')), stagedManifest)).toBe(
+      0,
+    );
+    expect(existsSync(workDir)).toBe(false);
+  }, 180_000);
 });

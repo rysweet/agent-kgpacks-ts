@@ -50,6 +50,47 @@ export function checkpointMatches(checkpoint, params) {
   return Boolean(checkpoint) && checkpoint.paramsHash === paramsHash(params);
 }
 
+/** Verifies that durable database sources are exactly a prefix of the source inventory. */
+export function deriveResumeProgress(inventory, durableSources) {
+  if (durableSources.length > inventory.length) {
+    throw new Error('durable database contains more sources than the current source inventory');
+  }
+
+  const durableByTitle = new Map();
+  for (const source of durableSources) {
+    if (durableByTitle.has(source.title)) {
+      throw new Error(`durable database contains duplicate source ${source.title}`);
+    }
+    durableByTitle.set(source.title, source.hash);
+  }
+
+  const inventoryTitles = new Set();
+  for (let index = 0; index < inventory.length; index++) {
+    const source = inventory[index];
+    if (inventoryTitles.has(source.title)) {
+      throw new Error(`source inventory contains duplicate source ${source.title}`);
+    }
+    inventoryTitles.add(source.title);
+    if (index < durableSources.length && durableByTitle.get(source.title) !== source.hash) {
+      throw new Error('durable database sources are not an exact prefix of the source inventory');
+    }
+  }
+
+  return {
+    loadedRecords: durableSources.length,
+    sourceOffset:
+      durableSources.length === 0 ? 0 : inventory[durableSources.length - 1].sourceOffset,
+  };
+}
+
+/** Verifies exact title/hash closure before a completed database can be published. */
+export function assertExactSourceClosure(inventory, durableSources) {
+  const progress = deriveResumeProgress(inventory, durableSources);
+  if (progress.loadedRecords !== inventory.length) {
+    throw new Error('completed database source closure does not match the source inventory');
+  }
+}
+
 /**
  * Writes the checkpoint sidecar (stamped with a version + `updatedAt`). Call this
  * AFTER the batch's DB transaction has durably committed, so it never claims more

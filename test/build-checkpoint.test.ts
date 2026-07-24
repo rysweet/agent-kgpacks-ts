@@ -20,6 +20,8 @@ import {
   clearCheckpoint,
   paramsHash,
   checkpointMatches,
+  deriveResumeProgress,
+  assertExactSourceClosure,
 } from '../scripts/build-checkpoint.mjs';
 
 let dir: string;
@@ -95,6 +97,64 @@ describe('paramsHash / checkpointMatches', () => {
       src: '/data/cve',
     };
     expect(paramsHash(reordered)).toBe(paramsHash(PARAMS));
+  });
+
+  describe('database-authoritative resume progress', () => {
+    const inventory = [
+      { sourceOffset: 1, title: 'CVE-2025-0001', hash: 'a' },
+      { sourceOffset: 3, title: 'CVE-2025-0002', hash: 'b' },
+      { sourceOffset: 4, title: 'CVE-2025-0003', hash: 'c' },
+    ];
+
+    it('derives progress from durable sources instead of sidecar fields', () => {
+      expect(
+        deriveResumeProgress(inventory, [
+          { title: 'CVE-2025-0002', hash: 'b' },
+          { title: 'CVE-2025-0001', hash: 'a' },
+        ]),
+      ).toEqual({ loadedRecords: 2, sourceOffset: 3 });
+    });
+
+    it('rejects forward, non-prefix, and hash-tampered durable progress', () => {
+      expect(() =>
+        deriveResumeProgress(inventory, [
+          { title: 'CVE-2025-0001', hash: 'a' },
+          { title: 'CVE-2025-0003', hash: 'c' },
+        ]),
+      ).toThrow(/exact prefix/i);
+      expect(() =>
+        deriveResumeProgress(inventory, [{ title: 'CVE-2025-0001', hash: 'tampered' }]),
+      ).toThrow(/exact prefix/i);
+      expect(() =>
+        deriveResumeProgress(inventory, [...inventory, { title: 'extra', hash: 'd' }]),
+      ).toThrow(/more sources/i);
+    });
+
+    it('requires exact source closure before publication', () => {
+      expect(() => assertExactSourceClosure(inventory, inventory)).not.toThrow();
+      expect(() => assertExactSourceClosure(inventory, inventory.slice(0, 2))).toThrow(
+        /source closure/i,
+      );
+    });
+
+    it('derives large resume prefixes without sorting or mutating either input', () => {
+      const largeInventory = Array.from({ length: 20_000 }, (_, index) => ({
+        sourceOffset: index * 2 + 1,
+        title: `CVE-2025-${String(index).padStart(5, '0')}`,
+        hash: `hash-${index}`,
+      }));
+      const durable = largeInventory
+        .slice(0, 15_000)
+        .map(({ title, hash }) => ({ title, hash }))
+        .reverse();
+      const firstDurable = durable[0];
+
+      expect(deriveResumeProgress(largeInventory, durable)).toEqual({
+        loadedRecords: 15_000,
+        sourceOffset: 29_999,
+      });
+      expect(durable[0]).toBe(firstDurable);
+    });
   });
 
   it('changes when any output-affecting input changes', () => {

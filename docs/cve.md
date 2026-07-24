@@ -21,7 +21,11 @@ CVE 5.1 JSON ─▶ cveToGraph() ─▶ Article + Entities + Relationships
 No LLM is involved, so building is a throughput problem (embed + load), not a
 per-record latency problem — which is what makes a _comprehensive_ build feasible.
 
-### Mapping (`scripts/cve-source.mjs`)
+### Mapping (`packages/ingestion/src/cve-adapter.ts`)
+
+The TypeScript adapter is the sole mapping authority. The historical
+`scripts/cve-source.mjs` entry point contains no mapping logic and delegates to
+the compiled ingestion export.
 
 | Source field                                                 | Graph element                                       |
 | ------------------------------------------------------------ | --------------------------------------------------- |
@@ -49,7 +53,7 @@ pnpm cve:fetch --kind delta        # small "recent changes" corpus (fast to try)
 ```
 
 It prints the exact `pnpm cve:build …` command to run next, pre-filled with the
-release `--corpus-commit`/`--corpus-date` so the built pack is provenance-stamped.
+peeled release `--corpus-commit`, `--corpus-date`, and separate `--corpus-tag`.
 See [cve-corpus.md](cve-corpus.md) for options (`--tag`, `--dest`, `--max-bytes`,
 `GITHUB_TOKEN`) and the security model. The full baseline is ~550 MB / ~360k
 records; the delta asset is a much smaller recent-changes slice.
@@ -211,11 +215,12 @@ without replacing assets or moving a tag. Immutable publication does not update
 the legacy mutable `packs` release. See
 [immutable update release publication](pack-versioning.md#immutable-update-release-publication).
 
-The builder (`build-cve-pack.mjs`) stamps **provenance** (corpus commit/date,
+The builder (`build-cve-pack.mjs`) stamps **provenance** (corpus commit/date/tag,
 embedding model, build date) into `manifest.json`; the release script mirrors it
-into `cve.pack-release.json` and fills `build.date`. Override the corpus fields
-with `--corpus-commit` / `--corpus-date` — `pnpm cve:fetch` prints these pre-filled
-from the source release (see [cve-corpus.md](cve-corpus.md)). See
+into `cve.pack-release.json` and fills `build.date`. Supply the required full SHA
+and real UTC date with `--corpus-commit` / `--corpus-date`, plus `--corpus-tag`
+when building from a release. `pnpm cve:fetch` prints these pre-filled from the
+source release (see [cve-corpus.md](cve-corpus.md)). See
 [docs/pack-versioning.md](pack-versioning.md) for the tag scheme and the full
 provenance field reference.
 

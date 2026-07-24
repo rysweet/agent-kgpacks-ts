@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
+  accessSync,
   closeSync,
+  constants,
+  copyFileSync,
   createReadStream,
   existsSync,
   fsyncSync,
@@ -18,6 +21,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { Database, type Connection } from '@kgpacks/db';
 import { BGE_MODEL_ID, BgeEmbedder } from '@kgpacks/embeddings';
@@ -37,12 +41,17 @@ import type { Embedder } from './types.js';
 
 export const INCREMENTAL_SCHEMA_VERSION = '2';
 export const UPDATE_TOOL_VERSION = 'agent-kgpacks-ts@0.1.0';
-const VERSION_RE = /^[0-9A-Za-z]+(?:[._-][0-9A-Za-z]+)*$/;
 const SHA256_RE = /^[a-f0-9]{64}$/;
+const GIT_SHA1_RE = /^[a-f0-9]{40}$/;
 const STATE_FILE = 'update-state.json';
 const METADATA_ID = 'pack';
-const provenanceFor = (embeddingModel: string) => ({
-  corpus: { name: 'cve-records', commit: null, date: null },
+const provenanceFor = (
+  embeddingModel: string,
+  corpusCommit: string,
+  corpusDate: string,
+  corpusTag: string | null = null,
+) => ({
+  corpus: { name: 'cvelistV5', commit: corpusCommit, date: corpusDate, tag: corpusTag },
   embedding: { model: embeddingModel, dimensions: 768 },
   build: { tool_version: UPDATE_TOOL_VERSION },
 });
@@ -91,6 +100,9 @@ export interface BuildCvePackConfig {
   packId: string;
   version: string;
   embedder: Embedder;
+  corpusCommit: string;
+  corpusDate: string;
+  corpusTag?: string | null;
 }
 
 export interface PublishBuiltCvePackConfig {
@@ -99,6 +111,9 @@ export interface PublishBuiltCvePackConfig {
   packId: string;
   version: string;
   embeddingModelId?: string;
+  corpusCommit: string;
+  corpusDate: string;
+  corpusTag?: string | null;
 }
 
 interface FreshUpdateConfig {
@@ -179,9 +194,11 @@ interface ArticleSourceIdentity {
 }
 
 interface ExpectedUpdate {
+  baseMetadata: DurablePackMetadata;
   metadata: DurablePackMetadata;
   applications: DurableUpdateApplication[];
   sources: ArticleSourceIdentity[];
+  baseHashes: Map<string, string>;
 }
 
 function sha256(value: string | Buffer): string {
@@ -189,13 +206,18 @@ function sha256(value: string | Buffer): string {
 }
 
 function compareUnicodeScalars(left: string, right: string): number {
-  const leftPoints = [...left].map((value) => value.codePointAt(0) ?? 0);
-  const rightPoints = [...right].map((value) => value.codePointAt(0) ?? 0);
-  const length = Math.min(leftPoints.length, rightPoints.length);
-  for (let index = 0; index < length; index++) {
-    if (leftPoints[index] !== rightPoints[index]) return leftPoints[index] - rightPoints[index];
+  let leftIndex = 0;
+  let rightIndex = 0;
+  while (leftIndex < left.length && rightIndex < right.length) {
+    const leftPoint = left.codePointAt(leftIndex) ?? 0;
+    const rightPoint = right.codePointAt(rightIndex) ?? 0;
+    if (leftPoint !== rightPoint) return leftPoint - rightPoint;
+    leftIndex += leftPoint > 0xffff ? 2 : 1;
+    rightIndex += rightPoint > 0xffff ? 2 : 1;
   }
-  return leftPoints.length - rightPoints.length;
+  if (leftIndex < left.length) return 1;
+  if (rightIndex < right.length) return -1;
+  return 0;
 }
 
 function canonical(value: unknown): string {
@@ -224,6 +246,49 @@ function provenanceEmbeddingModel(provenance: Record<string, unknown>): string |
   const model = (embedding as Record<string, unknown>).model;
   const dimensions = (embedding as Record<string, unknown>).dimensions;
   return typeof model === 'string' && model !== '' && dimensions === 768 ? model : null;
+}
+
+function hasCanonicalProvenance(
+  provenance: Record<string, unknown>,
+  embeddingModel: string,
+): boolean {
+  const corpus = provenance.corpus;
+  if (!corpus || typeof corpus !== 'object' || Array.isArray(corpus)) return false;
+  const { commit, date, tag } = corpus as Record<string, unknown>;
+  if (
+    typeof commit !== 'string' ||
+    !GIT_SHA1_RE.test(commit) ||
+    typeof date !== 'string' ||
+    !isRealUtcDate(date) ||
+    (tag !== null && (typeof tag !== 'string' || tag === ''))
+  ) {
+    return false;
+  }
+  return (
+    canonical(provenance) ===
+    canonical(provenanceFor(embeddingModel, commit, date, tag as string | null))
+  );
+}
+
+function isRealUtcDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return month >= 1 && month <= 12 && day >= 1 && day <= days[month - 1];
+}
+
+function assertCorpusProvenance(commit: string, date: string, tag: string | null): void {
+  if (!GIT_SHA1_RE.test(commit)) {
+    throw new Error('corpus commit must be a full lowercase 40-character Git SHA-1');
+  }
+  if (!isRealUtcDate(date)) {
+    throw new Error('corpus date must be a real UTC calendar date in YYYY-MM-DD form');
+  }
+  if (tag !== null && tag === '') throw new Error('corpus tag must be non-empty when provided');
 }
 
 function assertScalarStrings(value: unknown, location: string): void {
@@ -260,9 +325,16 @@ function readDelta(path: string): ParsedDelta {
   } catch {
     throw new Error('delta is not valid UTF-8');
   }
-  const lines = decoded.split(/\r?\n/).filter((line) => line.trim() !== '');
-  for (let ordinal = 0; ordinal < lines.length; ordinal++) {
-    const raw = lines[ordinal];
+  let ordinal = 0;
+  let lineStart = 0;
+  while (lineStart <= decoded.length) {
+    const newline = decoded.indexOf('\n', lineStart);
+    const lineEnd = newline === -1 ? decoded.length : newline;
+    const contentEnd =
+      lineEnd > lineStart && decoded.charCodeAt(lineEnd - 1) === 13 ? lineEnd - 1 : lineEnd;
+    const raw = decoded.slice(lineStart, contentEnd);
+    lineStart = newline === -1 ? decoded.length + 1 : newline + 1;
+    if (raw.trim() === '') continue;
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
@@ -313,6 +385,7 @@ function readDelta(path: string): ParsedDelta {
       throw new Error(`delta record ${ordinal + 1} cannot be mapped by the CVE adapter`);
     }
     records.push({ ordinal, key, payload, payloadHash: sha256(payload) });
+    ordinal++;
   }
   records.sort((left, right) => left.key.localeCompare(right.key));
   const deltaId = sha256(
@@ -328,7 +401,7 @@ function readDelta(path: string): ParsedDelta {
 }
 
 function assertVersion(version: string): void {
-  if (!VERSION_RE.test(version) || !isValidSemver(version)) {
+  if (!isValidSemver(version)) {
     throw new Error(`invalid target version ${JSON.stringify(version)}`);
   }
 }
@@ -420,7 +493,6 @@ function asUpdateState(value: unknown, path: string): UpdateState {
   }
   if (
     (state.phase !== 'prepared' && state.phase !== 'delta-applied') ||
-    !VERSION_RE.test(String(state.version)) ||
     !isValidSemver(String(state.version)) ||
     ![
       state.buildId,
@@ -477,6 +549,21 @@ async function fileEntry(path: string, relativePath: string) {
   return { path: relativePath, size: statSync(path).size, sha256: hash.digest('hex') };
 }
 
+function validatedPackDbSha256(validation: PackValidationResult): string {
+  const files = validation.manifest.files;
+  if (
+    !Array.isArray(files) ||
+    files.length !== 1 ||
+    !files[0] ||
+    typeof files[0] !== 'object' ||
+    (files[0] as Record<string, unknown>).path !== 'pack.db' ||
+    typeof (files[0] as Record<string, unknown>).sha256 !== 'string'
+  ) {
+    throw new Error('validated pack manifest is missing its pack.db checksum');
+  }
+  return (files[0] as Record<string, string>).sha256;
+}
+
 function contentDigest(files: Array<{ path: string; size: number; sha256: string }>): string {
   return sha256(
     canonical([...files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))),
@@ -519,28 +606,79 @@ function fsyncFile(path: string): void {
   }
 }
 
-function assertNoReplacePublicationAvailable(): void {
+function nativeRenameHelper(): string {
+  const moduleDir = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    process.env.WIKIGR_RENAME_NOREPLACE_HELPER,
+    join(moduleDir, 'rename-noreplace'),
+    resolve(moduleDir, '../../../dist/rename-noreplace'),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+  for (const candidate of candidates) {
+    try {
+      accessSync(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      // Try the next deterministic package/source location.
+    }
+  }
+  throw new Error('native renameat2(RENAME_NOREPLACE) helper is unavailable');
+}
+
+function runNoReplaceMove(
+  source: string,
+  destination: string,
+  helper = nativeRenameHelper(),
+): ReturnType<typeof spawnSync> {
+  return spawnSync(helper, [source, destination], { encoding: 'utf8' });
+}
+
+function assertNoReplacePublicationAvailable(filesystemPath: string): void {
   if (process.platform !== 'linux') {
     throw new Error('atomic no-replace publication requires Linux renameat2 support');
   }
-  const probe = spawnSync('mv', ['--version'], { encoding: 'utf8' });
-  if (probe.error || probe.status !== 0 || !probe.stdout.includes('GNU coreutils')) {
-    throw new Error('atomic no-replace publication requires GNU mv with renameat2 support');
+  const helper = nativeRenameHelper();
+  const probeRoot = mkdtempSync(join(filesystemPath, '.kgpacks-renameat2-'));
+  const source = join(probeRoot, 'source');
+  const destination = join(probeRoot, 'destination');
+  try {
+    mkdirSync(source);
+    mkdirSync(destination);
+    writeFileSync(join(source, 'marker'), 'source');
+    writeFileSync(join(destination, 'marker'), 'destination');
+    const collision = runNoReplaceMove(source, destination, helper);
+    if (
+      collision.error ||
+      collision.status !== 17 ||
+      !existsSync(source) ||
+      readFileSync(join(destination, 'marker'), 'utf8') !== 'destination'
+    ) {
+      throw new Error('target filesystem does not provide atomic RENAME_NOREPLACE semantics');
+    }
+    rmSync(destination, { recursive: true });
+    const promotion = runNoReplaceMove(source, destination, helper);
+    if (
+      promotion.error ||
+      promotion.status !== 0 ||
+      existsSync(source) ||
+      readFileSync(join(destination, 'marker'), 'utf8') !== 'source'
+    ) {
+      throw new Error('target filesystem cannot atomically promote with RENAME_NOREPLACE');
+    }
+  } finally {
+    rmSync(probeRoot, { recursive: true, force: true });
   }
 }
 
 /**
- * GNU mv uses renameat2(RENAME_NOREPLACE) for same-filesystem `--no-clobber`
- * directory promotion. Unlike Node's rename(), this cannot replace a destination
- * created between preflight and the syscall.
+ * The packaged native helper makes one renameat2(RENAME_NOREPLACE) syscall.
+ * Unlike Node's rename(), it cannot replace a destination created concurrently.
  */
 function publishDirectoryNoReplace(staging: string, output: string): boolean {
-  const moved = spawnSync('mv', ['--no-clobber', '--no-target-directory', '--', staging, output], {
-    encoding: 'utf8',
-  });
+  const moved = runNoReplaceMove(staging, output);
+  if (moved.status === 17 && existsSync(staging)) return false;
   if (moved.error || moved.status !== 0) {
     throw new Error(
-      `atomic no-replace publication failed: ${moved.error?.message ?? moved.stderr.trim()}`,
+      `atomic no-replace publication failed: ${moved.error?.message ?? String(moved.stderr).trim()}`,
     );
   }
   if (existsSync(staging)) return false;
@@ -774,7 +912,10 @@ function createManifest(input: {
   };
 }
 
-async function finalizePack(staging: string, metadata: DurablePackMetadata): Promise<PackManifest> {
+async function finalizePack(
+  staging: string,
+  metadata: DurablePackMetadata,
+): Promise<PackValidationResult> {
   const database = new Database(join(staging, 'pack.db'), { readOnly: true });
   const connection = database.connect();
   let counts: PackValidationResult['counts'];
@@ -794,20 +935,21 @@ async function finalizePack(staging: string, metadata: DurablePackMetadata): Pro
   }
   const manifest = createManifest({ metadata: durableMetadata, applications, files, counts });
   saveManifest(join(staging, 'manifest.json'), manifest);
-  await validateKnowledgePack(staging);
+  const validation = await validateKnowledgePack(staging);
   fsyncFile(join(staging, 'pack.db'));
   fsyncFile(join(staging, 'manifest.json'));
   fsyncDirectory(staging);
   fsyncDirectory(dirname(staging));
-  return manifest;
+  return validation;
 }
 
 /** Builds a small provenance-capable CVE pack from an NDJSON corpus. */
 export async function buildCvePack(config: BuildCvePackConfig): Promise<void> {
   assertVersion(config.version);
+  assertCorpusProvenance(config.corpusCommit, config.corpusDate, config.corpusTag ?? null);
   if (existsSync(config.output)) throw new Error(`output already exists: ${config.output}`);
   const parsed = readDelta(config.source);
-  assertNoReplacePublicationAvailable();
+  assertNoReplacePublicationAvailable(nearestExisting(dirname(resolve(config.output))));
   const embeddingModel = embedderModelId(config.embedder);
   const buildId = buildIdFor({
     packId: config.packId,
@@ -824,7 +966,12 @@ export async function buildCvePack(config: BuildCvePackConfig): Promise<void> {
     extractorVersion: CVE_ADAPTER_VERSION,
     toolVersion: UPDATE_TOOL_VERSION,
     buildId,
-    provenance: provenanceFor(embeddingModel),
+    provenance: provenanceFor(
+      embeddingModel,
+      config.corpusCommit,
+      config.corpusDate,
+      config.corpusTag ?? null,
+    ),
     basePackId: null,
     baseVersion: null,
     baseBuildId: null,
@@ -848,6 +995,9 @@ export async function buildCvePack(config: BuildCvePackConfig): Promise<void> {
       packId: config.packId,
       version: config.version,
       embeddingModelId: embeddingModel,
+      corpusCommit: config.corpusCommit,
+      corpusDate: config.corpusDate,
+      corpusTag: config.corpusTag,
     });
   } catch (error) {
     rmSync(staging, { recursive: true, force: true });
@@ -861,13 +1011,14 @@ export async function buildCvePack(config: BuildCvePackConfig): Promise<void> {
  */
 export async function publishBuiltCvePack(config: PublishBuiltCvePackConfig): Promise<void> {
   assertVersion(config.version);
+  assertCorpusProvenance(config.corpusCommit, config.corpusDate, config.corpusTag ?? null);
   const staging = resolve(config.staging);
   const output = resolve(config.output);
   if (staging === output || pathsOverlap(staging, output)) {
     throw new Error('staging and output paths must not overlap');
   }
   assertSameFilesystem(output, staging);
-  assertNoReplacePublicationAvailable();
+  assertNoReplacePublicationAvailable(nearestExisting(dirname(staging)));
   const embeddingModel = config.embeddingModelId ?? BGE_MODEL_ID;
   const metadata: DurablePackMetadata = {
     packId: config.packId,
@@ -883,7 +1034,12 @@ export async function publishBuiltCvePack(config: PublishBuiltCvePackConfig): Pr
       deltaId: null,
       embeddingModel,
     }),
-    provenance: provenanceFor(embeddingModel),
+    provenance: provenanceFor(
+      embeddingModel,
+      config.corpusCommit,
+      config.corpusDate,
+      config.corpusTag ?? null,
+    ),
     basePackId: null,
     baseVersion: null,
     baseBuildId: null,
@@ -926,6 +1082,16 @@ function asNumberArray(value: unknown): number[] {
   if (Array.isArray(value)) return value.map(Number);
   if (ArrayBuffer.isView(value)) return Array.from(value as unknown as ArrayLike<number>, Number);
   throw new Error('base pack contains an invalid embedding');
+}
+
+function isFiniteEmbedding(value: unknown): boolean {
+  if (!Array.isArray(value) && !ArrayBuffer.isView(value)) return false;
+  const embedding = value as unknown as ArrayLike<unknown>;
+  if (embedding.length !== 768) return false;
+  for (let offset = 0; offset < embedding.length; offset++) {
+    if (!Number.isFinite(Number(embedding[offset]))) return false;
+  }
+  return true;
 }
 
 function groupByArticle<T extends Record<string, unknown>>(rows: T[]): Map<string, T[]> {
@@ -1058,6 +1224,47 @@ function expectedSourceClosure(
     .sort((left, right) => left.title.localeCompare(right.title));
 }
 
+function applicationsEqual(
+  left: DurableUpdateApplication[],
+  right: DurableUpdateApplication[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every(
+      (application, index) =>
+        application.key === right[index].key &&
+        application.operation === right[index].operation &&
+        application.basePayloadSha256 === right[index].basePayloadSha256 &&
+        application.resultPayloadSha256 === right[index].resultPayloadSha256 &&
+        application.classification === right[index].classification,
+    )
+  );
+}
+
+function sourceClosuresEqual(
+  left: ArticleSourceIdentity[],
+  right: ArticleSourceIdentity[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every(
+      (source, index) => source.title === right[index].title && source.hash === right[index].hash,
+    )
+  );
+}
+
+function resumeRecordsMatchDelta(records: UpdateState['records'], delta: DeltaRecord[]): boolean {
+  return (
+    records.length === delta.length &&
+    records.every(
+      (record, index) =>
+        record.ordinal === delta[index].ordinal &&
+        record.key === delta[index].key &&
+        record.hash === delta[index].payloadHash,
+    )
+  );
+}
+
 async function sourceClosureForPack(packDir: string): Promise<ArticleSourceIdentity[]> {
   const database = new Database(join(packDir, 'pack.db'), { readOnly: true });
   const connection = database.connect();
@@ -1065,8 +1272,11 @@ async function sourceClosureForPack(packDir: string): Promise<ArticleSourceIdent
     const rows = await connection.run<ArticleSourceIdentity>(
       'MATCH (s:ArticleSource) RETURN s.title AS title, s.payload_sha256 AS hash ORDER BY title',
     );
-    const titles = new Set(rows.map((row) => row.title));
-    if (titles.size !== rows.length) throw new Error('pack contains duplicate article sources');
+    for (let index = 1; index < rows.length; index++) {
+      if (rows[index - 1].title === rows[index].title) {
+        throw new Error('pack contains duplicate article sources');
+      }
+    }
     return rows;
   } finally {
     connection.close();
@@ -1091,6 +1301,8 @@ async function expectedUpdateFor(
   }
   const baseHashes = await sourceHashesForPack(state.base);
   return {
+    baseMetadata: baseValidation.metadata,
+    baseHashes,
     metadata: targetMetadata(baseValidation.metadata, {
       version: state.version,
       buildId,
@@ -1112,8 +1324,8 @@ async function assertPackMatchesExpected(
   const sources = await sourceClosureForPack(packDir);
   if (
     canonical(validation.metadata) !== canonical(expected.metadata) ||
-    canonical(validation.applications) !== canonical(expected.applications) ||
-    canonical(sources) !== canonical(expected.sources)
+    !applicationsEqual(validation.applications, expected.applications) ||
+    !sourceClosuresEqual(sources, expected.sources)
   ) {
     throw new Error(message);
   }
@@ -1169,12 +1381,13 @@ function resultFromValidation(
 async function publishStagedPack(
   state: UpdateState,
   expected: ExpectedUpdate,
+  finalizedValidation?: PackValidationResult,
 ): Promise<UpdateKnowledgePackResult> {
   const staging = join(state.workDir, 'staging');
   if (!existsSync(staging) || !statSync(staging).isDirectory()) {
     throw new Error(`completed update staging directory is missing at ${staging}`);
   }
-  const validation = await validateKnowledgePack(staging);
+  const validation = finalizedValidation ?? (await validateKnowledgePack(staging));
   await assertPackMatchesExpected(
     staging,
     validation,
@@ -1214,10 +1427,44 @@ async function resetGeneratedStructures(connection: Connection): Promise<void> {
       await connection.run(`CALL DROP_VECTOR_INDEX('${tableName}', '${indexName}')`);
     }
   }
-  await connection.run('MATCH ()-[r:ENTITY_RELATION]->() DELETE r');
-  await connection.run('MATCH ()-[r:LINKS_TO]->() DELETE r');
-  await connection.run('MATCH (n:UpdateApplication) DELETE n');
-  await connection.run('MATCH (n:PackMetadata) DELETE n');
+  for (const [match, remove] of [
+    [
+      'MATCH ()-[r:ENTITY_RELATION]->() RETURN r LIMIT 1',
+      'MATCH ()-[r:ENTITY_RELATION]->() DELETE r',
+    ],
+    ['MATCH ()-[r:LINKS_TO]->() RETURN r LIMIT 1', 'MATCH ()-[r:LINKS_TO]->() DELETE r'],
+    ['MATCH (n:UpdateApplication) RETURN n LIMIT 1', 'MATCH (n:UpdateApplication) DELETE n'],
+    ['MATCH (n:PackMetadata) RETURN n LIMIT 1', 'MATCH (n:PackMetadata) DELETE n'],
+  ] as const) {
+    if ((await connection.run(match)).length > 0) await connection.run(remove);
+  }
+}
+
+async function resetDatabaseForDeterministicRebuild(connection: Connection): Promise<void> {
+  await connection.loadExtension('vector');
+  const indexes = await connection.run<{ tableName: string; indexName: string }>(
+    'CALL SHOW_INDEXES() RETURN table_name AS tableName, index_name AS indexName',
+  );
+  for (const { tableName, indexName } of indexes) {
+    await connection.run(`CALL DROP_VECTOR_INDEX('${tableName}', '${indexName}')`);
+  }
+  for (const table of [
+    'ENTITY_RELATION',
+    'HAS_ENTITY',
+    'LINKS_TO',
+    'HAS_CHUNK',
+    'HAS_SECTION',
+    'UpdateApplication',
+    'RelationSupport',
+    'ArticleSource',
+    'PackMetadata',
+    'Entity',
+    'Chunk',
+    'Section',
+    'Article',
+  ]) {
+    await connection.run(`DROP TABLE ${table}`);
+  }
 }
 
 async function executeUpdate(
@@ -1231,19 +1478,8 @@ async function executeUpdate(
 
   const baseDatabase = new Database(join(state.base, 'pack.db'), { readOnly: true });
   const baseConnection = baseDatabase.connect();
-  let baseHashes: Map<string, string>;
-  let baseMetadata: DurablePackMetadata;
-  try {
-    const sourceRows = await baseConnection.run<{ title: string; hash: string }>(
-      'MATCH (s:ArticleSource) RETURN s.title AS title, s.payload_sha256 AS hash ORDER BY title',
-    );
-    baseHashes = new Map(sourceRows.map((row) => [row.title, row.hash]));
-    baseMetadata = await readPackMetadata(baseConnection);
-  } catch (error) {
-    baseConnection.close();
-    baseDatabase.close();
-    throw error;
-  }
+  const baseHashes = expected.baseHashes;
+  const baseMetadata = expected.baseMetadata;
 
   const staging = join(state.workDir, 'staging');
   const stagingDatabase = join(staging, 'pack.db');
@@ -1254,6 +1490,7 @@ async function executeUpdate(
     }
     rmSync(staging, { recursive: true, force: true });
     mkdirSync(staging, { recursive: true });
+    copyFileSync(join(state.base, 'pack.db'), stagingDatabase);
   } else {
     rmSync(`${stagingDatabase}.wal`, { force: true });
   }
@@ -1261,7 +1498,9 @@ async function executeUpdate(
   const outputConnection = outputDatabase.connect();
   try {
     if (resumingStaging) await resetGeneratedStructures(outputConnection);
+    else await resetDatabaseForDeterministicRebuild(outputConnection);
     const loadedTitles = new Set<string>();
+    const checkpoints = new Map(state.records.map((record) => [record.key, record]));
     if (resumingStaging) {
       const loadedSources = await outputConnection.run<{ title: string; hash: string }>(
         'MATCH (s:ArticleSource) RETURN s.title AS title, s.payload_sha256 AS hash',
@@ -1278,7 +1517,6 @@ async function executeUpdate(
           );
         }
       }
-      const checkpoints = new Map(state.records.map((record) => [record.key, record]));
       for (const source of loadedSources) loadedTitles.add(source.title);
       for (const record of parsed.records) {
         const loadedHash = loadedHashes.get(record.key);
@@ -1298,7 +1536,11 @@ async function executeUpdate(
       resume: resumingStaging,
     });
     const deltaByKey = new Map(parsed.records.map((record) => [record.key, record]));
-    const finalTitles = [...new Set([...baseHashes.keys(), ...deltaByKey.keys()])].sort();
+    const finalTitles = [...baseHashes.keys()];
+    for (const title of deltaByKey.keys()) {
+      if (!baseHashes.has(title)) finalTitles.push(title);
+    }
+    finalTitles.sort();
     const batchSize = 256;
     for (let offset = 0; offset < finalTitles.length; offset += batchSize) {
       const batchTitles = finalTitles
@@ -1333,7 +1575,7 @@ async function executeUpdate(
       await outputConnection.run('CHECKPOINT');
       for (const title of batchTitles) {
         loadedTitles.add(title);
-        const checkpoint = state.records.find((record) => record.key === title);
+        const checkpoint = checkpoints.get(title);
         if (checkpoint) checkpoint.processed = true;
       }
       writeState(state);
@@ -1369,7 +1611,7 @@ async function executeUpdate(
     baseConnection.close();
     baseDatabase.close();
   }
-  await finalizePack(
+  const finalizedValidation = await finalizePack(
     staging,
     targetMetadata(baseMetadata, {
       version: state.version,
@@ -1383,7 +1625,7 @@ async function executeUpdate(
   state.records = state.records.map((record) => ({ ...record, processed: true }));
   writeState(state);
   onCheckpoint?.({ phase: state.phase, workDir: state.workDir });
-  return publishStagedPack(state, expected);
+  return publishStagedPack(state, expected, finalizedValidation);
 }
 
 /** Applies or resumes an immutable, provenance-aware CVE pack update. */
@@ -1408,11 +1650,10 @@ async function updateKnowledgePackInternal(
       throw new Error('update resume state was created by incompatible tool/schema versions');
     }
     const baseValidation = await validateKnowledgePack(state.base);
-    const basePayload = await fileEntry(join(state.base, 'pack.db'), 'pack.db');
     if (
       baseValidation.contentDigest !== state.baseContentDigest ||
       sha256(readFileSync(join(state.base, 'manifest.json'))) !== state.baseManifestSha256 ||
-      basePayload.sha256 !== state.basePayloadSha256
+      validatedPackDbSha256(baseValidation) !== state.basePayloadSha256
     ) {
       throw new Error('base input changed since the interrupted update');
     }
@@ -1420,19 +1661,13 @@ async function updateKnowledgePackInternal(
     if (parsed.fileSha256 !== state.deltaFileSha256 || parsed.deltaId !== state.deltaId) {
       throw new Error('delta input changed since the interrupted update');
     }
-    const expectedRecords = parsed.records.map((record) => ({
-      ordinal: record.ordinal,
-      key: record.key,
-      hash: record.payloadHash,
-    }));
-    const savedRecords = state.records.map(({ ordinal, key, hash }) => ({ ordinal, key, hash }));
     if (
-      canonical(savedRecords) !== canonical(expectedRecords) ||
+      !resumeRecordsMatchDelta(state.records, parsed.records) ||
       (state.phase === 'delta-applied' && state.records.some((record) => !record.processed))
     ) {
       throw new Error('update resume record checkpoints do not match the delta');
     }
-    assertNoReplacePublicationAvailable();
+    assertNoReplacePublicationAvailable(nearestExisting(dirname(state.output)));
     const expected = await expectedUpdateFor(state, parsed, baseValidation);
     if (existsSync(state.output)) {
       if (!lstatSync(state.output).isDirectory()) {
@@ -1489,11 +1724,10 @@ async function updateKnowledgePackInternal(
   const workDir = resolve(config.workDir ?? `${output}.work`);
   assertDisjointPaths(base, output, workDir);
   assertSameFilesystem(output, workDir);
-  assertNoReplacePublicationAvailable();
+  assertNoReplacePublicationAvailable(nearestExisting(dirname(output)));
   if (existsSync(workDir)) {
     throw new Error(`incomplete update work exists at ${workDir}; use --resume ${workDir}`);
   }
-  const basePayload = await fileEntry(join(base, 'pack.db'), 'pack.db');
   const state: UpdateState = {
     phase: 'prepared',
     base,
@@ -1505,7 +1739,7 @@ async function updateKnowledgePackInternal(
     deltaFileSha256: parsed.fileSha256,
     baseContentDigest: baseValidation.contentDigest,
     baseManifestSha256: sha256(readFileSync(join(base, 'manifest.json'))),
-    basePayloadSha256: basePayload.sha256,
+    basePayloadSha256: validatedPackDbSha256(baseValidation),
     workDir,
     schemaVersion: INCREMENTAL_SCHEMA_VERSION,
     extractorVersion: CVE_ADAPTER_VERSION,
@@ -1525,8 +1759,8 @@ async function updateKnowledgePackInternal(
       const existingSources = await sourceClosureForPack(output);
       if (
         canonical(existing.metadata) === canonical(expected.metadata) &&
-        canonical(existing.applications) === canonical(expected.applications) &&
-        canonical(existingSources) === canonical(expected.sources)
+        applicationsEqual(existing.applications, expected.applications) &&
+        sourceClosuresEqual(existingSources, expected.sources)
       ) {
         const noOpState = { output };
         return resultFromValidation(noOpState, existing, true);
@@ -1556,6 +1790,61 @@ export async function updateKnowledgePack(
   } catch (error) {
     if (error instanceof KnowledgePackUpdateError) throw error;
     throw new KnowledgePackUpdateError(error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function validateVectorIndexMembership(
+  connection: Connection,
+  table: 'Section' | 'Chunk',
+  index: string,
+  expected: number,
+): Promise<void> {
+  let afterId = '';
+  let validated = 0;
+  let queryVector: number[] | undefined;
+  while (true) {
+    const rows = await connection.run<{ id: string; embedding: unknown }>(
+      `MATCH (node:${table}) WHERE node.id > $afterId ` +
+        'RETURN node.id AS id, node.embedding AS embedding ORDER BY id LIMIT 256',
+      { afterId },
+    );
+    if (rows.length === 0) break;
+    afterId = rows[rows.length - 1].id;
+    for (const row of rows) {
+      if (!isFiniteEmbedding(row.embedding)) {
+        throw new Error(`${index} membership does not match live ${table} rows`);
+      }
+      queryVector ??= asNumberArray(row.embedding);
+      validated++;
+    }
+  }
+  if (validated !== expected || (expected > 0 && queryVector === undefined)) {
+    throw new Error(`${index} membership does not match live ${table} rows`);
+  }
+  if (expected === 0) return;
+
+  // The index definition covers the complete fixed-width property. Keep the
+  // operability probe bounded after validating every live vector above.
+  const probeSize = Math.min(expected, 32);
+  const probe = await connection.run<{
+    hits: number | bigint;
+    uniqueCount: number | bigint;
+    liveCount: number | bigint;
+  }>(
+    `CALL QUERY_VECTOR_INDEX('${table}', '${index}', $queryVector, $requested) ` +
+      `OPTIONAL MATCH (live:${table} {id: node.id}) ` +
+      'RETURN count(*) AS hits, count(DISTINCT node.id) AS uniqueCount, ' +
+      'count(live) AS liveCount',
+    { queryVector, requested: probeSize },
+  );
+  const hits = Number(probe[0]?.hits ?? 0);
+  if (
+    hits === 0 ||
+    hits > probeSize ||
+    Number(probe[0]?.uniqueCount ?? 0) !== hits ||
+    Number(probe[0]?.liveCount ?? 0) !== hits
+  ) {
+    throw new Error(`${index} membership does not match live ${table} rows`);
   }
 }
 
@@ -1651,7 +1940,7 @@ async function validateKnowledgePackInternal(packDir: string): Promise<PackValid
       metadata.toolVersion !== UPDATE_TOOL_VERSION ||
       !SHA256_RE.test(metadata.buildId) ||
       embeddingModel === null ||
-      canonical(metadata.provenance) !== canonical(provenanceFor(embeddingModel))
+      !hasCanonicalProvenance(metadata.provenance, embeddingModel)
     ) {
       throw new Error('pack database metadata identity or provenance is invalid');
     }
@@ -2054,29 +2343,11 @@ async function validateKnowledgePackInternal(packDir: string): Promise<PackValid
       }
       if (supported.length < relationBatchSize && live.length < relationBatchSize) break;
     }
-    const vector = `[${new Array(768).fill('0').join(',')}]`;
     for (const [table, index, expected] of [
       ['Section', 'embedding_idx', counts.sections],
       ['Chunk', 'chunk_embedding_idx', counts.chunks],
     ] as const) {
-      const indexed = await connection.run<{
-        indexed: number | bigint;
-        uniqueCount: number | bigint;
-      }>(
-        `CALL QUERY_VECTOR_INDEX('${table}', '${index}', ${vector}, ${expected + 1}) ` +
-          'RETURN count(node) AS indexed, count(DISTINCT node.id) AS uniqueCount',
-      );
-      const live = await connection.run<{ liveCount: number | bigint }>(
-        `CALL QUERY_VECTOR_INDEX('${table}', '${index}', ${vector}, ${expected + 1}) ` +
-          `WITH node MATCH (live:${table} {id: node.id}) RETURN count(live) AS liveCount`,
-      );
-      if (
-        Number(indexed[0]?.indexed ?? 0) !== expected ||
-        Number(indexed[0]?.uniqueCount ?? 0) !== expected ||
-        Number(live[0]?.liveCount ?? 0) !== expected
-      ) {
-        throw new Error(`${index} membership does not match live ${table} rows`);
-      }
+      await validateVectorIndexMembership(connection, table, index, expected);
     }
     return {
       valid: true,

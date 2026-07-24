@@ -47,7 +47,8 @@ are installed (no time-of-check/time-of-use gap).
 
 ## Verifying on pull (default behavior)
 
-Verification is **on by default when a signature is present**:
+Automatically discovered GitHub releases **must have a trusted signature by
+default**:
 
 ```bash
 wikigr pack pull cve
@@ -60,16 +61,18 @@ wikigr pack pull cve
 - If the signature is **present and invalid** (bad signature, wrong key, or
   tampered index), the pull **fails closed** with a `PackInstallError` (CLI exit
   code 5) and installs nothing.
-- If the signature is **absent** (e.g. an older release, or a local mirror without
-  one), the pull proceeds using checksum integrity alone and prints a warning —
-  unless you require a signature (below).
+- Automatic discovery ignores releases without the index's `.sig` asset. A missing
+  or invalid signature then fails closed before the index is parsed.
+- An explicitly selected source (`--tag` or `--base-url`) may be unsigned for local
+  and legacy workflows; the pull proceeds using checksum integrity alone and prints
+  a warning unless `--require-signature` is set.
 
 ### Flags
 
 | Flag                  | Effect                                                                                                                                                                    |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--require-signature` | **Hard-fail** if a valid signature is not present. Blocks silent downgrade to integrity-only, and blocks unsigned mirrors. Recommended for automated/production installs. |
-| `--no-verify`         | Skip signature verification entirely (checksums are still enforced). Escape hatch for a trusted, air-gapped mirror.                                                       |
+| `--require-signature` | **Hard-fail** if an explicitly selected source lacks a valid signature. Automatic discovery already enforces this policy.                                                 |
+| `--no-verify`         | Skip signature verification entirely, including during automatic discovery (checksums are still enforced). Explicit unsafe escape hatch for a trusted, air-gapped mirror. |
 
 ```bash
 # Fail unless the release is signed by the project key
@@ -106,23 +109,26 @@ node -e '
 
 ## Signing when you publish
 
-`scripts/release-pack.mjs` signs the index automatically **when a signing key is
-available** (via the `KGPACKS_SIGNING_KEY` environment variable, populated from the
-Actions secret in CI). It writes `<name>.pack-release.json.sig` next to the
-index and uploads both, plus the public key:
+`scripts/release-pack.mjs` comprehensively validates schema-v2 packs. Legacy
+schema-v1 packs fall back to structural manifest and payload packaging so
+existing releases remain publishable; unknown schema versions fail closed. A
+signing key is required for every real publication. The key is supplied through
+`KGPACKS_SIGNING_KEY` (populated from the Actions secret in CI). The script writes
+`<name>.pack-release.json.sig` next to the index and uploads both, plus the public
+key:
 
 ```bash
 # In CI (key injected from the Actions secret): signs + uploads the .sig
 KGPACKS_SIGNING_KEY="$SIGNING_KEY" node scripts/release-pack.mjs --pack cve --tag cve-2025.06
 
-# Locally without a key: publishes unsigned (integrity-only) and warns
-node scripts/release-pack.mjs --pack cve --tag cve-2025.06
+# Local artifact inspection without a key: unsigned dry run only
+node scripts/release-pack.mjs --pack cve --tag cve-2025.06 --dry-run --no-sign
 ```
 
-| Flag / env             | Default | Meaning                                                                                           |
-| ---------------------- | ------- | ------------------------------------------------------------------------------------------------- |
-| `KGPACKS_SIGNING_KEY`  | (unset) | Ed25519 private key (base64 PKCS8 DER). When set, the index is signed.                            |
-| `--sign` / `--no-sign` | auto    | Force or forbid signing regardless of key presence (a forced `--sign` without a key is an error). |
+| Flag / env             | Default | Meaning                                                               |
+| ---------------------- | ------- | --------------------------------------------------------------------- |
+| `KGPACKS_SIGNING_KEY`  | (unset) | Ed25519 private key (base64 PKCS8 DER). Required outside `--dry-run`. |
+| `--sign` / `--no-sign` | auto    | Force signing, or allow an unsigned artifact only with `--dry-run`.   |
 
 > The signing **private key never appears** in build logs, command lines, or fork
 > PRs. Only the release job (running on a trusted ref) has access to the secret.

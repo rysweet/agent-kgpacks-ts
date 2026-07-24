@@ -107,6 +107,7 @@ jobs:
           cd "$WORKDIR"
           ./node_modules/.bin/wikigr --help
           ./node_modules/.bin/wikigr query --help
+          ./node_modules/.bin/wikigr update --help
 
   python-free-guard:
     name: python-free guard
