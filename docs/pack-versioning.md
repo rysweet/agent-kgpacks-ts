@@ -41,9 +41,19 @@ version.
 
 ## Pull a version
 
-Without `--tag`, `wikigr pack pull cve` discovers immutable releases for the
-requested pack and selects the highest version that contains its release index.
-Pass `--tag` to pin a release:
+Without `--tag`, `wikigr pack pull cve` discovers immutable releases for
+the requested pack and selects the highest eligible stable version. An eligible
+release is not a draft or GitHub prerelease, has a supported immutable tag
+whose derived SemVer has no prerelease component, and contains the release index
+plus a signature when signatures are required. A
+stable-looking tag on a release with `prerelease: true` is ineligible; an absent
+`prerelease` property remains compatible.
+
+Only a successful, exhaustive discovery that finds zero eligible immutable
+releases falls back to the legacy `packs` tag. Discovery errors fail closed.
+The fallback retains mandatory signature verification unless `--no-verify` was
+explicitly supplied. An explicit tag or base URL bypasses
+discovery. Pass `--tag` to pin a release:
 
 ```bash
 wikigr pack pull cve                        # latest discoverable immutable release
@@ -225,5 +235,7 @@ publishing flow and the remaining `release-pack.mjs` flags, and
 - [docs/pack-signing.md](pack-signing.md) — sign & verify the release index.
 - [docs/cve.md](cve.md) — build & publish the CVE pack.
 - [docs/packages/packs.md](packages/packs.md) — manifest schema & versioning helpers.
+- [Pack pull and validation](reference/pack-management.md) — discovery,
+  checksum, schema-dispatch, and resolver contracts.
 - [Incremental update contract](reference/incremental-update.md) — schema-v2
   identity, lineage, manifest, and complete validation.

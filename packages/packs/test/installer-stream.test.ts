@@ -115,6 +115,23 @@ describe('@kgpacks/packs — installPackFromStream (benign extraction)', () => {
       installPackFromStream(Readable.from(makeTarGz(benignEntries())), installRoot),
     ).rejects.toBeInstanceOf(PackInstallError);
   });
+
+  it('runs caller validation in staging before the atomic rename', async () => {
+    let validatedPath = '';
+    await expect(
+      installPackFromStream(Readable.from(makeTarGz(benignEntries())), installRoot, {
+        validate(staging, manifest) {
+          validatedPath = staging;
+          expect(manifest.name).toBe(PACK_NAME);
+          expect(existsSync(join(staging, 'pack.db'))).toBe(true);
+          expect(existsSync(join(installRoot, PACK_NAME))).toBe(false);
+          throw new PackInstallError('semantic validation failed');
+        },
+      }),
+    ).rejects.toThrow('semantic validation failed');
+    expect(existsSync(validatedPath)).toBe(false);
+    expect(existsSync(join(installRoot, PACK_NAME))).toBe(false);
+  });
 });
 
 describe('@kgpacks/packs — installPackFromStream (security negatives)', () => {

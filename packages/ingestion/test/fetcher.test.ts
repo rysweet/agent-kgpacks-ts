@@ -156,6 +156,39 @@ describe('createSafeFetcher — fetch + redirects', () => {
     await expect(fetch('http://example.com/')).rejects.toBeInstanceOf(BlockedUrlError);
     expect(net.calls).toEqual([]);
   });
+
+  it('retries transient statuses and re-validates DNS before every attempt', async () => {
+    let fetchCalls = 0;
+    let lookupCalls = 0;
+    const fetchImpl = async (): Promise<ReturnType<typeof makeResponse>> => {
+      fetchCalls++;
+      if (fetchCalls === 1) {
+        return makeResponse(503, 'busy', { 'retry-after': '0' });
+      }
+      return makeResponse(200, 'ok');
+    };
+    const lookup = async (): Promise<{ address: string; family: number }[]> => {
+      lookupCalls++;
+      return publicLookup();
+    };
+    const fetch = createSafeFetcher({ fetchImpl, lookup, maxRetries: 1 });
+
+    await expect(fetch('https://example.com/')).resolves.toBe('ok');
+    expect(fetchCalls).toBe(2);
+    expect(lookupCalls).toBe(2);
+  });
+
+  it('does not retry a permanent HTTP failure', async () => {
+    let calls = 0;
+    const fetchImpl = async (): Promise<ReturnType<typeof makeResponse>> => {
+      calls++;
+      return makeResponse(404, 'missing');
+    };
+    const fetch = createSafeFetcher({ fetchImpl, lookup: publicLookup, maxRetries: 3 });
+
+    await expect(fetch('https://example.com/missing')).rejects.toMatchObject({ status: 404 });
+    expect(calls).toBe(1);
+  });
 });
 
 describe('createSafeFetcher — response body size cap', () => {

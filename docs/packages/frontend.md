@@ -336,6 +336,12 @@ const testClient = new ApiClient({
 interface ApiClientOptions {
   /** Base URL prefix. Defaults to import.meta.env.VITE_API_BASE_URL ?? ''. */
   baseUrl?: string;
+  /** Per-attempt timeout for blocking HTTP calls. Default 15000ms. */
+  timeoutMs?: number;
+  /** Retries for transient idempotent HTTP failures. Default 2. */
+  maxRetries?: number;
+  /** Initial exponential-backoff delay. Default 250ms. */
+  retryBaseDelayMs?: number;
   /** Injectable fetch implementation. Defaults to globalThis.fetch. */
   fetch?: typeof fetch;
   /** Injectable EventSource constructor for streamChat. Defaults to globalThis.EventSource. */
@@ -722,6 +728,10 @@ export class ApiClientError extends Error {
   → `INTERNAL_ERROR`.
 - **Transport failures** (`fetch` rejecting, DNS, offline) become
   `code: 'NETWORK_ERROR'`, `status: null`.
+- **Timeouts** become `code: 'TIMEOUT'`, `status: null`. Idempotent blocking
+  requests (`GET`/`HEAD`) retry transient transport failures and HTTP
+  `408`/`425`/`429`/`5xx` responses with bounded exponential backoff, respecting
+  `Retry-After`. `POST /chat` and SSE streams are never replayed automatically.
 - **SSE failures** map as described in [`streamChat`](#streamchat-sse):
   in-stream `"TimeoutError"` → `TIMEOUT`, `"AgentError"` → `AGENT_ERROR`. A
   **pre-stream** connection failure is reported as `NETWORK_ERROR` (the browser's

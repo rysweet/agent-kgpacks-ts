@@ -278,7 +278,10 @@ async function extractTarGzToDir(
 export async function installPackFromStream(
   source: Readable,
   installRoot: string,
-  options: { maxTotalBytes?: number } = {},
+  options: {
+    maxTotalBytes?: number;
+    validate?: (staging: string, manifest: PackManifest) => void | Promise<void>;
+  } = {},
 ): Promise<InstalledPack> {
   const maxTotalBytes = options.maxTotalBytes ?? STREAM_MAX_TOTAL_BYTES;
   mkdirSync(installRoot, { recursive: true });
@@ -287,6 +290,7 @@ export async function installPackFromStream(
   try {
     await extractTarGzToDir(source, staging, maxTotalBytes);
     const manifest = loadManifest(join(staging, MANIFEST_FILENAME));
+    await options.validate?.(staging, manifest);
     const dest = join(installRoot, manifest.name);
     if (existsSync(dest)) {
       throw new PackInstallError(`pack already installed: ${JSON.stringify(manifest.name)}`);

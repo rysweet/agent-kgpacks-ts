@@ -21,7 +21,7 @@ import { Command } from 'commander';
 import { DEFAULT_PACK_REPO } from '../constants.js';
 import type { CliContext } from '../context.js';
 import { CliError } from '../errors.js';
-import { EXIT_PACK_NOT_FOUND, EXIT_USAGE } from '../exit-codes.js';
+import { EXIT_PACK_NOT_FOUND, EXIT_USAGE, EXIT_VALIDATION } from '../exit-codes.js';
 import { printJson } from '../io.js';
 import { pullPack } from '../pack-pull.js';
 import { resolveExistingPackDir } from '../pack-dir.js';
@@ -116,19 +116,32 @@ export function registerPack(parent: Command, ctx: CliContext): void {
         throw new CliError(`pack not found: ${name}`, EXIT_PACK_NOT_FOUND);
       }
       const manifest = loadManifestFromDir(dir);
-      if (manifest.schemaVersion === '2') {
-        const { validateKnowledgePack } = await import('@kgpacks/ingestion');
-        const validation = await validateKnowledgePack(dir);
-        printJson(ctx.io, {
-          valid: true,
-          name: manifest.name,
-          version: manifest.version,
-          buildId: manifest.buildId,
-          counts: validation.counts,
-        });
-        return;
+      const schemaVersion = Object.hasOwn(manifest, 'schemaVersion')
+        ? manifest.schemaVersion
+        : undefined;
+      switch (schemaVersion) {
+        case undefined:
+        case '1':
+          printJson(ctx.io, { valid: true, name: manifest.name, version: manifest.version });
+          return;
+        case '2': {
+          const { validateKnowledgePack } = await import('@kgpacks/ingestion');
+          const validation = await validateKnowledgePack(dir);
+          printJson(ctx.io, {
+            valid: true,
+            name: manifest.name,
+            version: manifest.version,
+            buildId: manifest.buildId,
+            counts: validation.counts,
+          });
+          return;
+        }
+        default:
+          throw new CliError(
+            `unsupported manifest schema ${JSON.stringify(schemaVersion)}`,
+            EXIT_VALIDATION,
+          );
       }
-      printJson(ctx.io, { valid: true, name: manifest.name, version: manifest.version });
     });
 
   pack

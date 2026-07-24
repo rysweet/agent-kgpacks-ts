@@ -46,7 +46,8 @@ RUNTIME
   pack install <archive.tar.gz>  Install a pack from a local gzip-compressed tarball.
   pack list                      List installed packs.
   pack info <pack>               Print a pack's full manifest.
-  pack validate <pack>           Validate a manifest; completely validate schema-v2 packs.
+  pack validate <pack>           Validate supported legacy/current manifest schemas.
+  pack pull <name>               Discover/download and integrity-check a release pack.
   pack remove <pack>             Remove an installed pack.
 
 INGESTION
@@ -163,6 +164,46 @@ them equivalent; every other file, directory, or symlink collision fails. See
 the
 [incremental update how-to](../../docs/howto/incremental-cve-update.md) and
 [contract reference](../../docs/reference/incremental-update.md).
+
+Commander reserves `--version` at the program root. `buildProgram()`
+normalizes update-command `--version` and `--version=...` to the update
+command's internal `--target-version` option only after a recognized top-level
+`update` or `pack update` command. It skips the argv prefix implied by the
+parse mode:
+
+| `parseAsync` mode                                     | Prefix entries skipped |
+| ----------------------------------------------------- | ---------------------: |
+| `{ from: "user" }`                                    |                      0 |
+| `{ from: "node" }`                                    |                      2 |
+| Default or omitted mode                               |                      2 |
+| `{ from: "electron" }`, `process.defaultApp === true` |                      2 |
+| `{ from: "electron" }`, otherwise                     |                      1 |
+
+When `argv` is omitted, normalization reads `process.argv` using the
+default/node offset. It recognizes either `--packs-dir <dir>` or
+`--packs-dir=<dir>` before the command. Only arguments after that command will
+be rewritten. Root `wikigr --version`, `--version` on unrelated commands, and
+the word `update` used as another command's argument will remain unchanged.
+
+### `pack pull` and `pack validate`
+
+`pack pull` rejects malformed or duplicate part names before download,
+re-verifies finalized scratch files in declared order, installs from those
+files, and verifies schema-v2 payload metadata after installation, removing the
+destination on mismatch. Automatic discovery excludes drafts, GitHub-marked
+prereleases, prerelease SemVer tags, and releases missing required assets.
+Release discovery, index/signature reads, and part downloads retry bounded
+transient HTTP failures and honor `Retry-After`; missing signatures are optional,
+but signature service failures are surfaced rather than treated as unsigned.
+
+`pack validate` accepts only an absent schema version or exact string `"1"`
+as legacy and exact string `"2"` as current. All other values fail with exit
+code `4`. Schema v2 receives comprehensive database, payload,
+provenance, graph, and vector-index validation.
+
+See [Pack pull and validation reference](../../docs/reference/pack-management.md)
+for CLI examples, source precedence, the exported resolver API, schema matrix,
+and integrity guarantees.
 
 ### `research-sources` — discover candidate URLs
 

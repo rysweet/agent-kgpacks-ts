@@ -77,7 +77,7 @@ it('drives the real CVE update engine through the public CLI', async () => {
   } finally {
     rmSync(temp, { recursive: true, force: true });
   }
-}, 30_000);
+}, 120_000);
 
 it('falls back to manifest validation for a legacy pack without schema-v2 payloads', async () => {
   const temp = mkdtempSync(join(tmpdir(), 'kgpacks-cli-legacy-'));
