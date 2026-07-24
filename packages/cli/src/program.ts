@@ -10,7 +10,7 @@
 // surface as thrown `CommanderError`s and all output is capturable — making the
 // program fully testable in-process.
 
-import { Command } from 'commander';
+import { Command, type ParseOptions } from 'commander';
 
 import { registerCreate } from './commands/build.js';
 import { registerPack } from './commands/pack.js';
@@ -81,6 +81,28 @@ function normalizeUpdateVersion(argv: readonly string[]): string[] {
   });
 }
 
+function normalizeParseInvocation(
+  argv: readonly string[] | undefined,
+  parseOptions: ParseOptions | undefined,
+): readonly [readonly string[] | undefined, ParseOptions | undefined] {
+  if (parseOptions?.from === undefined) return [argv, parseOptions];
+  const effectiveArgv = argv ?? process.argv;
+  const electronProcess = process as NodeJS.Process & { defaultApp?: boolean };
+  const userArgOffset =
+    parseOptions.from === 'user'
+      ? 0
+      : parseOptions.from === 'electron' && !electronProcess.defaultApp
+        ? 1
+        : 2;
+  return [
+    [
+      ...effectiveArgv.slice(0, userArgOffset),
+      ...normalizeUpdateVersion(effectiveArgv.slice(userArgOffset)),
+    ],
+    parseOptions,
+  ];
+}
+
 function applyExitAndOutput(command: Command, io: Io): void {
   command.exitOverride();
   command.configureOutput({
@@ -126,11 +148,10 @@ export function buildProgram(options: BuildProgramOptions = {}): Command {
   registerPack(program, ctx);
 
   applyExitAndOutput(program, io);
+  const parse = program.parse.bind(program);
   const parseAsync = program.parseAsync.bind(program);
+  program.parse = (argv, parseOptions) => parse(...normalizeParseInvocation(argv, parseOptions));
   program.parseAsync = (argv, parseOptions) =>
-    parseAsync(
-      argv && parseOptions?.from === 'user' ? normalizeUpdateVersion(argv) : argv,
-      parseOptions,
-    );
+    parseAsync(...normalizeParseInvocation(argv, parseOptions));
   return program;
 }

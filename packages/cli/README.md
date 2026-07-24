@@ -143,6 +143,15 @@ Fresh mode requires a completed provenance-capable
 CVE base, strict UTF-8 NDJSON delta, distinct output path, and target version.
 Resume mode accepts only `--resume`.
 
+| Flag                  | Mode   | Required | Default         |
+| --------------------- | ------ | -------- | --------------- |
+| `--base <pack-dir>`   | fresh  | yes      | —               |
+| `--delta <file>`      | fresh  | yes      | —               |
+| `--output <pack-dir>` | fresh  | yes      | —               |
+| `--version <version>` | fresh  | yes      | —               |
+| `--work-dir <dir>`    | fresh  | no       | `<output>.work` |
+| `--resume <work-dir>` | resume | yes      | —               |
+
 ```sh
 wikigr update \
   --base data/releases/2026.06/cve \
@@ -150,6 +159,9 @@ wikigr update \
   --output data/releases/2026.07/cve \
   --version 2026.7.0
 ```
+
+The update target `--version` is scoped to arguments after `update` or
+`pack update`; `wikigr --version` still prints the CLI version.
 
 The base is opened read-only. Operations are keyed by `cveId`: absent upserts
 are `added`, changed canonical payloads are `modified`, identical payloads are
@@ -348,3 +360,34 @@ way. See the
 [incremental update reference](../../docs/reference/incremental-update.md),
 [docs/PLAN.md](../../docs/PLAN.md) and [docs/monorepo.md](../../docs/monorepo.md)
 for the broader contract.
+
+### Commander parsing contract
+
+Callers using `buildProgram()` directly may use either `parse` or `parseAsync`
+with Commander's normal `from: 'user' | 'node' | 'electron'` option. Explicit
+argument arrays and Commander's default `process.argv` path are both supported:
+
+```ts
+import { buildProgram } from '@kgpacks/cli';
+
+await buildProgram().parseAsync(
+  [
+    'update',
+    '--base',
+    'data/releases/2026.06/cve',
+    '--delta',
+    '.scratch/cve/delta.ndjson',
+    '--output',
+    'data/releases/2026.07/cve',
+    '--version',
+    '2026.7.0',
+  ],
+  { from: 'user' },
+);
+```
+
+The wrapper preserves Commander's source-specific executable/script prefixes,
+including packaged and default-app Electron invocations. It scopes
+update-local `--version` only when `from` is explicit. When parse options or
+`from` are omitted, arguments are delegated to Commander unchanged. `run(argv)`
+always parses with `from: 'user'`.

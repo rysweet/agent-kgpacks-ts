@@ -31,10 +31,12 @@ import {
   type PackManifest,
 } from '@kgpacks/packs';
 
+import { readBaseLoadables, toLoadable } from './article-copy.js';
 import { chunkArticle } from './chunking.js';
 import { CVE_ADAPTER_VERSION, CVE_ID_RE, cveToGraph } from './cve-adapter.js';
 import { KnowledgePackUpdateError, KnowledgePackValidationError } from './errors.js';
 import { loadPack, type LoadableArticle } from './loader.js';
+import { normalizeResumedDatabase } from './resume-database.js';
 import { createPackWriter } from './streaming-loader.js';
 import type { Embedder } from './types.js';
 
@@ -699,33 +701,6 @@ async function assertBaseUnchanged(state: UpdateState): Promise<void> {
   }
 }
 
-async function toLoadable(payload: string, embedder: Embedder): Promise<LoadableArticle> {
-  let record: unknown;
-  try {
-    record = JSON.parse(payload);
-  } catch (error) {
-    throw new Error(`invalid CVE source payload: ${(error as Error).message}`);
-  }
-  const graph = cveToGraph(record);
-  if (!graph) throw new Error('CVE source payload is rejected or has no usable description');
-  const chunks = chunkArticle(graph.article, { size: 4000, overlap: 0 });
-  const texts = [
-    ...graph.article.sections.map((section) => section.content),
-    ...chunks.map((chunk) => chunk.content),
-  ];
-  const embeddings = await embedder.generate(texts);
-  return {
-    article: graph.article,
-    sectionEmbeddings: embeddings.slice(0, graph.article.sections.length),
-    chunks,
-    chunkEmbeddings: embeddings.slice(graph.article.sections.length),
-    extraction: graph.extraction,
-    sourcePayload: payload,
-    sourcePayloadHash: sha256(payload),
-    extractorVersion: CVE_ADAPTER_VERSION,
-  };
-}
-
 async function writeDatabase(
   path: string,
   loadables: LoadableArticle[],
@@ -1120,77 +1095,6 @@ async function sourceHashesForPack(packDir: string): Promise<Map<string, string>
   }
 }
 
-async function readBaseLoadables(
-  connection: Connection,
-  titles: string[],
-): Promise<Map<string, LoadableArticle>> {
-  if (titles.length === 0) return new Map();
-  try {
-    const articleRows = await connection.run<Record<string, unknown>>(
-      'MATCH (a:Article), (src:ArticleSource) WHERE a.title = src.title ' +
-        'AND a.title IN $titles ' +
-        'RETURN a.title AS title, a.category AS category, a.expansion_depth AS depth, ' +
-        'src.payload AS payload, src.payload_sha256 AS payloadHash, ' +
-        'src.extractor_version AS extractorVersion ORDER BY title',
-      { titles },
-    );
-    const sectionRows = await connection.run<Record<string, unknown>>(
-      'MATCH (a:Article)-[r:HAS_SECTION]->(s:Section) ' +
-        'WHERE a.title IN $titles ' +
-        'RETURN a.title AS article, r.section_index AS idx, s.id AS id, s.title AS title, ' +
-        's.content AS content, s.embedding AS embedding, s.level AS level, s.cve_id AS cveId, ' +
-        's.affected_products AS affectedProducts, s.aliases AS aliases, s.cpes AS cpes, ' +
-        's.purls AS purls, s.ecosystems AS ecosystems ORDER BY article, idx',
-      { titles },
-    );
-    const chunkRows = await connection.run<Record<string, unknown>>(
-      'MATCH (a:Article)-[r:HAS_CHUNK]->(c:Chunk) ' +
-        'WHERE a.title IN $titles ' +
-        'RETURN a.title AS article, r.section_index AS sectionIndex, r.chunk_index AS chunkIndex, ' +
-        'c.id AS id, c.content AS content, c.embedding AS embedding ORDER BY article, sectionIndex, chunkIndex',
-      { titles },
-    );
-    const sectionsByArticle = groupByArticle(sectionRows);
-    const chunksByArticle = groupByArticle(chunkRows);
-    const byTitle = new Map<string, LoadableArticle>();
-    for (const row of articleRows) {
-      const title = String(row.title);
-      const sourcePayload = String(row.payload);
-      const graph = cveToGraph(JSON.parse(sourcePayload));
-      if (!graph || graph.article.title !== title) {
-        throw new Error(`base article source does not reproduce ${title}`);
-      }
-      const articleSections = sectionsByArticle.get(title) ?? [];
-      const articleChunks = chunksByArticle.get(title) ?? [];
-      const chunks = articleChunks.map((chunk) => ({
-        id: String(chunk.id),
-        content: String(chunk.content),
-        articleTitle: title,
-        sectionIndex: Number(chunk.sectionIndex),
-        chunkIndex: Number(chunk.chunkIndex),
-      }));
-      byTitle.set(title, {
-        article: graph.article,
-        sectionEmbeddings: articleSections.map((section) => asNumberArray(section.embedding)),
-        chunks,
-        chunkEmbeddings: articleChunks.map((chunk) => asNumberArray(chunk.embedding)),
-        extraction: graph.extraction,
-        expansionDepth: Number(row.depth),
-        sourcePayload,
-        sourcePayloadHash: String(row.payloadHash),
-        extractorVersion: String(row.extractorVersion),
-      });
-    }
-    if (byTitle.size !== articleRows.length)
-      throw new Error('base article provenance is incomplete');
-    return byTitle;
-  } catch (error) {
-    throw new Error(
-      `base pack is not provenance-capable and must be rebuilt from source: ${(error as Error).message}`,
-    );
-  }
-}
-
 function applicationsFor(
   baseHashes: Map<string, string>,
   delta: DeltaRecord[],
@@ -1413,32 +1317,6 @@ async function publishStagedPack(
   return resultFromValidation(state, validation, false);
 }
 
-async function resetGeneratedStructures(connection: Connection): Promise<void> {
-  await connection.loadExtension('vector');
-  const indexes = await connection.run<{ tableName: string; indexName: string }>(
-    'CALL SHOW_INDEXES() RETURN table_name AS tableName, index_name AS indexName',
-  );
-  for (const { tableName, indexName } of indexes) {
-    if (
-      (tableName === 'Section' && indexName === 'embedding_idx') ||
-      (tableName === 'Chunk' && indexName === 'chunk_embedding_idx')
-    ) {
-      await connection.run(`CALL DROP_VECTOR_INDEX('${tableName}', '${indexName}')`);
-    }
-  }
-  for (const [match, remove] of [
-    [
-      'MATCH ()-[r:ENTITY_RELATION]->() RETURN r LIMIT 1',
-      'MATCH ()-[r:ENTITY_RELATION]->() DELETE r',
-    ],
-    ['MATCH ()-[r:LINKS_TO]->() RETURN r LIMIT 1', 'MATCH ()-[r:LINKS_TO]->() DELETE r'],
-    ['MATCH (n:UpdateApplication) RETURN n LIMIT 1', 'MATCH (n:UpdateApplication) DELETE n'],
-    ['MATCH (n:PackMetadata) RETURN n LIMIT 1', 'MATCH (n:PackMetadata) DELETE n'],
-  ] as const) {
-    if ((await connection.run(match)).length > 0) await connection.run(remove);
-  }
-}
-
 async function executeUpdate(
   state: UpdateState,
   parsed: ParsedDelta,
@@ -1468,7 +1346,7 @@ async function executeUpdate(
   const outputDatabase = new Database(stagingDatabase, { autoCheckpoint: false });
   const outputConnection = outputDatabase.connect();
   try {
-    if (resumingStaging) await resetGeneratedStructures(outputConnection);
+    if (resumingStaging) await normalizeResumedDatabase(outputConnection);
     const loadedTitles = new Set<string>();
     const checkpoints = new Map(state.records.map((record) => [record.key, record]));
     if (resumingStaging) {

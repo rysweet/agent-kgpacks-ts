@@ -28,6 +28,9 @@ export const CHUNK_VECTOR_INDEX = 'chunk_embedding_idx';
 /** Extensions loaded before any vector/FTS operation. */
 export const EXTENSIONS = ['vector', 'fts'] as const;
 
+// LadybugDB requires pu < 1; the largest lower IEEE-754 value requests complete sampling.
+const COMPLETE_VECTOR_INDEX_BUILD_PU = 0.9999999999999999;
+
 /** Node-table DDL, in dependency order (nodes before any relationship). */
 export const NODE_TABLE_DDL: readonly string[] = [
   `CREATE NODE TABLE Article(
@@ -134,6 +137,6 @@ export const REL_TABLE_DDL: readonly string[] = [
  * post-insert).
  */
 export const VECTOR_INDEX_DDL: readonly string[] = [
-  `CALL CREATE_VECTOR_INDEX('${SECTION_TABLE}', '${SECTION_VECTOR_INDEX}', 'embedding', metric := 'cosine')`,
-  `CALL CREATE_VECTOR_INDEX('${CHUNK_TABLE}', '${CHUNK_VECTOR_INDEX}', 'embedding', metric := 'cosine')`,
+  `CALL CREATE_VECTOR_INDEX('${SECTION_TABLE}', '${SECTION_VECTOR_INDEX}', 'embedding', metric := 'cosine', pu := ${COMPLETE_VECTOR_INDEX_BUILD_PU})`,
+  `CALL CREATE_VECTOR_INDEX('${CHUNK_TABLE}', '${CHUNK_VECTOR_INDEX}', 'embedding', metric := 'cosine', pu := ${COMPLETE_VECTOR_INDEX_BUILD_PU})`,
 ];

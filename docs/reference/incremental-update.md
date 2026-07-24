@@ -1,7 +1,7 @@
 ---
 title: Incremental knowledge-pack update contract
 description: Reference for the schema-v2 CVE update API, delta grammar, durable metadata, validation, and publication guarantees
-last_updated: 2026-07-23
+last_updated: 2026-07-24
 review_schedule: as-needed
 owner: kgpacks-maintainers
 doc_type: reference
@@ -15,6 +15,7 @@ This reference defines the implemented schema-v2 APIs and CLI semantics.
 
 - [CLI contract](#cli-contract)
 - [Public TypeScript API](#public-typescript-api)
+- [Internal update boundaries](#internal-update-boundaries)
 - [Delta grammar](#delta-grammar)
 - [Classification and identity](#classification-and-identity)
 - [Base eligibility](#base-eligibility)
@@ -23,6 +24,7 @@ This reference defines the implemented schema-v2 APIs and CLI semantics.
 - [Schema-v2 manifest](#schema-v2-manifest)
 - [Validation boundaries](#validation-boundaries)
 - [Resume and publication](#resume-and-publication)
+- [Security assumptions](#security-assumptions)
 - [Errors and exit codes](#errors-and-exit-codes)
 
 ## CLI contract
@@ -50,6 +52,15 @@ are mutually exclusive. The target version must be strict SemVer 2.0, including
 the standard prerelease and build-metadata grammar, and must differ from the
 base version. The difference is exact string inequality after validation.
 
+| Option                | Mode   | Required | Default         | Contract                                                          |
+| --------------------- | ------ | -------- | --------------- | ----------------------------------------------------------------- |
+| `--base <pack-dir>`   | fresh  | yes      | none            | Completed provenance-capable schema-v2 CVE pack; opened read-only |
+| `--delta <file>`      | fresh  | yes      | none            | Strict UTF-8 NDJSON containing accepted CVE upserts               |
+| `--output <pack-dir>` | fresh  | yes      | none            | New immutable destination; never replaced                         |
+| `--version <version>` | fresh  | yes      | none            | Target SemVer, distinct from the base version                     |
+| `--work-dir <dir>`    | fresh  | no       | `<output>.work` | Durable same-filesystem workspace                                 |
+| `--resume <work-dir>` | resume | yes      | none            | Existing update workspace; excludes every fresh option            |
+
 The canonicalized base, output, and work paths must be pairwise disjoint: no
 path may equal, contain, or be contained by another. Symlinks and non-directory
 ancestors are rejected rather than followed into the trust boundary. Work and
@@ -60,6 +71,14 @@ Commander validates mode shape before calling the package API. `--resume`
 cannot be combined with `--base`, `--delta`, `--output`, `--version`, or
 `--work-dir`; without `--resume`, all four required fresh flags must be present.
 Global options such as `--packs-dir` do not become request fields.
+
+`--version` is the update target only when it follows `update` or
+`pack update`. At the program root it retains Commander's normal program-version
+meaning. `buildProgram()` preserves this scoping for synchronous and asynchronous
+parsing when the caller supplies Commander's `from` option. This covers explicit
+argument arrays and the default `process.argv` path for `user`, `node`, and
+`electron` sources. Without `from`, arguments are delegated unchanged. `run(argv)`
+always uses `from: 'user'`.
 
 ## Public TypeScript API
 
@@ -122,6 +141,37 @@ declare function updateKnowledgePack(
 declare function validateKnowledgePack(packDir: string): Promise<PackValidationResult>;
 ```
 
+Fresh update:
+
+```ts
+import { updateKnowledgePack } from '@kgpacks/ingestion';
+
+const result = await updateKnowledgePack({
+  base: 'data/releases/2026.06/cve',
+  delta: '.scratch/cve/delta.ndjson',
+  output: 'data/releases/2026.07/cve',
+  version: '2026.7.0',
+});
+
+console.log(result.output, result.added, result.modified, result.unchanged);
+```
+
+Resume and validate:
+
+```ts
+import { updateKnowledgePack, validateKnowledgePack } from '@kgpacks/ingestion';
+
+const resumed = await updateKnowledgePack({
+  resume: 'data/releases/2026.07/cve.work',
+  onCheckpoint: ({ phase, workDir }) => {
+    console.error(`checkpoint ${phase}: ${workDir}`);
+  },
+});
+
+const validation = await validateKnowledgePack(resumed.output);
+console.log(validation.valid, validation.contentDigest);
+```
+
 `UpdateKnowledgePackResult` has exactly the nine fields shown above. Successful
 fresh, resume, and matching-destination no-op calls all return that shape.
 Failures throw and never return a partial or success-shaped result.
@@ -146,12 +196,61 @@ updateKnowledgePack?: (
 `buildPack` remains the seed-based full ingestion seam for `create`; it does not
 implement incremental updates.
 
+`embedder` is optional in both modes and defaults to the production BGE embedder.
+An injected embedder must report the same model identity recorded by the base and
+workspace. `onCheckpoint` is observational: it receives `prepared` or
+`delta-applied` with the canonical work directory after durable state exists.
+Throwing from the callback fails the operation; callback errors are not ignored.
+
 `@kgpacks/ingestion` also exports `PackCheckpoint`, `DurablePackMetadata`,
 `DurableUpdateApplication`, `KnowledgePackUpdateError`, and
 `KnowledgePackValidationError`. It owns update orchestration, the versioned CVE
 adapter, manifest projection, complete validation, resume, and publication. It
 uses `@kgpacks/db` for LadybugDB and `@kgpacks/packs` for manifest
 serialization. The CLI loads this update seam lazily.
+
+## Internal update boundaries
+
+The update lifecycle keeps article reconstruction and resume cleanup in focused
+internal modules. Neither module is exported from `@kgpacks/ingestion`.
+
+### Article reconstruction
+
+`article-copy.ts` owns two operations:
+
+- converting one accepted canonical CVE payload into a `LoadableArticle`, with
+  section text embedded before chunk text and the result split back into aligned
+  section and chunk vectors;
+- reconstructing unchanged base articles in stable title, section-index, and
+  chunk-index order without re-embedding them.
+
+Base reconstruction reads `Article`, `ArticleSource`, `HAS_SECTION`, and
+`HAS_CHUNK` data through a minimal read connection. It verifies the source
+payload SHA-256, extractor version, adapter reproduction, title, article
+cardinality, embedding representation, and complete requested-title coverage
+before returning data. A provenance or database failure rejects the update with
+rebuild-from-source guidance and retains the original error as `cause`. Invalid
+new payloads and embedding failures also propagate; the updater does not skip an
+article or substitute empty data.
+
+### Resume database normalization
+
+`resume-database.ts` accepts only the writable staging connection. The
+orchestrator, not the module, establishes that trust boundary; the read-only base
+connection is never passed to normalization. The exact cleanup allowlist and
+retry behavior are specified under [Resume and publication](#resume-and-publication).
+Every LadybugDB failure propagates, so resume never reports success after partial
+normalization.
+
+### Vector-index construction
+
+The generated HNSW indexes are always
+`Section.embedding_idx` and `Chunk.chunk_embedding_idx`, both over 768-element
+embeddings with cosine distance. Both DDL statements use
+`pu := 0.9999999999999999`. LadybugDB requires `pu < 1`; this value is the
+largest IEEE-754 number below one and therefore requests complete build sampling
+without violating that constraint. Indexes are created only after live rows are
+finalized and are rebuilt after resume normalization.
 
 ## Delta grammar
 
@@ -702,6 +801,26 @@ re-canonicalizes every saved path and revalidates the sidecar schema, target
 version, exact base tree and delta bytes, semantic `deltaId`, staged database,
 durable applications, all recorded component versions, and the embedding model.
 
+After validation, resume normalizes only the writable staging database before
+continuing mutation. The update orchestrator owns this boundary: it passes the
+staging connection to normalization, while the base remains open through a
+separate read-only connection and is never normalized. Normalization does not
+determine whether its connection points to staging.
+
+The normalization allowlist is exact:
+
+- vector indexes `Section.embedding_idx` and `Chunk.chunk_embedding_idx` are
+  dropped when present;
+- generated `ENTITY_RELATION` and `LINKS_TO` relationship rows are removed;
+- derived `UpdateApplication` and `PackMetadata` rows are removed.
+
+No other index, relationship, node table, or row is removed. Each LadybugDB
+operation is issued separately rather than as one atomic cleanup transaction.
+Any extension-load, inspection, drop, query, or delete failure propagates and
+stops resume. Because the operations are allowlisted and tolerate already
+absent generated state, retrying resume can repeat normalization after a
+partially completed cleanup.
+
 The durable phases are `prepared` and `delta-applied`. During `prepared`,
 resume reconciles per-record sidecar status with staged source/application
 evidence and continues in stable-key order. During `delta-applied`, resume
@@ -751,6 +870,23 @@ Existing output behavior:
 The base tree must remain byte-identical after success, no-op, failure, and
 resume. A failed fresh update leaves output absent. Work remains only when it
 contains an intentional resumable checkpoint.
+
+## Security assumptions
+
+Pack and delta hashes detect local byte changes; they do not authenticate who
+produced those bytes. Establish base-pack and delta authenticity before running
+the updater.
+
+The invoking operator must exclusively control write access to the work,
+resume, output-parent, and delta paths. Canonicalization, symlink rejection, and
+no-replace publication protect the update boundary, but they do not sandbox
+elevated execution against an attacker-controlled filesystem. Do not run the
+updater with elevated privileges over untrusted paths.
+
+The base database is opened read-only. Resume normalization receives only the
+writable staging connection and removes only the generated-state allowlist
+defined above. Database inspection and mutation failures propagate rather than
+being converted into successful or partial results.
 
 ## Errors and exit codes
 

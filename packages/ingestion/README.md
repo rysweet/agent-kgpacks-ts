@@ -60,6 +60,8 @@ whole pipeline runs offline in tests:
 | `expansion.ts`            | Bounded breadth-first link discovery (work queue with `maxDepth` / `maxArticles`).                                                              |
 | `index.ts`                | `buildPack(config)` orchestration.                                                                                                              |
 | `incremental-update.ts`   | Immutable CVE update, resume, complete schema-v2 validation, and no-replace publication.                                                        |
+| `article-copy.ts`         | Internal reconstruction of new and unchanged CVE articles, with stable ordering, provenance checks, and embedding alignment.                    |
+| `resume-database.ts`      | Internal, non-exported normalization of writable update staging during resume; it never receives the read-only base connection.                 |
 
 ## Read-side contract (binding)
 
@@ -74,9 +76,35 @@ expectations exactly:
   reference's Article→Article edge, required for read compatibility).
 - `Chunk` carries its own `chunk_embedding_idx` (cosine) and never collides with
   the `Section` read path.
+- Both indexes are built after live rows are finalized with
+  `pu := 0.9999999999999999`, the largest IEEE-754 value below LadybugDB's
+  exclusive upper bound of `1`, to request complete build sampling.
+
+### Incremental-update internals
+
+`article-copy.ts` and `resume-database.ts` are deliberately private package
+modules. They are not re-exported from `@kgpacks/ingestion`.
+
+Article copying validates base source hashes, extractor identity, adapter
+reproduction, requested-title coverage, and embedding data before preserving
+database section/chunk order. New payload conversion embeds section content
+before chunk content and preserves those slices in the resulting load record.
+Failures reject the update; base-copy failures include rebuild guidance and keep
+the original error as their cause.
+
+Resume normalization receives only the writable staging connection. It removes
+the two generated vector indexes plus generated `ENTITY_RELATION`, `LINKS_TO`,
+`UpdateApplication`, and `PackMetadata` state when present. It leaves every
+other index and row untouched. Each operation is separately retryable, and every
+database failure propagates. See the
+[resume and publication contract](../../docs/reference/incremental-update.md#resume-and-publication).
 
 ## Security
 
+- **Update trust boundary:** pack and delta hashes provide local integrity, not
+  producer authentication. The operator must establish input authenticity and
+  exclusively control writable update, resume, and output paths. Do not run
+  elevated updates over attacker-controlled filesystem paths.
 - **SSRF defense:** only `https:` URLs, no embedded credentials, DNS resolution
   with every resolved address checked against private/loopback/reserved/
   link-local ranges (including IPv4-mapped IPv6 and the `169.254.169.254`
