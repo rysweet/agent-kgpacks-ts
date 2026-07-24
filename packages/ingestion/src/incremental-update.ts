@@ -1,26 +1,16 @@
 import { createHash } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
 import {
-  accessSync,
-  closeSync,
-  constants,
   createReadStream,
   existsSync,
-  fsyncSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
-  openSync,
   readFileSync,
-  realpathSync,
   readdirSync,
-  renameSync,
   rmSync,
   statSync,
-  writeFileSync,
 } from 'node:fs';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { basename, dirname, join, resolve } from 'node:path';
 
 import { Database, type Connection } from '@kgpacks/db';
 import { BGE_MODEL_ID, BgeEmbedder } from '@kgpacks/embeddings';
@@ -35,15 +25,27 @@ import { canonicalJson as canonical } from './canonical-json.js';
 import { chunkArticle } from './chunking.js';
 import { CVE_ADAPTER_VERSION, CVE_ID_RE, cveToGraph } from './cve-adapter.js';
 import { KnowledgePackUpdateError, KnowledgePackValidationError } from './errors.js';
+import { readDelta, type DeltaRecord, type ParsedDelta } from './incremental-delta.js';
+import {
+  assertNoReplacePublicationAvailable,
+  assertSameFilesystem,
+  fsyncDirectory,
+  fsyncFile,
+  nearestExisting,
+  pathsOverlap,
+  publishDirectoryNoReplace,
+} from './incremental-publication.js';
+import { readState, type UpdateState, writeState } from './incremental-state.js';
 import { loadPack, type LoadableArticle } from './loader.js';
 import { createPackWriter } from './streaming-loader.js';
 import type { Embedder } from './types.js';
+
+export { nativeRenameHelper } from './incremental-publication.js';
 
 export const INCREMENTAL_SCHEMA_VERSION = '2';
 export const UPDATE_TOOL_VERSION = 'agent-kgpacks-ts@0.1.0';
 const SHA256_RE = /^[a-f0-9]{64}$/;
 const GIT_SHA1_RE = /^[a-f0-9]{40}$/;
-const STATE_FILE = 'update-state.json';
 const METADATA_ID = 'pack';
 const CORPUS_PROVENANCE_FILENAME = 'corpus-provenance.json';
 const provenanceFor = (
@@ -56,40 +58,6 @@ const provenanceFor = (
   embedding: { model: embeddingModel, dimensions: 768 },
   build: { tool_version: UPDATE_TOOL_VERSION },
 });
-
-interface DeltaRecord {
-  ordinal: number;
-  key: string;
-  payload: string;
-  payloadHash: string;
-}
-
-interface ParsedDelta {
-  records: DeltaRecord[];
-  deltaId: string;
-  fileSha256: string;
-}
-
-interface UpdateState {
-  phase: 'prepared' | 'delta-applied';
-  base: string;
-  delta: string;
-  output: string;
-  version: string;
-  buildId: string;
-  deltaId: string;
-  deltaFileSha256: string;
-  baseContentDigest: string;
-  baseManifestSha256: string;
-  basePayloadSha256: string;
-  baseProvenanceSha256: string;
-  workDir: string;
-  schemaVersion: string;
-  extractorVersion: string;
-  toolVersion: string;
-  embeddingModel: string;
-  records: Array<{ ordinal: number; key: string; hash: string; processed: boolean }>;
-}
 
 export interface PackCheckpoint {
   phase: UpdateState['phase'];
@@ -379,257 +347,16 @@ export function resolveCorpusProvenance(
   };
 }
 
-function assertScalarStrings(value: unknown, location: string): void {
-  const check = (text: string): void => {
-    for (let index = 0; index < text.length; index++) {
-      const code = text.charCodeAt(index);
-      if (code >= 0xd800 && code <= 0xdbff) {
-        const next = text.charCodeAt(++index);
-        if (!(next >= 0xdc00 && next <= 0xdfff)) {
-          throw new Error(`${location} contains an unpaired Unicode surrogate`);
-        }
-      } else if (code >= 0xdc00 && code <= 0xdfff) {
-        throw new Error(`${location} contains an unpaired Unicode surrogate`);
-      }
-    }
-  };
-  if (typeof value === 'string') check(value);
-  else if (Array.isArray(value)) value.forEach((item) => assertScalarStrings(item, location));
-  else if (value && typeof value === 'object') {
-    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-      check(key);
-      assertScalarStrings(child, location);
-    }
-  }
-}
-
-function readDelta(path: string): ParsedDelta {
-  const bytes = readFileSync(path);
-  const records: DeltaRecord[] = [];
-  const seen = new Set<string>();
-  let decoded: string;
-  try {
-    decoded = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-  } catch {
-    throw new Error('delta is not valid UTF-8');
-  }
-  let ordinal = 0;
-  let lineStart = 0;
-  while (lineStart <= decoded.length) {
-    const newline = decoded.indexOf('\n', lineStart);
-    const lineEnd = newline === -1 ? decoded.length : newline;
-    const contentEnd =
-      lineEnd > lineStart && decoded.charCodeAt(lineEnd - 1) === 13 ? lineEnd - 1 : lineEnd;
-    const raw = decoded.slice(lineStart, contentEnd);
-    lineStart = newline === -1 ? decoded.length + 1 : newline + 1;
-    if (raw.trim() === '') continue;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (error) {
-      throw new Error(`invalid delta record ${ordinal + 1}: ${(error as Error).message}`);
-    }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error(`invalid delta record ${ordinal + 1}: expected a JSON object`);
-    }
-    const object = parsed as Record<string, unknown>;
-    if (object.operation === 'delete') {
-      throw new Error(`delete operation is not supported (${String(object.key ?? 'unknown')})`);
-    }
-    if (object.operation !== undefined && object.operation !== 'upsert') {
-      throw new Error(`unsupported delta operation ${JSON.stringify(object.operation)}`);
-    }
-    if (object.operation === 'upsert') {
-      const keys = Object.keys(object).sort();
-      if (canonical(keys) !== canonical(['key', 'operation', 'payload']) || !object.payload) {
-        throw new Error(`invalid delta record ${ordinal + 1}: malformed upsert envelope`);
-      }
-    }
-    const payloadObject =
-      object.operation === 'upsert' && object.payload && typeof object.payload === 'object'
-        ? object.payload
-        : parsed;
-    const metadata = (payloadObject as Record<string, unknown>).cveMetadata;
-    const key =
-      metadata && typeof metadata === 'object'
-        ? String((metadata as Record<string, unknown>).cveId ?? '').trim()
-        : String(object.key ?? '').trim();
-    if (!CVE_ID_RE.test(key)) {
-      throw new Error(`delta record ${ordinal + 1} has no valid CVE stable key`);
-    }
-    if (object.key !== undefined && String(object.key).trim() !== key) {
-      throw new Error(`delta record ${ordinal + 1} key does not match its CVE payload`);
-    }
-    if (seen.has(key)) throw new Error(`duplicate delta stable key: ${key}`);
-    seen.add(key);
-    assertScalarStrings(payloadObject, `delta record ${ordinal + 1}`);
-    const payload = canonical(payloadObject);
-    const metadataObject =
-      metadata && typeof metadata === 'object' ? (metadata as Record<string, unknown>) : {};
-    if (String(metadataObject.state ?? '').toUpperCase() === 'REJECTED') {
-      throw new Error(`delete operation is not supported (${key} is REJECTED)`);
-    }
-    if (!cveToGraph(payloadObject)) {
-      throw new Error(`delta record ${ordinal + 1} cannot be mapped by the CVE adapter`);
-    }
-    records.push({ ordinal, key, payload, payloadHash: sha256(payload) });
-    ordinal++;
-  }
-  records.sort((left, right) => left.key.localeCompare(right.key));
-  const deltaId = sha256(
-    canonical(
-      records.map((record) => ({
-        operation: 'upsert',
-        key: record.key,
-        sourcePayloadSha256: record.payloadHash,
-      })),
-    ),
-  );
-  return { records, deltaId, fileSha256: sha256(bytes) };
-}
-
 function assertVersion(version: string): void {
   if (!isValidSemver(version)) {
     throw new Error(`invalid target version ${JSON.stringify(version)}`);
   }
 }
 
-function nearestExisting(path: string): string {
-  let current = resolve(path);
-  while (!existsSync(current)) {
-    const parent = dirname(current);
-    if (parent === current) throw new Error(`cannot resolve filesystem for ${path}`);
-    current = parent;
-  }
-  return current;
-}
-
-function assertSameFilesystem(output: string, workDir: string): void {
-  if (statSync(nearestExisting(dirname(output))).dev !== statSync(nearestExisting(workDir)).dev) {
-    throw new Error('work directory must reside on the output filesystem');
-  }
-}
-
-function canonicalPath(path: string): string {
-  let current = resolve(path);
-  const suffix: string[] = [];
-  while (!existsSync(current)) {
-    suffix.unshift(basename(current));
-    const parent = dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
-  return join(realpathSync(current), ...suffix);
-}
-
-function pathsOverlap(leftPath: string, rightPath: string): boolean {
-  const left = canonicalPath(leftPath);
-  const right = canonicalPath(rightPath);
-  const fromLeft = relative(left, right);
-  const fromRight = relative(right, left);
-  const within = (value: string) =>
-    value === '' || (!value.startsWith(`..${sep}`) && value !== '..' && !isAbsolute(value));
-  return within(fromLeft) || within(fromRight);
-}
-
 function assertDisjointPaths(base: string, output: string, workDir: string): void {
   if (pathsOverlap(base, output) || pathsOverlap(base, workDir) || pathsOverlap(output, workDir)) {
     throw new Error('base, output, and work directory paths must not overlap');
   }
-}
-
-function writeState(state: UpdateState): void {
-  if (!lstatSync(state.workDir).isDirectory()) {
-    throw new Error(`update work path is not a directory: ${state.workDir}`);
-  }
-  const path = join(state.workDir, STATE_FILE);
-  const temporary = `${path}.tmp-${process.pid}`;
-  try {
-    writeFileSync(temporary, `${JSON.stringify(state, null, 2)}\n`);
-    fsyncFile(temporary);
-    renameSync(temporary, path);
-    fsyncDirectory(state.workDir);
-  } finally {
-    rmSync(temporary, { force: true });
-  }
-}
-
-function asUpdateState(value: unknown, path: string): UpdateState {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(`invalid update resume state at ${path}`);
-  }
-  const state = value as Record<string, unknown>;
-  const strings = [
-    'base',
-    'delta',
-    'output',
-    'version',
-    'buildId',
-    'deltaId',
-    'deltaFileSha256',
-    'baseContentDigest',
-    'baseManifestSha256',
-    'basePayloadSha256',
-    'workDir',
-    'schemaVersion',
-    'extractorVersion',
-    'toolVersion',
-    'embeddingModel',
-  ] as const;
-  if (strings.some((key) => typeof state[key] !== 'string' || state[key] === '')) {
-    throw new Error(`invalid update resume state at ${path}`);
-  }
-  if (
-    (state.phase !== 'prepared' && state.phase !== 'delta-applied') ||
-    !isValidSemver(String(state.version)) ||
-    ![
-      state.buildId,
-      state.deltaId,
-      state.deltaFileSha256,
-      state.baseContentDigest,
-      state.baseManifestSha256,
-      state.basePayloadSha256,
-      state.baseProvenanceSha256,
-    ].every((hash) => SHA256_RE.test(String(hash))) ||
-    ![state.base, state.delta, state.output, state.workDir].every(
-      (savedPath) => typeof savedPath === 'string' && isAbsolute(savedPath),
-    ) ||
-    !Array.isArray(state.records)
-  ) {
-    throw new Error(`invalid update resume state at ${path}`);
-  }
-  const seen = new Set<string>();
-  for (const record of state.records) {
-    if (!record || typeof record !== 'object' || Array.isArray(record)) {
-      throw new Error(`invalid update resume state at ${path}`);
-    }
-    const item = record as Record<string, unknown>;
-    if (
-      !Number.isInteger(item.ordinal) ||
-      Number(item.ordinal) < 0 ||
-      typeof item.key !== 'string' ||
-      !CVE_ID_RE.test(item.key) ||
-      typeof item.hash !== 'string' ||
-      !SHA256_RE.test(item.hash) ||
-      typeof item.processed !== 'boolean' ||
-      seen.has(item.key)
-    ) {
-      throw new Error(`invalid update resume state at ${path}`);
-    }
-    seen.add(item.key);
-  }
-  return value as UpdateState;
-}
-
-function readState(workDir: string): UpdateState {
-  const path = join(resolve(workDir), STATE_FILE);
-  let value: unknown;
-  try {
-    value = JSON.parse(readFileSync(path, 'utf8'));
-  } catch (error) {
-    throw new Error(`cannot read update resume state at ${path}: ${(error as Error).message}`);
-  }
-  return asUpdateState(value, path);
 }
 
 async function fileEntry(path: string, relativePath: string) {
@@ -675,120 +402,6 @@ function buildIdFor(input: {
       toolVersion: UPDATE_TOOL_VERSION,
     }),
   );
-}
-
-function fsyncDirectory(path: string): void {
-  const fd = openSync(path, 'r');
-  try {
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-}
-
-function fsyncFile(path: string): void {
-  const fd = openSync(path, 'r');
-  try {
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-}
-
-export function nativeRenameHelper(architecture = process.arch): string {
-  const moduleDir = dirname(fileURLToPath(import.meta.url));
-  const configuredHelper = process.env.WIKIGR_RENAME_NOREPLACE_HELPER;
-  if (configuredHelper !== undefined) {
-    try {
-      accessSync(configuredHelper, constants.X_OK);
-      return configuredHelper;
-    } catch {
-      throw new Error(
-        `WIKIGR_RENAME_NOREPLACE_HELPER is not executable: ${JSON.stringify(configuredHelper)}`,
-      );
-    }
-  }
-
-  if (architecture !== 'x64' && architecture !== 'arm64') {
-    throw new Error(`native renameat2(RENAME_NOREPLACE) helper does not support ${architecture}`);
-  }
-  const helperName = `rename-noreplace-linux-${architecture}`;
-  const candidates = [
-    join(moduleDir, helperName),
-    resolve(moduleDir, '../../../dist', helperName),
-    resolve(moduleDir, '../../../native/prebuilds', helperName),
-  ];
-  for (const candidate of candidates) {
-    try {
-      accessSync(candidate, constants.X_OK);
-      return candidate;
-    } catch {
-      // Try the next deterministic package/source location.
-    }
-  }
-  throw new Error('native renameat2(RENAME_NOREPLACE) helper is unavailable');
-}
-
-function runNoReplaceMove(
-  source: string,
-  destination: string,
-  helper = nativeRenameHelper(),
-): ReturnType<typeof spawnSync> {
-  return spawnSync(helper, [source, destination], { encoding: 'utf8' });
-}
-
-function assertNoReplacePublicationAvailable(filesystemPath: string): void {
-  if (process.platform !== 'linux') {
-    throw new Error('atomic no-replace publication requires Linux renameat2 support');
-  }
-  const helper = nativeRenameHelper();
-  const probeRoot = mkdtempSync(join(filesystemPath, '.kgpacks-renameat2-'));
-  const source = join(probeRoot, 'source');
-  const destination = join(probeRoot, 'destination');
-  try {
-    mkdirSync(source);
-    mkdirSync(destination);
-    writeFileSync(join(source, 'marker'), 'source');
-    writeFileSync(join(destination, 'marker'), 'destination');
-    const collision = runNoReplaceMove(source, destination, helper);
-    if (
-      collision.error ||
-      collision.status !== 17 ||
-      !existsSync(source) ||
-      readFileSync(join(destination, 'marker'), 'utf8') !== 'destination'
-    ) {
-      throw new Error('target filesystem does not provide atomic RENAME_NOREPLACE semantics');
-    }
-    rmSync(destination, { recursive: true });
-    const promotion = runNoReplaceMove(source, destination, helper);
-    if (
-      promotion.error ||
-      promotion.status !== 0 ||
-      existsSync(source) ||
-      readFileSync(join(destination, 'marker'), 'utf8') !== 'source'
-    ) {
-      throw new Error('target filesystem cannot atomically promote with RENAME_NOREPLACE');
-    }
-  } finally {
-    rmSync(probeRoot, { recursive: true, force: true });
-  }
-}
-
-/**
- * The packaged native helper makes one renameat2(RENAME_NOREPLACE) syscall.
- * Unlike Node's rename(), it cannot replace a destination created concurrently.
- */
-function publishDirectoryNoReplace(staging: string, output: string): boolean {
-  const moved = runNoReplaceMove(staging, output);
-  if (moved.status === 17 && existsSync(staging)) return false;
-  if (moved.error || moved.status !== 0) {
-    throw new Error(
-      `atomic no-replace publication failed: ${moved.error?.message ?? String(moved.stderr).trim()}`,
-    );
-  }
-  if (existsSync(staging)) return false;
-  if (!existsSync(output)) throw new Error('atomic publication completed without an output');
-  return true;
 }
 
 async function assertBaseUnchanged(state: UpdateState): Promise<void> {

@@ -19,6 +19,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { assertExactVectorIdentityClosure } from '../src/incremental-update.js';
 import {
   buildCvePack,
+  KnowledgePackUpdateError,
   resolveCorpusProvenance,
   type Embedder,
   updateKnowledgePack,
@@ -656,6 +657,37 @@ describe('incremental CVE pack update', () => {
     ).rejects.toThrow(expected);
     expect(existsSync(rejectedOutput)).toBe(false);
     expect(existsSync(`${rejectedOutput}.work`)).toBe(false);
+    expect(treeDigest(base)).toBe(baseDigest);
+  });
+
+  it('reports malformed source structure as a structured update failure', async () => {
+    const delta = join(temp, 'malformed-source-structure.ndjson');
+    const malformedOutput = join(temp, 'malformed-source-structure-output');
+    writeFileSync(
+      delta,
+      `${JSON.stringify({
+        cveMetadata: { cveId: 'CVE-2025-9010', state: 'PUBLISHED' },
+        containers: [],
+      })}\n`,
+    );
+
+    let failure: unknown;
+    try {
+      await updateKnowledgePack({
+        base,
+        delta,
+        output: malformedOutput,
+        version: '3.0.2',
+        embedder,
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(KnowledgePackUpdateError);
+    expect((failure as Error).message).toMatch(/containers/i);
+    expect(existsSync(malformedOutput)).toBe(false);
+    expect(existsSync(`${malformedOutput}.work`)).toBe(false);
     expect(treeDigest(base)).toBe(baseDigest);
   });
 

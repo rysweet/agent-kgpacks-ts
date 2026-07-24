@@ -50,16 +50,19 @@ whole pipeline runs offline in tests:
 
 ## Modules
 
-| Module                    | Responsibility                                                                                                                                  |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `fetcher.ts`              | HTTPS-only, SSRF-safe fetch: validates the URL and every redirect hop against the private/loopback/reserved/link-local blocklist (IPv4 + IPv6). |
-| `sources.ts`              | HTML → plain text, heading-delimited sections, same-domain link extraction, Wikipedia title canonicalization.                                   |
-| `extraction.ts`           | LLM entity/relationship/key-fact extraction with robust JSON parsing, sanitization, and relation normalization.                                 |
-| `chunking.ts`             | Pure overlapping-window chunking of section text.                                                                                               |
-| `schema.ts` / `loader.ts` | LadybugDB schema + node/edge/embedding loading and cosine HNSW vector indexes.                                                                  |
-| `expansion.ts`            | Bounded breadth-first link discovery (work queue with `maxDepth` / `maxArticles`).                                                              |
-| `index.ts`                | `buildPack(config)` orchestration.                                                                                                              |
-| `incremental-update.ts`   | Immutable CVE update, resume, complete schema-v2 validation, and no-replace publication.                                                        |
+| Module                       | Responsibility                                                                                                                                  |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fetcher.ts`                 | HTTPS-only, SSRF-safe fetch: validates the URL and every redirect hop against the private/loopback/reserved/link-local blocklist (IPv4 + IPv6). |
+| `sources.ts`                 | HTML → plain text, heading-delimited sections, same-domain link extraction, Wikipedia title canonicalization.                                   |
+| `extraction.ts`              | LLM entity/relationship/key-fact extraction with robust JSON parsing, sanitization, and relation normalization.                                 |
+| `chunking.ts`                | Pure overlapping-window chunking of section text.                                                                                               |
+| `schema.ts` / `loader.ts`    | LadybugDB schema + node/edge/embedding loading and cosine HNSW vector indexes.                                                                  |
+| `expansion.ts`               | Bounded breadth-first link discovery (work queue with `maxDepth` / `maxArticles`).                                                              |
+| `index.ts`                   | `buildPack(config)` orchestration.                                                                                                              |
+| `incremental-update.ts`      | Public immutable CVE build/update facade and complete schema-v2 validation.                                                                     |
+| `incremental-delta.ts`       | Strict NDJSON delta parsing, stable-key checks, and canonical delta identity.                                                                   |
+| `incremental-state.ts`       | Durable incremental-update checkpoint validation and atomic persistence.                                                                        |
+| `incremental-publication.ts` | Filesystem safety checks and atomic no-replace publication.                                                                                     |
 
 ## Read-side contract (binding)
 

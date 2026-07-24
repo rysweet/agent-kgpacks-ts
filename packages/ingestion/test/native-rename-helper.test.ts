@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
@@ -24,6 +24,17 @@ describe('nativeRenameHelper', () => {
     process.env.WIKIGR_RENAME_NOREPLACE_HELPER = '/does/not/exist/rename-noreplace';
 
     expect(() => nativeRenameHelper()).toThrow(/WIKIGR_RENAME_NOREPLACE_HELPER is not executable/);
+  });
+
+  it('uses an explicit executable helper without probing architecture-specific candidates', () => {
+    const root = mkdtempSync(join(tmpdir(), 'configured-rename-helper-'));
+    roots.push(root);
+    const helper = join(root, 'rename-noreplace');
+    writeFileSync(helper, '#!/bin/sh\nexit 0\n');
+    chmodSync(helper, 0o755);
+    process.env.WIKIGR_RENAME_NOREPLACE_HELPER = helper;
+
+    expect(nativeRenameHelper('unsupported-test-architecture')).toBe(helper);
   });
 
   it.each(['x64', 'arm64'])('selects the packaged Linux %s helper', (architecture) => {
